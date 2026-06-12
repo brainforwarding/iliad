@@ -1,0 +1,13 @@
+<!-- Iliad owl — white, for dark backgrounds. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 72" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M20 17 L26 22" />
+  <path d="M44 17 L38 22" />
+  <path d="M32 18 C44 18 51 27 51 38 C51 49 43 55 32 55 C21 55 13 49 13 38 C13 27 20 18 32 18 Z" />
+  <circle cx="24" cy="33" r="6.5" />
+  <circle cx="40" cy="33" r="6.5" />
+  <circle cx="24" cy="33" r="2.4" fill="#ffffff" stroke="none" />
+  <circle cx="40" cy="33" r="2.4" fill="#ffffff" stroke="none" />
+  <path d="M29.5 38 L32 41 L34.5 38" />
+  <path d="M5 61 C20 63 42 62 55 59" />
+  <path d="M15 60.5 C12 56 10 52 8 48" />
+</svg>

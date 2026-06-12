@@ -1,0 +1,288 @@
+import { cp, mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
+import {
+  ensureInsideWorkspace,
+  ensureMarkdownFile,
+  ensureVisibleWorkspacePath,
+  ignoredNames,
+  normalizeMarkdownName,
+  toKind,
+  validateDirectoryName,
+  validateMarkdownRenameName,
+  validateVisibleFileName,
+  type FileKind
+} from "./pathSafety.js";
+
+export type { FileKind };
+
+export interface FileTreeNode {
+  name: string;
+  path: string;
+  relativePath: string;
+  kind: FileKind;
+  children?: FileTreeNode[];
+}
+
+export interface SaveImageAssetRequest {
+  workspaceRoot: string;
+  documentPath: string;
+  dataUrl: string;
+  originalName?: string;
+}
+
+export interface SavedImageAsset {
+  filePath: string;
+  relativePath: string;
+  markdown: string;
+}
+
+function fileTreeNode(workspaceRoot: string, filePath: string, isDirectory: boolean): FileTreeNode {
+  return {
+    name: path.basename(filePath),
+    path: filePath,
+    relativePath: path.relative(workspaceRoot, filePath),
+    kind: toKind(filePath, isDirectory),
+    children: isDirectory ? [] : undefined
+  };
+}
+
+export async function readDirectory(rootPath: string, currentPath = rootPath): Promise<FileTreeNode[]> {
+  const entries = await readdir(currentPath, { withFileTypes: true });
+  const visibleEntries = entries.filter((entry) => !entry.name.startsWith(".") && !ignoredNames.has(entry.name));
+
+  const nodes = await Promise.all(
+    visibleEntries.map(async (entry) => {
+      const absolutePath = path.join(currentPath, entry.name);
+      const node = fileTreeNode(rootPath, absolutePath, entry.isDirectory());
+
+      if (entry.isDirectory()) {
+        node.children = await readDirectory(rootPath, absolutePath);
+      }
+
+      return node;
+    })
+  );
+
+  return nodes.sort((a, b) => {
+    const rank = (node: FileTreeNode) => {
+      const isAssetDirectory = node.kind === "directory" && node.name === "assets";
+
+      if (node.kind === "directory" && !isAssetDirectory) {
+        return 0;
+      }
+
+      if (node.kind === "markdown") {
+        return 1;
+      }
+
+      if (isAssetDirectory) {
+        return 2;
+      }
+
+      return 3;
+    };
+    const rankDifference = rank(a) - rank(b);
+
+    if (rankDifference !== 0) {
+      return rankDifference;
+    }
+
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  });
+}
+
+export async function readMarkdownFile(workspaceRoot: string, filePath: string) {
+  ensureMarkdownFile(workspaceRoot, filePath);
+
+  return readFile(filePath, "utf8");
+}
+
+export async function writeMarkdownFile(workspaceRoot: string, filePath: string, content: string) {
+  ensureMarkdownFile(workspaceRoot, filePath);
+  await writeFile(filePath, content, "utf8");
+
+  return { savedAt: new Date().toISOString() };
+}
+
+function duplicateName(name: string) {
+  const extension = path.extname(name);
+  const baseName = extension ? path.basename(name, extension) : name;
+
+  return `${baseName} copy${extension}`;
+}
+
+async function uniquePath(directoryPath: string, preferredName: string) {
+  const extension = path.extname(preferredName);
+  const baseName = path.basename(preferredName, extension);
+  let candidate = path.join(directoryPath, preferredName);
+  let index = 2;
+
+  while (true) {
+    try {
+      await stat(candidate);
+      candidate = path.join(directoryPath, `${baseName}-${index}${extension}`);
+      index += 1;
+    } catch {
+      return candidate;
+    }
+  }
+}
+
+async function assertPathAvailable(filePath: string) {
+  try {
+    await stat(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+
+    throw error;
+  }
+
+  throw new Error("A file with that name already exists.");
+}
+
+export async function createMarkdownFile(workspaceRoot: string, directoryPath: string, requestedName: string) {
+  ensureVisibleWorkspacePath(workspaceRoot, directoryPath);
+  const fileName = normalizeMarkdownName(requestedName);
+  const filePath = await uniquePath(directoryPath, fileName);
+  ensureVisibleWorkspacePath(workspaceRoot, filePath);
+  await writeFile(filePath, `# ${path.basename(filePath, path.extname(filePath))}\n`, "utf8");
+
+  return fileTreeNode(workspaceRoot, filePath, false);
+}
+
+export async function createFolder(workspaceRoot: string, directoryPath: string, requestedName: string) {
+  ensureVisibleWorkspacePath(workspaceRoot, directoryPath);
+  const folderName = validateDirectoryName(requestedName || "untitled folder");
+  const folderPath = await uniquePath(directoryPath, folderName);
+  ensureVisibleWorkspacePath(workspaceRoot, folderPath);
+  await mkdir(folderPath);
+
+  return fileTreeNode(workspaceRoot, folderPath, true);
+}
+
+export async function renamePath(workspaceRoot: string, filePath: string, requestedName: string) {
+  ensureVisibleWorkspacePath(workspaceRoot, filePath);
+
+  const parentDirectory = path.dirname(filePath);
+  const fileStats = await stat(filePath);
+  const fileName = fileStats.isDirectory()
+    ? validateDirectoryName(requestedName)
+    : toKind(filePath, false) === "markdown"
+      ? validateMarkdownRenameName(requestedName)
+      : validateVisibleFileName(requestedName);
+  const newPath = path.join(parentDirectory, fileName);
+  ensureVisibleWorkspacePath(workspaceRoot, newPath);
+
+  if (path.resolve(newPath) !== path.resolve(filePath)) {
+    await assertPathAvailable(newPath);
+  }
+
+  await rename(filePath, newPath);
+
+  return fileTreeNode(workspaceRoot, newPath, fileStats.isDirectory());
+}
+
+export async function duplicatePath(workspaceRoot: string, filePath: string) {
+  ensureVisibleWorkspacePath(workspaceRoot, filePath);
+
+  const fileStats = await stat(filePath);
+
+  if (fileStats.isDirectory()) {
+    throw new Error("Folder duplication is not supported yet.");
+  }
+
+  const parentDirectory = path.dirname(filePath);
+  const preferredName = duplicateName(path.basename(filePath));
+  const duplicatePath = await uniquePath(parentDirectory, preferredName);
+  ensureVisibleWorkspacePath(workspaceRoot, duplicatePath);
+  await cp(filePath, duplicatePath);
+
+  return fileTreeNode(workspaceRoot, duplicatePath, false);
+}
+
+export async function assertTrashablePath(workspaceRoot: string, filePath: string) {
+  ensureVisibleWorkspacePath(workspaceRoot, filePath);
+  await stat(filePath);
+}
+
+function timestampForFileName() {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, "0");
+
+  return [
+    now.getFullYear(),
+    pad(now.getMonth() + 1),
+    pad(now.getDate()),
+    "-",
+    pad(now.getHours()),
+    pad(now.getMinutes()),
+    pad(now.getSeconds())
+  ].join("");
+}
+
+function extensionFromDataUrl(dataUrl: string, originalName?: string) {
+  const originalExtension = originalName ? path.extname(originalName).toLowerCase() : "";
+
+  if (originalExtension && [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(originalExtension)) {
+    return originalExtension;
+  }
+
+  const mime = /^data:([^;]+);base64,/.exec(dataUrl)?.[1];
+
+  switch (mime) {
+    case "image/jpeg":
+      return ".jpg";
+    case "image/gif":
+      return ".gif";
+    case "image/webp":
+      return ".webp";
+    case "image/svg+xml":
+      return ".svg";
+    case "image/png":
+    default:
+      return ".png";
+  }
+}
+
+function dataUrlToBuffer(dataUrl: string) {
+  const match = /^data:[^;]+;base64,(.+)$/.exec(dataUrl);
+
+  if (!match) {
+    throw new Error("Image data must be a base64 data URL.");
+  }
+
+  return Buffer.from(match[1], "base64");
+}
+
+function markdownRelativePath(fromDocument: string, toAsset: string) {
+  const relativePath = path.relative(path.dirname(fromDocument), toAsset).split(path.sep).join("/");
+
+  if (relativePath.startsWith("../")) {
+    return relativePath;
+  }
+
+  return relativePath.startsWith(".") ? relativePath : `./${relativePath}`;
+}
+
+export async function saveImageAsset(request: SaveImageAssetRequest): Promise<SavedImageAsset> {
+  ensureInsideWorkspace(request.workspaceRoot, request.documentPath);
+  const documentSlug = path.basename(request.documentPath, path.extname(request.documentPath)).replace(/\s+/g, "-");
+  const assetDirectory = path.join(request.workspaceRoot, "assets", documentSlug);
+  await mkdir(assetDirectory, { recursive: true });
+
+  const extension = extensionFromDataUrl(request.dataUrl, request.originalName);
+  const fileName = `image-${timestampForFileName()}${extension}`;
+  const filePath = await uniquePath(assetDirectory, fileName);
+  ensureInsideWorkspace(request.workspaceRoot, filePath);
+  await writeFile(filePath, dataUrlToBuffer(request.dataUrl));
+
+  const relativePath = markdownRelativePath(request.documentPath, filePath);
+
+  return {
+    filePath,
+    relativePath,
+    markdown: `![Image](${relativePath})`
+  };
+}

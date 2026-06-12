@@ -1,0 +1,239 @@
+.sidebar {
+  display: grid;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-right: 1px solid var(--hairline);
+  background: var(--editor);
+}
+
+.sidebar-header {
+  display: grid;
+  min-height: 44px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 8px 7px 14px;
+}
+
+.workspace-menu {
+  position: relative;
+  min-width: 0;
+}
+
+.workspace-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 6px 3px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.workspace-switch:hover {
+  background: var(--paper);
+}
+
+.workspace-switch:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.workspace-name {
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: var(--text-md);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-chevron {
+  flex: 0 0 auto;
+  color: var(--muted-3);
+}
+
+.sidebar-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 30px;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.tree-scroll {
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 8px 18px;
+}
+
+.tree-item {
+  display: grid;
+  width: 100%;
+  min-height: 30px;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 2px;
+  padding-left: calc(8px + var(--tree-depth) * 18px);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink-3);
+}
+
+.tree-open-button:focus-visible {
+  outline: none;
+  border-radius: var(--radius-control);
+  box-shadow: var(--focus-ring);
+}
+
+.tree-item:hover,
+.tree-item:focus-within {
+  background: var(--paper);
+}
+
+.tree-item.is-selected {
+  border-color: var(--row-wash);
+  background: var(--hover-wash);
+}
+
+.tree-item.is-directory.is-selected {
+  border-color: var(--row-wash);
+  background: var(--hover-wash);
+  color: var(--ink-3);
+}
+
+.tree-item.is-active {
+  border-color: transparent;
+  background: var(--hover-wash);
+  box-shadow: var(--rail);
+  color: var(--ink-3);
+}
+
+.tree-open-button {
+  display: grid;
+  min-width: 0;
+  min-height: 28px;
+  grid-template-columns: 20px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px 0 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tree-item.is-markdown .tree-name {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+.tree-external-hint {
+  display: inline-flex;
+  justify-self: center;
+  margin-left: auto;
+  align-items: center;
+  color: var(--focus-ring-border);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.tree-item:hover .tree-external-hint,
+.tree-open-button:focus-visible .tree-external-hint {
+  opacity: 0.7;
+}
+
+.tree-item.is-pending-create {
+  color: var(--teal-deep);
+}
+
+.tree-item.is-pending-create .tree-icon,
+.tree-item.is-pending-dir .tree-icon {
+  color: var(--teal);
+}
+
+.tree-item.is-pending-create .tree-name {
+  color: var(--teal-deep);
+  font-weight: 600;
+}
+
+.tree-item.is-external,
+.tree-item.is-asset {
+  color: var(--muted-3);
+}
+
+.tree-item.is-external .tree-icon,
+.tree-item.is-asset .tree-icon,
+.tree-item.is-asset .tree-name {
+  opacity: 0.66;
+}
+
+.tree-icon {
+  display: inline-grid;
+  min-width: 0;
+  place-items: center;
+  color: var(--muted-2);
+}
+
+.tree-name {
+  overflow: hidden;
+  font-size: var(--text-md);
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-pending-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--pending);
+  box-shadow: var(--ring-paper);
+  justify-self: center;
+}
+
+.tree-pending-dot.is-create {
+  background: var(--create);
+}
+
+.tree-rename-form {
+  display: grid;
+  grid-column: 1 / -1;
+  min-width: 0;
+  min-height: 28px;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+}
+
+.tree-rename-input {
+  min-width: 0;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: var(--overlay-veil);
+  color: var(--ink-1);
+  font-size: var(--text-md);
+  outline: none;
+  padding: 0 6px;
+}
+
+.tree-rename-input:focus {
+  border-color: var(--accent-wash);
+  background: var(--editor);
+}
+
+.empty-tree {
+  padding: 20px 12px;
+  color: var(--muted-3);
+  font-size: var(--text-md);
+}

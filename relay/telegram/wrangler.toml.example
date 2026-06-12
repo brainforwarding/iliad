@@ -1,0 +1,19 @@
+name = "iliad-telegram-relay"
+main = "src/worker.ts"
+compatibility_date = "2026-05-27"
+
+[[durable_objects.bindings]]
+name = "TELEGRAM_RELAY"
+class_name = "TelegramRelayDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TelegramRelayDurableObject"]
+
+[vars]
+# Non-secret bot username used to build t.me pairing links.
+TELEGRAM_BOT_USERNAME = "your_bot_name"
+
+# Configure these with `wrangler secret put`, not in this file:
+# TELEGRAM_BOT_TOKEN
+# TELEGRAM_WEBHOOK_SECRET

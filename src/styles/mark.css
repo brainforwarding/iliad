@@ -1,0 +1,176 @@
+/* Athena's owl signature mark — see src/components/IliadMark.tsx.
+   Motion is intentionally quiet: a gentle breathe + an occasional smile-blink,
+   plus a rare hop (scheduled in the component). All disabled under reduced motion. */
+
+.iliad-mark {
+  display: inline-flex;
+  color: var(--teal);
+  line-height: 0;
+}
+
+.iliad-mark svg {
+  display: block;
+  overflow: visible;
+}
+
+.iliad-mark--asleep {
+  color: var(--focus-ring-border);
+}
+
+.iliad-mark__zzz {
+  font-family: var(--font-serif);
+  /* decorative glyph sized to the SVG mark, intentionally outside the type scale */
+  font-size: 9px; /* stylelint-disable-line declaration-property-value-allowed-list */
+  opacity: 0.65;
+}
+
+.iliad-mark__eye-closed,
+.iliad-mark__wings {
+  opacity: 0;
+}
+
+.iliad-mark__owl {
+  transform-box: fill-box;
+  transform-origin: 50% 92%;
+  animation: iliad-mark-breathe 4.2s ease-in-out infinite;
+}
+
+.iliad-mark__eye-open {
+  animation: iliad-mark-eye-open 5.6s ease-in-out infinite;
+}
+
+.iliad-mark__eye-closed {
+  animation: iliad-mark-eye-closed 5.6s ease-in-out infinite;
+}
+
+.iliad-mark__wing-l,
+.iliad-mark__wing-r {
+  transform-box: fill-box;
+}
+
+.iliad-mark__wing-l {
+  transform-origin: 90% 30%;
+}
+
+.iliad-mark__wing-r {
+  transform-origin: 10% 30%;
+}
+
+/* hop: only the owl moves; the branch is a sibling and stays put */
+.iliad-mark.is-hop .iliad-mark__owl {
+  animation: iliad-mark-hop 0.82s ease;
+}
+
+.iliad-mark.is-hop .iliad-mark__wing-l {
+  animation: iliad-mark-flap-l 0.82s ease;
+}
+
+.iliad-mark.is-hop .iliad-mark__wing-r {
+  animation: iliad-mark-flap-r 0.82s ease;
+}
+
+@keyframes iliad-mark-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+}
+
+/* smile-blink: lid closes to a little arc — rings keep their shape */
+@keyframes iliad-mark-eye-open {
+  0%,
+  93.5%,
+  98%,
+  100% {
+    opacity: 1;
+  }
+  95.5%,
+  96.5% {
+    opacity: 0;
+  }
+}
+
+@keyframes iliad-mark-eye-closed {
+  0%,
+  93.5%,
+  98%,
+  100% {
+    opacity: 0;
+  }
+  95.5%,
+  96.5% {
+    opacity: 1;
+  }
+}
+
+@keyframes iliad-mark-hop {
+  0% {
+    transform: translateY(0) scaleY(1);
+  }
+  18% {
+    transform: translateY(1px) scaleY(0.94);
+  }
+  45% {
+    transform: translateY(-12px) scaleY(1.04);
+  }
+  70% {
+    transform: translateY(0) scaleY(0.97);
+  }
+  85% {
+    transform: translateY(-2px);
+  }
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+}
+
+@keyframes iliad-mark-flap-l {
+  0%,
+  100% {
+    opacity: 0;
+    transform: rotate(0) scale(0.6);
+  }
+  45% {
+    opacity: 1;
+    transform: rotate(-42deg) scale(1);
+  }
+  80% {
+    opacity: 0.4;
+    transform: rotate(-10deg) scale(0.9);
+  }
+}
+
+@keyframes iliad-mark-flap-r {
+  0%,
+  100% {
+    opacity: 0;
+    transform: rotate(0) scale(0.6);
+  }
+  45% {
+    opacity: 1;
+    transform: rotate(42deg) scale(1);
+  }
+  80% {
+    opacity: 0.4;
+    transform: rotate(10deg) scale(0.9);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iliad-mark__owl,
+  .iliad-mark__eye-open,
+  .iliad-mark__eye-closed,
+  .iliad-mark.is-hop .iliad-mark__owl,
+  .iliad-mark.is-hop .iliad-mark__wing-l,
+  .iliad-mark.is-hop .iliad-mark__wing-r {
+    animation: none !important;
+  }
+
+  .iliad-mark__eye-closed,
+  .iliad-mark__wings {
+    opacity: 0;
+  }
+}

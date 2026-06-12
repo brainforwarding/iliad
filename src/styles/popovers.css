@@ -1,0 +1,325 @@
+.typography-menu,
+.language-menu {
+  position: relative;
+  display: inline-grid;
+  -webkit-app-region: no-drag;
+}
+
+.typography-popover,
+.language-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 12;
+  display: grid;
+  width: 218px;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-surface);
+  background: var(--overlay);
+  box-shadow: var(--shadow-popover);
+  color: var(--ink-2);
+  -webkit-app-region: no-drag;
+}
+
+.language-popover {
+  width: 144px;
+  gap: 4px;
+  padding: 6px;
+}
+
+.language-option {
+  min-height: 30px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-sm);
+  padding: 0 9px;
+  text-align: left;
+  -webkit-app-region: no-drag;
+}
+
+.language-option:hover,
+.language-option:focus-visible {
+  border-color: var(--hairline-strong);
+  background: var(--card);
+  outline: none;
+}
+
+.language-option.is-active {
+  border-color: var(--hairline-strong);
+  background: var(--editor);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink-1);
+}
+
+.typography-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 8px;
+}
+
+.typography-step-button,
+.font-preset-button,
+.typography-reset-button {
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-control);
+  background: var(--editor);
+  color: var(--ink-3);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  -webkit-app-region: no-drag;
+}
+
+.typography-step-button {
+  height: 30px;
+  font-weight: 600;
+}
+
+.typography-step-button:hover,
+.font-preset-button:hover,
+.typography-reset-button:hover {
+  border-color: var(--border-control);
+  background: var(--card);
+}
+
+.typography-step-button:focus-visible,
+.font-preset-button:focus-visible,
+.typography-reset-button:focus-visible {
+  outline: none;
+  border-color: var(--focus-ring-border);
+  box-shadow: var(--focus-ring);
+}
+
+.typography-size-value {
+  color: var(--muted-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-align: center;
+}
+
+.font-preset-group {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.font-preset-button {
+  height: 30px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted-1);
+}
+
+.font-preset-button:hover:not(.is-active) {
+  border-color: transparent;
+  background: var(--hover-wash);
+}
+
+.font-preset-button.is-active {
+  border-color: transparent;
+  background: var(--teal-tint);
+  color: var(--teal-deep);
+}
+
+.typography-reset-button {
+  height: 30px;
+  width: 100%;
+}
+
+.workspace-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 14;
+  display: grid;
+  width: max(220px, 100%);
+  max-width: min(320px, calc(100vw - 24px));
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-surface);
+  background: var(--overlay);
+  box-shadow: var(--shadow-popover);
+  color: var(--ink-2);
+}
+
+.workspace-popover button {
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.workspace-popover button:hover,
+.workspace-popover button:focus-visible {
+  background: var(--hover-wash);
+  outline: none;
+}
+
+.workspace-path {
+  overflow: hidden;
+  padding: 5px 8px;
+  color: var(--muted-3);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-divider {
+  height: 1px;
+  margin: 3px 4px;
+  background: var(--paper);
+}
+
+.workspace-action {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 8px;
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+.workspace-action svg {
+  color: var(--muted-2);
+}
+
+.workspace-action kbd {
+  color: var(--focus-ring-border);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+}
+
+.workspace-recent-label {
+  padding: 6px 8px 2px;
+  color: var(--muted-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Build identity footer: quiet metadata, not a control. */
+.workspace-version {
+  padding: 4px 8px 5px;
+  color: var(--muted-3);
+  font-size: var(--text-xs);
+  user-select: text;
+}
+
+.workspace-recent {
+  display: grid;
+  gap: 1px;
+  min-height: 34px;
+  padding: 4px 8px;
+}
+
+.workspace-recent-name {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-recent-path {
+  overflow: hidden;
+  color: var(--muted-3);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-context-menu {
+  position: fixed;
+  z-index: 50;
+  display: grid;
+  min-width: 156px;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--overlay-border);
+  border-radius: 7px;
+  background: var(--overlay);
+  box-shadow: var(--shadow-menu);
+}
+
+.tree-context-menu button {
+  min-height: 29px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-md);
+  line-height: 1;
+  padding: 0 10px;
+  text-align: left;
+}
+
+.tree-context-menu button:hover,
+.tree-context-menu button:focus-visible {
+  background: var(--hover-wash);
+  outline: none;
+}
+
+.tree-context-menu button.is-danger {
+  color: var(--teal-deep);
+}
+
+.toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 20;
+  display: inline-flex;
+  max-width: min(520px, calc(100vw - 36px));
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px 10px 14px;
+  border: 1px solid var(--error-border);
+  border-radius: 8px;
+  background: var(--editor);
+  color: var(--error-strong);
+  box-shadow: var(--shadow-overlay);
+  font-size: var(--text-md);
+}
+
+.toast.is-notice {
+  border-color: var(--hairline-strong);
+  background: var(--editor);
+  color: var(--muted-1);
+}
+
+.toast.is-notice button {
+  border-color: var(--hairline-strong);
+  color: var(--muted-1);
+}
+
+.toast button {
+  border: 1px solid var(--error-border);
+  border-radius: 5px;
+  background: var(--editor);
+  color: var(--error-strong);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  padding: 5px 8px;
+}
+
+.error-text {
+  margin: 0;
+  color: var(--error);
+  font-size: var(--text-md);
+}

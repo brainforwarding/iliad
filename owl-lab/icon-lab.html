@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Iliad · Icon Lab</title>
+    <style>
+      :root { --teal:#196f64; --teal-deep:#124f47; --paper:#f7f6f0; --cream:#fbfaf4; --ink:#1f211f; --muted:#777c73; }
+      * { box-sizing: border-box; }
+      body { margin:0; padding:40px 28px 80px; background:var(--paper); color:var(--ink);
+        font-family:"Iowan Old Style","New York",ui-serif,Georgia,serif; }
+      .wrap { max-width:1000px; margin:0 auto; }
+      h1 { font-size:2rem; font-weight:500; margin:0 0 4px; }
+      h2 { font-size:1.1rem; font-weight:500; margin:34px 0 14px; }
+      .sub { font-family:ui-sans-serif,system-ui,sans-serif; color:var(--muted); margin:0 0 20px; font-size:0.92rem; max-width:64ch; line-height:1.5; }
+      .grid { display:grid; gap:22px; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); }
+      .card { display:grid; justify-items:center; gap:12px; }
+      .name { font-family:ui-sans-serif,system-ui,sans-serif; font-weight:650; font-size:0.8rem; }
+      .desc { font-family:ui-sans-serif,system-ui,sans-serif; color:var(--muted); font-size:0.72rem; text-align:center; line-height:1.4; }
+      /* macOS-ish squircle badge */
+      .badge { width:120px; height:120px; border-radius:27px; display:grid; place-items:center;
+        box-shadow:0 8px 22px rgba(40,42,36,0.16); }
+      .badge svg { width:62%; height:62%; }
+      .badge.full svg { width:70%; height:74%; }
+      .sizes { display:flex; align-items:flex-end; gap:14px; margin-top:6px; }
+      .sizes .badge { box-shadow:0 4px 10px rgba(40,42,36,0.14); }
+      .darkrow { display:flex; gap:24px; align-items:center; padding:22px; border-radius:12px; background:#1d2522; }
+      .darkrow svg { width:84px; }
+      .darkrow span { font-family:ui-sans-serif,system-ui,sans-serif; color:#cdd3cc; font-size:0.82rem; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Iliad · Icon Lab</h1>
+      <p class="sub">App-icon (dock / taskbar / installer) treatments. Pick one and I'll generate
+        the real <code>icon.png / .icns / .ico</code>. The macOS preview uses a squircle; at the
+        bottom is the white owl on a dark background.</p>
+
+      <h2>App icon — glyph on badge</h2>
+      <div class="grid" id="grid"></div>
+
+      <h2>Chosen look at real sizes</h2>
+      <div class="sizes" id="sizes"></div>
+
+      <h2>White owl on dark</h2>
+      <div class="darkrow">
+        <span id="darkSlot"></span>
+        <span>iliad-owl-white.svg — for dark surfaces / future pages</span>
+      </div>
+    </div>
+
+    <script>
+      const S = `stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"`;
+      // glyph (no branch); pupils filled with the stroke color via currentColor
+      function glyph(stroke) {
+        return `<svg viewBox="10 13 44 45" stroke="${stroke}" color="${stroke}" ${S}>
+          <path d="M20 17 L26 22"/><path d="M44 17 L38 22"/>
+          <path d="M32 18 C44 18 51 27 51 38 C51 49 43 55 32 55 C21 55 13 49 13 38 C13 27 20 18 32 18 Z"/>
+          <circle cx="24" cy="33" r="6.5"/><circle cx="40" cy="33" r="6.5"/>
+          <circle cx="24" cy="33" r="2.4" fill="currentColor" stroke="none"/>
+          <circle cx="40" cy="33" r="2.4" fill="currentColor" stroke="none"/>
+          <path d="M29.5 38 L32 41 L34.5 38"/>
+        </svg>`;
+      }
+      function mark(stroke) {
+        return `<svg viewBox="0 0 64 72" stroke="${stroke}" color="${stroke}" ${S}>
+          <path d="M20 17 L26 22"/><path d="M44 17 L38 22"/>
+          <path d="M32 18 C44 18 51 27 51 38 C51 49 43 55 32 55 C21 55 13 49 13 38 C13 27 20 18 32 18 Z"/>
+          <circle cx="24" cy="33" r="6.5"/><circle cx="40" cy="33" r="6.5"/>
+          <circle cx="24" cy="33" r="2.4" fill="currentColor" stroke="none"/>
+          <circle cx="40" cy="33" r="2.4" fill="currentColor" stroke="none"/>
+          <path d="M29.5 38 L32 41 L34.5 38"/>
+          <path d="M5 61 C20 63 42 62 55 59"/><path d="M15 60.5 C12 56 10 52 8 48"/>
+        </svg>`;
+      }
+
+      const options = [
+        { name:"A · White on teal",   desc:"Classic, highest legibility. Safe default.",
+          bg:"#196f64", art:glyph("#ffffff") },
+        { name:"B · Cream on teal",   desc:"Warmer than pure white; matches the paper palette.",
+          bg:"#196f64", art:glyph("#f7f6f0") },
+        { name:"C · Teal on cream",   desc:"Light badge, brand owl. Quiet / editorial.",
+          bg:"#f4f2ea", art:glyph("#196f64") },
+        { name:"D · White on gradient", desc:"Teal→deep-teal depth, very macOS.",
+          bg:"linear-gradient(145deg,#1d8175,#124f47)", art:glyph("#ffffff") },
+        { name:"E · Owl + branch (cream/teal)", desc:"Full character incl. the branch. More personality, busier when tiny.",
+          bg:"#196f64", art:mark("#f7f6f0"), full:true }
+      ];
+
+      const grid = document.getElementById("grid");
+      options.forEach((o) => {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `<div class="badge ${o.full ? "full" : ""}" style="background:${o.bg}">${o.art}</div>
+          <div class="name">${o.name}</div><div class="desc">${o.desc}</div>`;
+        grid.appendChild(card);
+      });
+
+      // size preview uses option A by default
+      const sizes = [128, 64, 32, 16];
+      const sizesEl = document.getElementById("sizes");
+      sizes.forEach((px) => {
+        const b = document.createElement("div");
+        b.className = "badge";
+        b.style.cssText = `width:${px}px;height:${px}px;border-radius:${Math.round(px*0.225)}px;background:#196f64`;
+        b.innerHTML = glyph("#ffffff");
+        const wrap = document.createElement("div");
+        wrap.className = "card";
+        wrap.appendChild(b);
+        const cap = document.createElement("div");
+        cap.className = "desc";
+        cap.textContent = px + "px";
+        wrap.appendChild(cap);
+        sizesEl.appendChild(wrap);
+      });
+
+      document.getElementById("darkSlot").innerHTML = mark("#ffffff");
+    </script>
+  </body>
+</html>

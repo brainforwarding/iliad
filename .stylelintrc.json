@@ -1,0 +1,21 @@
+{
+  "rules": {
+    "color-no-hex": true,
+    "function-disallowed-list": ["/^rgba?$/i", "/^hsla?$/i"],
+    "declaration-property-value-allowed-list": {
+      "font-weight": ["/^(400|500|600|700|inherit)$/"],
+      "font-family": ["/^var\\(--/", "inherit"],
+      "font-size": ["/^var\\(--/", "/em$/", "/^clamp\\(/", "inherit"],
+      "font": ["inherit"]
+    }
+  },
+  "overrides": [
+    {
+      "files": ["src/styles/tokens.css"],
+      "rules": {
+        "color-no-hex": null,
+        "function-disallowed-list": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+@media (max-width: 760px) {
+  .app-topbar,
+  .app-content {
+    grid-template-columns: minmax(220px, 72vw) minmax(0, 1fr);
+  }
+
+  .sidebar-is-collapsed .app-topbar,
+  .is-focus-mode .app-topbar {
+    grid-template-columns: 108px minmax(0, 1fr);
+  }
+
+  .topbar-editor-zone {
+    padding-right: 10px;
+  }
+
+  .document-tab {
+    max-width: 46vw;
+    padding: 0 8px 0 12px;
+  }
+
+  .editor-surface .cm-content {
+    padding: 0 28px;
+  }
+
+  .assistant-is-open .app-content,
+  .assistant-is-open.sidebar-is-collapsed .app-content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .assistant-is-open .sidebar,
+  .assistant-is-open .editor-shell {
+    display: none;
+  }
+
+  .assistant-panel {
+    border-left: 0;
+  }
+}
