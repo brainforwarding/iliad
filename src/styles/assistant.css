@@ -369,11 +369,6 @@
   box-shadow: var(--focus-ring);
 }
 
-.assistant-settings-save {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .assistant-settings input,
 .assistant-settings select,
 .assistant-composer textarea {

@@ -123,7 +123,7 @@ export function AssistantPanel({
     refreshChatThreads,
     remote,
     runningRunId,
-    saveSettings,
+    saveApiKey,
     removeContextAttachment,
     removeLastContextAttachment,
     setApiKeyDraft,
@@ -272,7 +272,7 @@ export function AssistantPanel({
             onApiKeyDraftChange={setApiKeyDraft}
             onModeChange={setMode}
             onModelDraftChange={setModelDraft}
-            onSave={() => void saveSettings()}
+            onSaveApiKey={() => void saveApiKey()}
           />
         </AssistantPanelView>
       ) : (

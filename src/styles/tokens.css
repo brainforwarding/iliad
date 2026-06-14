@@ -71,6 +71,9 @@
   --highlight: rgba(255, 205, 90, 0.5);
   --selection-wash: rgba(60, 66, 74, 0.14); /* editor text selection */
   --tighten-wash: rgba(60, 66, 74, 0.1); /* range being adjusted */
+  --corrector-mark: #7b6a4a; /* writing corrector squiggle, neutral and non-status */
+  --corrector-mark-active: #554730; /* active writing corrector squiggle */
+  --autocomplete-ghost: rgba(82, 88, 79, 0.46); /* inline ghost text */
 
   /* ---- Review / diff — status applied to changes, not a new accent ---- */
   --diff-ins-ink: #2c5a38;

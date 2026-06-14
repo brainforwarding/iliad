@@ -21,20 +21,27 @@ import { useAgentProposals } from "./app/useAgentProposals";
 import { useSelectionComments } from "./app/useSelectionComments";
 import { useWorkspace } from "./app/useWorkspace";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
-import { EditorPane, type EditorSelectionCommentsProps, type EditorTightenProps } from "./components/EditorPane";
+import {
+  EditorPane,
+  type EditorSelectionCommentsProps,
+  type EditorTightenProps,
+  type EditorWritingAssistsProps
+} from "./components/EditorPane";
 import { ClipMark } from "./components/ClipMark";
 import { AssistantPanel, type AssistantPanelSelectionComments } from "./components/AssistantPanel";
 import { FileTree } from "./components/FileTree";
 import { LanguageMenu } from "./components/LanguageMenu";
 import { TreeContextMenu, type TreeContextMenuState } from "./components/TreeContextMenu";
 import { TypographyMenu } from "./components/TypographyMenu";
+import { WritingAssistsMenu } from "./components/WritingAssistsMenu";
 import { scrollEditorToPosition } from "./editor/selectionComments/scroll";
 import { useFileActions } from "./files/fileActions";
 import { findNodeByRelativePath } from "./files/fileTree";
 import { useAppLanguage } from "./i18n/appLanguage";
 import { useEditorPreferences } from "./preferences/editorPreferences";
+import { useWritingAssistPreferences } from "./preferences/writingAssistPreferences";
 import type { EditorView } from "@codemirror/view";
-import type { FileTreeNode, WorkspaceInfo } from "./types/iliad";
+import type { FileTreeNode, WorkspaceInfo, WritingAssistStatus } from "./types/iliad";
 
 function statusText(
   saveStatus: SaveStatus,
@@ -85,10 +92,19 @@ export default function App() {
     setEditorFontPreset,
     setEditorFontSize
   } = useEditorPreferences();
+  const {
+    correctorEnabled,
+    autocompleteEnabled,
+    autocompleteApiFallbackEnabled,
+    setCorrectorEnabled,
+    setAutocompleteEnabled,
+    setAutocompleteApiFallbackEnabled
+  } = useWritingAssistPreferences();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [typographyOpen, setTypographyOpen] = useState(false);
+  const [writingAssistsOpen, setWritingAssistsOpen] = useState(false);
   const [languageOpen, setLanguageOpen] = useState(false);
   const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null);
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);
@@ -97,6 +113,7 @@ export default function App() {
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [treeContextMenu, setTreeContextMenu] = useState<TreeContextMenuState | null>(null);
   const typographyMenuRef = useRef<HTMLDivElement | null>(null);
+  const writingAssistsMenuRef = useRef<HTMLDivElement | null>(null);
   const languageMenuRef = useRef<HTMLDivElement | null>(null);
   const treeContextMenuRef = useRef<HTMLDivElement | null>(null);
   const closeDocumentInFlightRef = useRef(false);
@@ -252,6 +269,18 @@ export default function App() {
   }, []);
   // Gates the editor's Tighten action; main re-checks identity on each request.
   const [editorCanTighten, setEditorCanTighten] = useState(false);
+  const [agentHasOpenAiApiKey, setAgentHasOpenAiApiKey] = useState(false);
+  const [writingAssistStatus, setWritingAssistStatus] = useState<WritingAssistStatus | null>(null);
+  const refreshWritingAssistStatus = useCallback(async () => {
+    try {
+      const status = await window.iliad.getWritingAssistStatus({ autocompleteApiFallbackEnabled });
+      setWritingAssistStatus(status);
+      setAgentHasOpenAiApiKey(status.autocomplete.apiFallbackAvailable);
+    } catch {
+      setWritingAssistStatus(null);
+    }
+  }, [autocompleteApiFallbackEnabled]);
+
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
@@ -270,6 +299,8 @@ export default function App() {
 
       if (!cancelled) {
         setEditorCanTighten(hasOpenAiApiKey || hasCodexAccount);
+        setAgentHasOpenAiApiKey(hasOpenAiApiKey);
+        void refreshWritingAssistStatus();
       }
     };
 
@@ -277,7 +308,13 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [assistantOpen]);
+  }, [assistantOpen, refreshWritingAssistStatus]);
+
+  useEffect(() => {
+    if (writingAssistsOpen) {
+      void refreshWritingAssistStatus();
+    }
+  }, [refreshWritingAssistStatus, writingAssistsOpen]);
   const scrollToSelectionComment = useCallback(
     (commentId: string) => {
       const view = editorViewRef.current;
@@ -484,6 +521,7 @@ export default function App() {
     setAssistantOpen(false);
     setLanguageOpen(false);
     setTypographyOpen(false);
+    setWritingAssistsOpen(false);
   }, [
     clearDocument,
     clearHistory,
@@ -580,6 +618,7 @@ export default function App() {
         setFocusMode(false);
         setLanguageOpen(false);
         setTypographyOpen(false);
+        setWritingAssistsOpen(false);
         closeTreeContextMenu();
         return;
       }
@@ -673,6 +712,24 @@ export default function App() {
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [typographyOpen]);
 
+  useEffect(() => {
+    if (!writingAssistsOpen) {
+      return;
+    }
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (writingAssistsMenuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+
+      setWritingAssistsOpen(false);
+    };
+
+    window.addEventListener("pointerdown", onPointerDown);
+
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [writingAssistsOpen]);
+
   const shellClassName = useMemo(() => {
     const classes = ["app-shell"];
 
@@ -738,6 +795,59 @@ export default function App() {
       cancel: (requestId) => window.iliad.cancelTighten(requestId)
     };
   }, [activeFile, editorCanTighten, editorFile, language, strings.editor.tighten]);
+  const editorWritingAssists = useMemo<EditorWritingAssistsProps | undefined>(() => {
+    if (!activeFile || activeFile.kind !== "markdown" || editorFile !== activeFile) {
+      return undefined;
+    }
+
+    const correctorMemoryApi = window.iliad.writingCorrectorMemory;
+    const workspaceSessionId = workspace?.sessionId;
+    const documentRelativePath = activeFile.relativePath;
+
+    return {
+      correctorEnabled,
+      autocompleteEnabled,
+      autocompleteApiFallbackEnabled,
+      language,
+      workspaceSessionId,
+      documentRelativePath,
+      labels: {
+        corrector: strings.editor.writingCorrector,
+        autocomplete: strings.editor.ideaAutocomplete
+      },
+      autocompleteIdea: (request) => window.iliad.autocompleteIdea(request),
+      cancelAutocompleteIdea: (requestId) => window.iliad.cancelAutocompleteIdea(requestId),
+      correctorMemory:
+        correctorMemoryApi && workspaceSessionId
+          ? {
+              load: () =>
+                correctorMemoryApi.get({
+                  workspaceSessionId,
+                  documentRelativePath,
+                  language
+                }),
+              ignoreIssue: (fingerprint) =>
+                correctorMemoryApi.ignoreIssue({
+                  workspaceSessionId,
+                  documentRelativePath,
+                  language,
+                  fingerprint
+                }),
+              addDictionaryWord: (word) => correctorMemoryApi.addDictionaryWord({ language, word })
+            }
+          : undefined
+    };
+  }, [
+    activeFile,
+    autocompleteApiFallbackEnabled,
+    autocompleteEnabled,
+    correctorEnabled,
+    editorFile,
+    language,
+    strings.editor.ideaAutocomplete,
+    strings.editor.writingCorrector,
+    workspace?.sessionId
+  ]);
   // The chip always reflects the open document; no chip for non-open documents.
   const assistantSelectionComments = useMemo<AssistantPanelSelectionComments | undefined>(() => {
     if (!activeFile || activeFile.kind !== "markdown") {
@@ -773,6 +883,35 @@ export default function App() {
     ? strings.topbar.forwardTo(markdownDisplayName(forwardTarget.node, strings.appName))
     : strings.topbar.noNextDocument;
   const focusModeLabel = focusMode ? strings.topbar.exitFocusMode : strings.topbar.focusMode;
+  const autocompleteStatusNote = useMemo(() => {
+    if (!autocompleteEnabled) {
+      return undefined;
+    }
+
+    const status = writingAssistStatus?.autocomplete;
+
+    if (!status) {
+      return undefined;
+    }
+
+    if (status.provider === "codex-app-server") {
+      return status.model
+        ? `${strings.writingAssists.autocompleteCodex} · ${status.model}`
+        : strings.writingAssists.autocompleteCodex;
+    }
+
+    if (status.provider === "openai-api") {
+      return status.model
+        ? `${strings.writingAssists.autocompleteApi} · ${status.model}`
+        : strings.writingAssists.autocompleteApi;
+    }
+
+    if (status.apiFallbackAvailable && !status.apiFallbackEnabled) {
+      return strings.writingAssists.autocompleteEnableApiFallback;
+    }
+
+    return strings.writingAssists.autocompleteUnavailable;
+  }, [autocompleteEnabled, strings.writingAssists, writingAssistStatus?.autocomplete]);
 
   if (!workspace) {
     return (
@@ -863,6 +1002,31 @@ export default function App() {
               onToggleOpen={() => setTypographyOpen((open) => !open)}
               open={typographyOpen}
             />
+            <WritingAssistsMenu
+              labels={strings.writingAssists}
+              menuRef={writingAssistsMenuRef}
+              open={writingAssistsOpen}
+              correctorEnabled={correctorEnabled}
+              autocompleteEnabled={autocompleteEnabled}
+              autocompleteApiFallbackEnabled={autocompleteApiFallbackEnabled}
+              correctorAvailable={language === "en"}
+              autocompleteNote={autocompleteStatusNote}
+              showApiFallback={writingAssistStatus?.autocomplete.apiFallbackAvailable ?? agentHasOpenAiApiKey}
+              onToggleOpen={() => {
+                setWritingAssistsOpen((open) => {
+                  const nextOpen = !open;
+
+                  if (nextOpen) {
+                    void refreshWritingAssistStatus();
+                  }
+
+                  return nextOpen;
+                });
+              }}
+              onSetCorrectorEnabled={setCorrectorEnabled}
+              onSetAutocompleteEnabled={setAutocompleteEnabled}
+              onSetAutocompleteApiFallbackEnabled={setAutocompleteApiFallbackEnabled}
+            />
             <LanguageMenu
               language={language}
               labels={strings.language}
@@ -951,6 +1115,7 @@ export default function App() {
             review={editorReview}
             selectionComments={editorSelectionComments}
             tighten={editorTighten}
+            writingAssists={editorWritingAssists}
             onActiveSelectionChange={handleActiveSelectionChange}
             onChange={handleEditorChange}
             onInsertImage={insertImage}

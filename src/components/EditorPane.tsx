@@ -7,6 +7,7 @@ import { aiReviewExtension } from "../editor/aiReview/extension";
 import { reviewHunksForDisplay, type DisplayReviewHunk } from "../editor/aiReview/diff";
 import type { EditorReviewState } from "../editor/aiReview/types";
 import { imageDropPasteExtension } from "../editor/imageDropPaste";
+import { ideaAutocompleteExtension, type IdeaAutocompleteStatus } from "../editor/ideaAutocomplete/extension";
 import {
   selectionCommentsExtension,
   type SelectionCommentPositionUpdate,
@@ -19,9 +20,19 @@ import {
   type TightenOverlayLabels
 } from "../editor/selectionComments/overlay";
 import { visualMarkdown } from "../editor/visualMarkdown";
+import { proseEnterExtension } from "../editor/proseEnter";
+import { writingCorrectorExtension } from "../editor/writingCorrector/extension";
+import { type WritingIssue, writingIssueFingerprint, writingIssueKey } from "../editor/writingCorrector/issues";
 import type { TightenInlineReview } from "../editor/tightenSafeRange";
 import type { EditorFontPreset } from "../preferences/editorPreferences";
-import type { FileTreeNode, SelectionComment, TightenResult } from "../types/iliad";
+import type {
+  FileTreeNode,
+  IdeaAutocompleteRequest,
+  IdeaAutocompleteResult,
+  SelectionComment,
+  TightenResult,
+  WritingCorrectorMemorySnapshot
+} from "../types/iliad";
 import { ClipMark } from "./ClipMark";
 import { FilePlus } from "lucide-react";
 
@@ -46,6 +57,44 @@ export interface EditorTightenProps {
     options?: { mode?: "tighten" | "edit"; instruction?: string }
   ) => Promise<TightenResult>;
   cancel: (requestId: string) => void;
+}
+
+export interface EditorWritingAssistsProps {
+  correctorEnabled: boolean;
+  autocompleteEnabled: boolean;
+  autocompleteApiFallbackEnabled: boolean;
+  language: "en" | "es";
+  workspaceSessionId?: string;
+  documentRelativePath?: string;
+  labels: {
+    corrector: {
+      apply: string;
+      ignore: string;
+      addToDictionary: string;
+      suggestion: string;
+      source: (source: string, ruleId: string) => string;
+      stale: string;
+      openActions: string;
+    };
+    autocomplete: {
+      working: string;
+      noProvider: string;
+      invalidApiKey: string;
+      rateLimited: string;
+      tooLong: string;
+      timeout: string;
+      unavailable: string;
+      noSuggestion: string;
+      unavailableInDocument: string;
+    };
+  };
+  autocompleteIdea: (request: IdeaAutocompleteRequest) => Promise<IdeaAutocompleteResult>;
+  cancelAutocompleteIdea: (requestId: string) => void;
+  correctorMemory?: {
+    load: () => Promise<WritingCorrectorMemorySnapshot>;
+    ignoreIssue: (fingerprint: string) => Promise<WritingCorrectorMemorySnapshot>;
+    addDictionaryWord: (word: string) => Promise<{ customWords: string[] }>;
+  };
 }
 
 interface EditorPaneProps {
@@ -83,6 +132,7 @@ interface EditorPaneProps {
   review: EditorReviewState | null;
   selectionComments?: EditorSelectionCommentsProps;
   tighten?: EditorTightenProps;
+  writingAssists?: EditorWritingAssistsProps;
   onChange: (value: string) => void;
   onInsertImage: (file: File) => Promise<string>;
   onOpenLink: (href: string) => void | Promise<void>;
@@ -169,6 +219,7 @@ export function EditorPane({
   review,
   selectionComments,
   tighten,
+  writingAssists,
   onChange,
   onInsertImage,
   onOpenLink,
@@ -192,6 +243,17 @@ export function EditorPane({
   const [provisionalCommentRange, setProvisionalCommentRange] = useState<{ from: number; to: number } | null>(null);
   const [provisionalTightenRange, setProvisionalTightenRange] = useState<{ from: number; to: number } | null>(null);
   const [tightenReview, setTightenReview] = useState<TightenInlineReview | null>(null);
+  const [activeWritingIssue, setActiveWritingIssue] = useState<{
+    issue: WritingIssue;
+    left: number;
+    top: number;
+  } | null>(null);
+  const [autocompleteStatus, setAutocompleteStatus] = useState<IdeaAutocompleteStatus>({ state: "idle" });
+  const [autocompleteStatusAnchor, setAutocompleteStatusAnchor] = useState<{ left: number; top: number } | null>(null);
+  const [ignoredWritingIssueKeys, setIgnoredWritingIssueKeys] = useState<Set<string>>(() => new Set());
+  const [customCorrectorWords, setCustomCorrectorWords] = useState<Set<string>>(() => new Set());
+  const editorSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const writingIssuePopoverRef = useRef<HTMLDivElement | null>(null);
   const overlayApiRef = useRef<SelectionCommentsOverlayApi | null>(null);
   const selectionCommentRanges = useMemo<SelectionCommentWashRange[]>(() => {
     if (!selectionComments) {
@@ -272,14 +334,67 @@ export function EditorPane({
     activeSelectionCallbackRef.current?.(null);
     setTightenReview(null);
     setProvisionalTightenRange(null);
+    setActiveWritingIssue(null);
+    setIgnoredWritingIssueKeys(new Set());
+    setCustomCorrectorWords(new Set());
+    setAutocompleteStatus({ state: "idle" });
+    setAutocompleteStatusAnchor(null);
   }, [file?.path]);
+
+  useEffect(() => {
+    const correctorMemory = writingAssists?.correctorMemory;
+    const documentPath = file?.path;
+
+    setIgnoredWritingIssueKeys(new Set());
+    setCustomCorrectorWords(new Set());
+
+    if (!correctorMemory || !documentPath) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void correctorMemory
+      .load()
+      .then((memory) => {
+        if (cancelled || file?.path !== documentPath) {
+          return;
+        }
+
+        setIgnoredWritingIssueKeys(new Set(memory.ignoredIssueFingerprints));
+        setCustomCorrectorWords(new Set(memory.customWords));
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [file?.path, writingAssists?.correctorMemory]);
 
   useEffect(() => {
     if (review) {
       setTightenReview(null);
       setProvisionalTightenRange(null);
+      setActiveWritingIssue(null);
     }
   }, [review]);
+
+  useEffect(() => {
+    setActiveWritingIssue(null);
+  }, [value]);
+
+  useEffect(() => {
+    if (!activeWritingIssue) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const firstButton = writingIssuePopoverRef.current?.querySelector("button");
+      firstButton instanceof HTMLButtonElement ? firstButton.focus() : writingIssuePopoverRef.current?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeWritingIssue]);
 
   const reportActiveSelection = useCallback((update: ViewUpdate) => {
     const selection = update.state.selection.main;
@@ -326,17 +441,201 @@ export function EditorPane({
     () => (review?.mode === "edit_file" ? editReviewDisplay?.changedLineRanges : tightenChangedLineRanges),
     [editReviewDisplay?.changedLineRanges, review?.mode, tightenChangedLineRanges]
   );
+  const openWritingIssue = useCallback((issue: WritingIssue, view: EditorView) => {
+    const coords = view.coordsAtPos(issue.from);
+    const surface = editorSurfaceRef.current;
+
+    if (!coords || !surface) {
+      return;
+    }
+
+    const surfaceRect = surface.getBoundingClientRect();
+    setActiveWritingIssue({
+      issue,
+      left: Math.max(12, coords.left - surfaceRect.left + surface.scrollLeft),
+      top: Math.max(12, coords.bottom - surfaceRect.top + surface.scrollTop + 8)
+    });
+  }, []);
+  const closeWritingIssue = useCallback(() => {
+    setActiveWritingIssue(null);
+    editorView?.focus();
+  }, [editorView]);
+  const applyWritingSuggestion = useCallback(
+    (issue: WritingIssue, replacement: string) => {
+      if (!editorView) {
+        return;
+      }
+
+      if (editorView.state.sliceDoc(issue.from, issue.to) !== issue.originalText) {
+        setActiveWritingIssue(null);
+        return;
+      }
+
+      editorView.dispatch({
+        changes: { from: issue.from, to: issue.to, insert: replacement },
+        selection: { anchor: issue.from + replacement.length }
+      });
+      setActiveWritingIssue(null);
+      editorView.focus();
+    },
+    [editorView]
+  );
+  const ignoreWritingIssue = useCallback(
+    (issue: WritingIssue) => {
+      const positionKey = writingIssueKey(issue);
+      const fingerprint = writingIssueFingerprint(issue, writingAssists?.language ?? "en");
+      const documentPath = file?.path;
+
+      setIgnoredWritingIssueKeys((currentKeys) => {
+        const nextKeys = new Set(currentKeys);
+        nextKeys.add(positionKey);
+        nextKeys.add(fingerprint);
+        return nextKeys;
+      });
+      setActiveWritingIssue(null);
+      editorView?.focus();
+
+      if (!documentPath) {
+        return;
+      }
+
+      void writingAssists?.correctorMemory
+        ?.ignoreIssue(fingerprint)
+        .then((memory) => {
+          if (file?.path !== documentPath) {
+            return;
+          }
+
+          setIgnoredWritingIssueKeys((currentKeys) => {
+            const nextKeys = new Set(currentKeys);
+            memory.ignoredIssueFingerprints.forEach((ignoredFingerprint) => nextKeys.add(ignoredFingerprint));
+            return nextKeys;
+          });
+        })
+        .catch(() => undefined);
+    },
+    [editorView, file?.path, writingAssists]
+  );
+  const addCorrectorWord = useCallback(
+    (issue: WritingIssue) => {
+      const word = issue.originalText.toLowerCase();
+      const documentPath = file?.path;
+
+      setCustomCorrectorWords((currentWords) => {
+        const nextWords = new Set(currentWords);
+        nextWords.add(word);
+        return nextWords;
+      });
+      setActiveWritingIssue(null);
+      editorView?.focus();
+
+      if (!documentPath) {
+        return;
+      }
+
+      void writingAssists?.correctorMemory
+        ?.addDictionaryWord(issue.originalText)
+        .then(({ customWords }) => {
+          if (file?.path !== documentPath) {
+            return;
+          }
+
+          setCustomCorrectorWords(new Set(customWords));
+        })
+        .catch(() => undefined);
+    },
+    [editorView, file?.path, writingAssists]
+  );
+  const updateAutocompleteStatusAnchor = useCallback(() => {
+    const view = editorView;
+    const surface = editorSurfaceRef.current;
+
+    if (!view || !surface) {
+      setAutocompleteStatusAnchor(null);
+      return;
+    }
+
+    const selection = view.state.selection.main;
+
+    if (!selection.empty) {
+      setAutocompleteStatusAnchor(null);
+      return;
+    }
+
+    const coords = view.coordsAtPos(selection.head);
+
+    if (!coords) {
+      setAutocompleteStatusAnchor(null);
+      return;
+    }
+
+    const surfaceRect = surface.getBoundingClientRect();
+    const maxLeft = surface.scrollLeft + surface.clientWidth - 340;
+    setAutocompleteStatusAnchor({
+      left: Math.max(12, Math.min(maxLeft, coords.left - surfaceRect.left + surface.scrollLeft)),
+      top: Math.max(12, coords.bottom - surfaceRect.top + surface.scrollTop + 10)
+    });
+  }, [editorView]);
+  const handleAutocompleteStatusChange = useCallback(
+    (status: IdeaAutocompleteStatus) => {
+      setAutocompleteStatus(status);
+
+      if (status.state === "requesting" || status.state === "failed") {
+        updateAutocompleteStatusAnchor();
+      } else {
+        setAutocompleteStatusAnchor(null);
+      }
+    },
+    [updateAutocompleteStatusAnchor]
+  );
+  const autocompleteStatusMessage = useMemo(() => {
+    if (!writingAssists?.autocompleteEnabled) {
+      return null;
+    }
+
+    if (autocompleteStatus.state === "requesting") {
+      return writingAssists.labels.autocomplete.working;
+    }
+
+    if (autocompleteStatus.state !== "failed") {
+      return null;
+    }
+
+    switch (autocompleteStatus.reason) {
+      case "no_key":
+        return writingAssists.labels.autocomplete.noProvider;
+      case "invalid_api_key":
+        return writingAssists.labels.autocomplete.invalidApiKey;
+      case "rate_limited":
+        return writingAssists.labels.autocomplete.rateLimited;
+      case "too_long":
+        return writingAssists.labels.autocomplete.tooLong;
+      case "timeout":
+        return writingAssists.labels.autocomplete.timeout;
+      case "no_suggestion":
+        return writingAssists.labels.autocomplete.noSuggestion;
+      case "disabled":
+      case "empty":
+        return writingAssists.labels.autocomplete.unavailableInDocument;
+      case "provider":
+      case "aborted":
+      case "untrusted":
+        return writingAssists.labels.autocomplete.unavailable;
+    }
+  }, [autocompleteStatus, writingAssists]);
 
   const extensions = useMemo(
     () => {
       const nextExtensions = [
       markdown(),
+      proseEnterExtension(),
       EditorView.lineWrapping,
       editorTheme,
       EditorView.updateListener.of(reportActiveSelection),
       visualMarkdown({
         documentPath: file?.path ?? "",
         blockedLineRanges,
+        initialEditorFocused: editorView?.hasFocus ?? false,
         labels: labels.visualMarkdown,
         onOpenLink
       })
@@ -357,6 +656,44 @@ export function EditorPane({
             onCommentShortcut: handleOverlayShortcut,
             onTightenShortcut: handleOverlayTightenShortcut,
             onEscape: handleOverlayEscape
+          })
+        );
+      }
+
+      if (file && writingAssists?.correctorEnabled && !review && !readOnly) {
+        nextExtensions.push(
+          ...writingCorrectorExtension({
+            enabled: true,
+            language: writingAssists.language,
+            blockedLineRanges,
+            ignoredIssueKeys: ignoredWritingIssueKeys,
+            customWords: customCorrectorWords,
+            onOpenIssue: openWritingIssue
+          })
+        );
+      }
+
+      if (
+        file &&
+        writingAssists?.autocompleteEnabled &&
+        writingAssists.workspaceSessionId &&
+        writingAssists.documentRelativePath &&
+        !activeWritingIssue &&
+        !review &&
+        !readOnly
+      ) {
+        nextExtensions.push(
+          ...ideaAutocompleteExtension({
+            enabled: true,
+            language: writingAssists.language,
+            workspaceSessionId: writingAssists.workspaceSessionId,
+            documentRelativePath: writingAssists.documentRelativePath,
+            documentTitle: file.name.replace(/\.(md|markdown|mdown|mkd)$/i, ""),
+            autocompleteApiFallbackEnabled: writingAssists.autocompleteApiFallbackEnabled,
+            blockedLineRanges,
+            requestAutocomplete: writingAssists.autocompleteIdea,
+            cancelAutocomplete: writingAssists.cancelAutocompleteIdea,
+            onStatusChange: handleAutocompleteStatusChange
           })
         );
       }
@@ -418,7 +755,9 @@ export function EditorPane({
     [
       editReviewDisplay,
       blockedLineRanges,
+      activeWritingIssue,
       editorTheme,
+      editorView,
       file?.path,
       handleAcceptTightenReview,
       handleOverlayEditorUpdate,
@@ -428,18 +767,24 @@ export function EditorPane({
       handleOverlayShortcut,
       handleOverlayTightenShortcut,
       handleRejectTightenReview,
+      handleAutocompleteStatusChange,
+      ignoredWritingIssueKeys,
       labels.visualMarkdown,
       labels.reviewToolbar.acceptChange,
       labels.reviewToolbar.rejectChange,
       onInsertImage,
       onOpenLink,
+      openWritingIssue,
       provisionalCommentRange,
       provisionalTightenRange,
       reportActiveSelection,
       review,
       selectionCommentRanges,
       selectionComments,
-      tightenReviewHunk
+      tightenReviewHunk,
+      writingAssists,
+      customCorrectorWords,
+      readOnly
     ]
   );
 
@@ -507,7 +852,7 @@ export function EditorPane({
           )}
         </div>
       ) : null}
-      <div className="editor-surface">
+      <div className="editor-surface" ref={editorSurfaceRef}>
         <CodeMirror
           value={value}
           basicSetup={{
@@ -556,6 +901,69 @@ export function EditorPane({
                 : undefined
             }
           />
+        ) : null}
+        {activeWritingIssue && writingAssists ? (
+          <div
+            className="writing-corrector-popover"
+            role="dialog"
+            aria-label={writingAssists.labels.corrector.openActions}
+            style={{ left: activeWritingIssue.left, top: activeWritingIssue.top }}
+            ref={writingIssuePopoverRef}
+            tabIndex={-1}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                closeWritingIssue();
+              }
+            }}
+          >
+            <p className="writing-corrector-message">
+              {activeWritingIssue.issue.suggestions.length > 0
+                ? writingAssists.labels.corrector.suggestion
+                : activeWritingIssue.issue.message}
+            </p>
+            <div className="writing-corrector-actions">
+              {activeWritingIssue.issue.suggestions.slice(0, 5).map((suggestion) => (
+                <button
+                  key={`${suggestion.label}:${suggestion.replacement}`}
+                  type="button"
+                  className="writing-corrector-action"
+                  onClick={() => applyWritingSuggestion(activeWritingIssue.issue, suggestion.replacement)}
+                >
+                  {suggestion.label || writingAssists.labels.corrector.apply}
+                </button>
+              ))}
+            </div>
+            <div className="writing-corrector-secondary-actions">
+              {activeWritingIssue.issue.canIgnore ? (
+                <button
+                  type="button"
+                  className="writing-corrector-secondary-action"
+                  onClick={() => ignoreWritingIssue(activeWritingIssue.issue)}
+                >
+                  {writingAssists.labels.corrector.ignore}
+                </button>
+              ) : null}
+              {activeWritingIssue.issue.canAddToDictionary ? (
+                <button
+                  type="button"
+                  className="writing-corrector-secondary-action"
+                  onClick={() => addCorrectorWord(activeWritingIssue.issue)}
+                >
+                  {writingAssists.labels.corrector.addToDictionary}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {autocompleteStatusMessage ? (
+          <div
+            className={autocompleteStatusAnchor ? "editor-autocomplete-status is-anchored" : "editor-autocomplete-status"}
+            role="status"
+            style={autocompleteStatusAnchor ? { left: autocompleteStatusAnchor.left, top: autocompleteStatusAnchor.top } : undefined}
+          >
+            {autocompleteStatusMessage}
+          </div>
         ) : null}
       </div>
     </main>

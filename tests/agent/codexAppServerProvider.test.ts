@@ -1441,6 +1441,49 @@ describe("Codex app-server runtime provider", () => {
     });
   });
 
+  it("classifies Codex invalid-request payloads from nested failed-turn messages", async () => {
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "iliad-codex-provider-invalid-request-"));
+    tempDirs.push(workspaceRoot);
+    const client = new FakeCodexClient();
+    const provider = new CodexAppServerRuntimeProvider({
+      client: client as any,
+      model: "gpt-5.5"
+    });
+
+    const promise = provider.startRun({
+      request: runRequest(workspaceRoot),
+      signal: new AbortController().signal
+    });
+
+    await client.waitForTurnStart();
+    client.emitNotification("turn/completed", {
+      threadId: "thread-1",
+      turn: {
+        id: "turn-1",
+        status: "failed",
+        error: {
+          message: JSON.stringify({
+            type: "error",
+            error: {
+              type: "invalid_request_error",
+              message: "The following tools cannot be used with reasoning.effort 'minimal': image_gen, web_search.",
+              param: "tools"
+            },
+            status: 400
+          })
+        }
+      }
+    });
+
+    await expect(promise).rejects.toMatchObject({
+      agentError: {
+        code: "provider_unavailable",
+        detail: "invalid_request",
+        userMessage: "Codex rejected unsupported request parameters. Try again."
+      }
+    });
+  });
+
   it("does not expose secret or path-like failed-turn codes", async () => {
     const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "iliad-codex-provider-unsafe-code-"));
     tempDirs.push(workspaceRoot);

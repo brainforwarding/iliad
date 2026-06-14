@@ -75,6 +75,8 @@ export type AgentRuntimeDiagnosticEvent =
       reason: string;
       from: string;
       to: string;
+      fromProvider?: AgentRuntimeProviderId;
+      toProvider?: AgentRuntimeProviderId;
     };
 
 export type AgentRuntimeDiagnosticEventListener = (event: AgentRuntimeDiagnosticEvent) => void;

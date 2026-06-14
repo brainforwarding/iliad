@@ -70,6 +70,18 @@ export const appStrings = {
       },
       reset: "Reset"
     },
+    writingAssists: {
+      title: "Writing assists",
+      dialogLabel: "Writing assists",
+      corrector: "Corrector",
+      autocomplete: "Autocomplete",
+      apiFallback: "Use API fallback",
+      correctorUnavailable: "English only for now",
+      autocompleteCodex: "Using Codex",
+      autocompleteApi: "Using OpenAI API",
+      autocompleteEnableApiFallback: "Enable API fallback or connect Codex",
+      autocompleteUnavailable: "Connect Codex or add an API key"
+    },
     editor: {
       emptyTitle: "Pick a file to start",
       emptyNewDocument: "New document",
@@ -102,6 +114,26 @@ export const appStrings = {
         editFailed: "Couldn't edit — try again",
         editNoKey: "Connect Codex or add an OpenAI API key in the assistant to edit",
         editTooLong: "Selection or instruction too long to edit"
+      },
+      writingCorrector: {
+        apply: "Apply",
+        ignore: "Ignore",
+        addToDictionary: "Add to dictionary",
+        suggestion: "Suggestion",
+        source: (source: string, ruleId: string) => `${source}: ${ruleId}`,
+        stale: "This suggestion is stale.",
+        openActions: "Open correction actions"
+      },
+      ideaAutocomplete: {
+        working: "Autocomplete is thinking…",
+        noProvider: "Connect Codex or enable API fallback for autocomplete.",
+        invalidApiKey: "The saved OpenAI API key was rejected.",
+        rateLimited: "Autocomplete is rate-limited. Try again shortly.",
+        tooLong: "Autocomplete context is too long here.",
+        timeout: "Autocomplete took too long. Try again.",
+        unavailable: "Autocomplete is unavailable right now.",
+        noSuggestion: "No suggestion yet.",
+        unavailableInDocument: "Autocomplete needs more writable text here."
       },
       reviewToolbar: {
         changes: (count: number) => (count === 1 ? "1 change" : `${count} changes`),
@@ -148,12 +180,13 @@ export const appStrings = {
       apiKeyHelper: "Saved locally. API usage is separate from ChatGPT plans.",
       getApiKey: "Get an API key",
       changeKey: "Change key",
+      saveApiKey: "Save key",
       apiKeyRole: "Chat, editing, and dictation.",
       powersChat: "Powers chat",
       powersDictation: "Powers dictation",
       modelSection: "Model",
       model: "Agent model",
-      modelHelper: "Codex-compatible models. gpt-5.5 is recommended.",
+      modelHelper: "Works with Codex and API fallback. gpt-5.5 is recommended.",
       mode: "Mode",
       saveSettings: "Save settings",
       send: "Send",
@@ -488,6 +521,18 @@ export const appStrings = {
       },
       reset: "Restablecer"
     },
+    writingAssists: {
+      title: "Ayudas de escritura",
+      dialogLabel: "Ayudas de escritura",
+      corrector: "Corrector",
+      autocomplete: "Autocompletar",
+      apiFallback: "Usar API como respaldo",
+      correctorUnavailable: "Solo inglés por ahora",
+      autocompleteCodex: "Usando Codex",
+      autocompleteApi: "Usando la API de OpenAI",
+      autocompleteEnableApiFallback: "Activa el respaldo API o conecta Codex",
+      autocompleteUnavailable: "Conecta Codex o agrega una clave API"
+    },
     editor: {
       emptyTitle: "Elige un archivo para empezar",
       emptyNewDocument: "Nuevo documento",
@@ -520,6 +565,26 @@ export const appStrings = {
         editFailed: "No se pudo editar; inténtalo de nuevo",
         editNoKey: "Conecta Codex o añade una clave de OpenAI en el asistente para editar",
         editTooLong: "Selección o instrucción demasiado larga para editar"
+      },
+      writingCorrector: {
+        apply: "Aplicar",
+        ignore: "Ignorar",
+        addToDictionary: "Agregar al diccionario",
+        suggestion: "Sugerencia",
+        source: (source: string, ruleId: string) => `${source}: ${ruleId}`,
+        stale: "Esta sugerencia quedó obsoleta.",
+        openActions: "Abrir acciones de corrección"
+      },
+      ideaAutocomplete: {
+        working: "Autocompletar está pensando…",
+        noProvider: "Conecta Codex o activa el respaldo API para autocompletar.",
+        invalidApiKey: "OpenAI rechazó la clave API guardada.",
+        rateLimited: "Autocompletar está limitado. Intenta de nuevo en un momento.",
+        tooLong: "El contexto de autocompletar es demasiado largo aquí.",
+        timeout: "Autocompletar tardó demasiado. Intenta de nuevo.",
+        unavailable: "Autocompletar no está disponible ahora.",
+        noSuggestion: "Sin sugerencia por ahora.",
+        unavailableInDocument: "Autocompletar necesita más texto editable aquí."
       },
       reviewToolbar: {
         changes: (count: number) => (count === 1 ? "1 cambio" : `${count} cambios`),
@@ -566,12 +631,13 @@ export const appStrings = {
       apiKeyHelper: "Se guarda localmente. El uso de la API es independiente de los planes de ChatGPT.",
       getApiKey: "Obtener una clave API",
       changeKey: "Cambiar clave",
+      saveApiKey: "Guardar clave",
       apiKeyRole: "Chat, edición y dictado.",
       powersChat: "Potencia el chat",
       powersDictation: "Potencia el dictado",
       modelSection: "Modelo",
       model: "Modelo del agente",
-      modelHelper: "Modelos compatibles con Codex. Se recomienda gpt-5.5.",
+      modelHelper: "Funciona con Codex y respaldo API. Se recomienda gpt-5.5.",
       mode: "Modo",
       saveSettings: "Guardar ajustes",
       send: "Enviar",

@@ -1,5 +1,5 @@
 import { createOpenAiResponse } from "../openaiResponses.js";
-import { providerStatusError } from "../errors.js";
+import { normalizeAgentError, providerStatusError } from "../errors.js";
 import { readOpenAiResponse, responseText } from "../openai/responses.js";
 import type { AgentProviderRunRequest, AgentRunContextItem, AgentThinkingRunEventListener } from "../types.js";
 import type { AgentDocumentTools } from "../documentTools.js";
@@ -128,12 +128,14 @@ export class OpenAiResponsesRuntimeProvider implements AgentRuntimeProvider {
         text
       };
     } catch (error) {
+      const agentError = normalizeAgentError(error);
       onDiagnosticEvent?.({
         event: "provider.request.completed",
         streaming: false,
         durationMs: Date.now() - startedAt,
         retryable: true,
-        errorCode: error instanceof Error ? error.name : "openai_response_error"
+        errorCode: agentError.code,
+        providerStatus: agentError.providerStatus
       });
       throw error;
     }

@@ -221,6 +221,178 @@ describe("agent IPC trust validation", () => {
     expect(service.tightenSelection).not.toHaveBeenCalled();
   });
 
+  it("rejects untrusted autocomplete senders before calling the service", async () => {
+    const { handleAutocompleteIpc } = await import("../../electron/ipc/autocomplete");
+    const service = {
+      autocompleteIdea: vi.fn(async () => " unused"),
+      writingAssistStatus: vi.fn()
+    };
+    electronMock.fromWebContents.mockReturnValue(null);
+
+    const response = await handleAutocompleteIpc(
+      {
+        sender: { id: 10 },
+        senderFrame: { url: "file:///Applications/Iliad.app/index.html" }
+      } as never,
+      {
+        requestId: "autocomplete-untrusted",
+        workspaceSessionId: "session-1",
+        documentRelativePath: "draft.md",
+        prefix: "This paragraph has enough context",
+        suffix: "",
+        language: "en"
+      },
+      {
+        service,
+        controllers: new Map(),
+        resolveWorkspaceRootForSession: async () => "/tmp/workspace"
+      }
+    );
+
+    expect(response).toEqual({ ok: false, reason: "untrusted" });
+    expect(service.autocompleteIdea).not.toHaveBeenCalled();
+  });
+
+  it("validates autocomplete workspace sessions and relative Markdown paths in main", async () => {
+    const { handleAutocompleteIpc } = await import("../../electron/ipc/autocomplete");
+    const workspaceRoot = await tempWorkspace();
+    const service = {
+      autocompleteIdea: vi.fn(async () => " next idea"),
+      writingAssistStatus: vi.fn()
+    };
+    electronMock.fromWebContents.mockReturnValue({});
+
+    const staleSession = await handleAutocompleteIpc(
+      {
+        sender: { id: 11 },
+        senderFrame: { url: "file:///Applications/Iliad.app/index.html" }
+      } as never,
+      {
+        requestId: "autocomplete-stale",
+        workspaceSessionId: "wrong-session",
+        documentRelativePath: "draft.md",
+        prefix: "This paragraph has enough context",
+        suffix: "",
+        language: "en"
+      },
+      {
+        service,
+        controllers: new Map(),
+        resolveWorkspaceRootForSession: async (_event, sessionId) => (sessionId === "session-1" ? workspaceRoot : null)
+      }
+    );
+    const unsafePath = await handleAutocompleteIpc(
+      {
+        sender: { id: 11 },
+        senderFrame: { url: "file:///Applications/Iliad.app/index.html" }
+      } as never,
+      {
+        requestId: "autocomplete-unsafe",
+        workspaceSessionId: "session-1",
+        documentRelativePath: "../draft.md",
+        prefix: "This paragraph has enough context",
+        suffix: "",
+        language: "en"
+      },
+      {
+        service,
+        controllers: new Map(),
+        resolveWorkspaceRootForSession: async (_event, sessionId) => (sessionId === "session-1" ? workspaceRoot : null)
+      }
+    );
+
+    expect(staleSession).toEqual({ ok: false, reason: "disabled" });
+    expect(unsafePath).toEqual({ ok: false, reason: "disabled" });
+    expect(service.autocompleteIdea).not.toHaveBeenCalled();
+  });
+
+  it("passes autocomplete API fallback only when explicitly enabled", async () => {
+    const { handleAutocompleteIpc } = await import("../../electron/ipc/autocomplete");
+    const workspaceRoot = await tempWorkspace();
+    const service = {
+      autocompleteIdea: vi.fn(async () => " next idea"),
+      writingAssistStatus: vi.fn()
+    };
+    electronMock.fromWebContents.mockReturnValue({});
+
+    const response = await handleAutocompleteIpc(
+      {
+        sender: { id: 12 },
+        senderFrame: { url: "file:///Applications/Iliad.app/index.html" }
+      } as never,
+      {
+        requestId: "autocomplete-valid",
+        workspaceSessionId: "session-1",
+        documentRelativePath: "draft.md",
+        prefix: "This paragraph has enough context",
+        suffix: "",
+        headingPath: ["Draft"],
+        documentTitle: "draft",
+        nearbyHeadings: ["Draft"],
+        language: "en",
+        autocompleteApiFallbackEnabled: true
+      },
+      {
+        service,
+        controllers: new Map(),
+        resolveWorkspaceRootForSession: async (_event, sessionId) => (sessionId === "session-1" ? workspaceRoot : null)
+      }
+    );
+
+    expect(response).toEqual({ ok: true, insert: " next idea" });
+    expect(service.autocompleteIdea).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "autocomplete-valid",
+        prefix: "This paragraph has enough context",
+        trigger: "automatic",
+        suggestionKind: "inline",
+        allowApiFallback: true
+      })
+    );
+  });
+
+  it("validates autocomplete trigger metadata and preserves explicit paragraph mode", async () => {
+    const { handleAutocompleteIpc } = await import("../../electron/ipc/autocomplete");
+    const workspaceRoot = await tempWorkspace();
+    const service = {
+      autocompleteIdea: vi.fn(async () => "\n\nThe next paragraph follows naturally."),
+      writingAssistStatus: vi.fn()
+    };
+    electronMock.fromWebContents.mockReturnValue({});
+
+    const response = await handleAutocompleteIpc(
+      {
+        sender: { id: 13 },
+        senderFrame: { url: "file:///Applications/Iliad.app/index.html" }
+      } as never,
+      {
+        requestId: "autocomplete-paragraph",
+        workspaceSessionId: "session-1",
+        documentRelativePath: "draft.md",
+        prefix: "This paragraph has enough context.",
+        suffix: "",
+        language: "en",
+        trigger: "manual",
+        suggestionKind: "paragraph",
+        autocompleteApiFallbackEnabled: false
+      },
+      {
+        service,
+        controllers: new Map(),
+        resolveWorkspaceRootForSession: async (_event, sessionId) => (sessionId === "session-1" ? workspaceRoot : null)
+      }
+    );
+
+    expect(response).toEqual({ ok: true, insert: "\n\nThe next paragraph follows naturally." });
+    expect(service.autocompleteIdea).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger: "manual",
+        suggestionKind: "paragraph",
+        allowApiFallback: false
+      })
+    );
+  });
+
   it("rejects untrusted Codex account IPC calls before calling the service", async () => {
     const {
       handleCodexCancelLoginIpc,

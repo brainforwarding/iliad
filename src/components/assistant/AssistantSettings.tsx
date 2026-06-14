@@ -1,4 +1,4 @@
-import { Check, Copy, ExternalLink } from "lucide-react";
+import { Copy, ExternalLink } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { agentModelOptions } from "../../assistant/agentModels";
 import {
@@ -20,7 +20,7 @@ interface AssistantSettingsProps {
   onApiKeyDraftChange: (value: string) => void;
   onModeChange: (value: AgentMode) => void;
   onModelDraftChange: (value: string) => void;
-  onSave: () => void;
+  onSaveApiKey: () => void | Promise<void>;
 }
 
 export function AssistantSettings({
@@ -34,9 +34,10 @@ export function AssistantSettings({
   onApiKeyDraftChange,
   onModeChange,
   onModelDraftChange,
-  onSave
+  onSaveApiKey
 }: AssistantSettingsProps) {
   const hasSavedKey = Boolean(settings?.hasOpenAiApiKey);
+  const hasApiKeyDraft = apiKeyDraft.trim().length > 0;
   const [editingKey, setEditingKey] = useState(false);
   const [codexCodeCopyState, setCodexCodeCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const codexCodeCopyTimerRef = useRef<number | null>(null);
@@ -64,6 +65,14 @@ export function AssistantSettings({
 
   const openApiKeys = () => {
     void window.iliad.openUrl("https://platform.openai.com/api-keys");
+  };
+  const saveApiKey = async () => {
+    try {
+      await onSaveApiKey();
+      setEditingKey(false);
+    } catch (error) {
+      console.warn("agent:save-api-key failed", error);
+    }
   };
   const copyCodexUserCode = async () => {
     if (!codex.login) {
@@ -241,6 +250,11 @@ export function AssistantSettings({
           ) : null}
 
           <div className="assistant-conn-actions">
+            {showApiKeyInput && hasApiKeyDraft ? (
+              <button type="button" onClick={() => void saveApiKey()}>
+                {labels.saveApiKey}
+              </button>
+            ) : null}
             {hasSavedKey && !editingKey ? (
               <button type="button" onClick={() => setEditingKey(true)}>
                 {labels.changeKey}
@@ -380,13 +394,6 @@ export function AssistantSettings({
           </div>
         </div>
       </section>
-
-      <div className="assistant-settings-save">
-        <button type="button" className="assistant-apply-button" onClick={onSave}>
-          <Check size={14} />
-          {labels.saveSettings}
-        </button>
-      </div>
     </div>
   );
 }

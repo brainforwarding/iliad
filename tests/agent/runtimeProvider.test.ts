@@ -62,7 +62,7 @@ describe("agent runtime provider seam", () => {
     });
   });
 
-  it("defaults and normalizes agent models to the Codex-supported list", async () => {
+  it("defaults and normalizes agent models to the shared regular-chat provider list", async () => {
     const userDataPath = await mkdtemp(path.join(os.tmpdir(), "iliad-provider-model-settings-"));
     tempDirs.push(userDataPath);
     const store = new AgentSettingsStore(userDataPath);
@@ -78,9 +78,10 @@ describe("agent runtime provider seam", () => {
 
     await expect(store.snapshot()).resolves.toMatchObject({ model: "gpt-5.5" });
     await expect(store.update({ model: "not-a-codex-model" })).resolves.toMatchObject({ model: "gpt-5.5" });
-    await expect(store.update({ model: "gpt-5.3-codex-spark" })).resolves.toMatchObject({
-      model: "gpt-5.3-codex-spark"
+    await expect(store.update({ model: "gpt-5.4-mini" })).resolves.toMatchObject({
+      model: "gpt-5.4-mini"
     });
+    await expect(store.update({ model: "gpt-5.3-codex-spark" })).resolves.toMatchObject({ model: "gpt-5.5" });
   });
 
   it("adapts the existing OpenAI Responses path behind the provider interface", async () => {

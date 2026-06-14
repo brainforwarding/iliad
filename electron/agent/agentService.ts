@@ -50,6 +50,14 @@ import type {
 } from "./runtime/provider.js";
 import { AgentSettingsStore } from "./settingsStore.js";
 import {
+  AUTOCOMPLETE_API_MODEL,
+  AUTOCOMPLETE_CODEX_MODEL_PREFERENCES,
+  autocompleteInstructions,
+  autocompleteMaxOutputTokens,
+  autocompleteModelInput,
+  type IdeaAutocompleteTextRequest
+} from "./autocomplete.js";
+import {
   selectionTransformInstruction,
   selectionTransformMaxOutputTokens,
   tightenModelInput,
@@ -109,6 +117,7 @@ export class AgentService {
   private readonly diagnostics: DiagnosticsLogger;
   private readonly activeRuns = new Map<string, AbortController>();
   private codexAppServerClient: CodexAppServerClient | null = null;
+  private readonly unavailableAutocompleteModels = new Set<string>();
   private readonly compactionCacheStore: CompactionCacheStore;
   private readonly compactionFailures = new Map<string, number>();
   private compactionInFlight = false;
@@ -404,6 +413,111 @@ export class AgentService {
     });
 
     return result.text;
+  }
+
+  async autocompleteIdea(request: IdeaAutocompleteTextRequest): Promise<string> {
+    const providerSelection = await this.selectWritingAssistTextProviders(request.allowApiFallback);
+
+    if ("error" in providerSelection) {
+      throw new AgentRuntimeError(providerSelection.error);
+    }
+
+    const workspaceRoot = path.join(this.userDataPath, "assistant", "autocomplete-workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    let lastError: unknown = null;
+
+    for (let index = 0; index < providerSelection.providers.length; index += 1) {
+      const candidate = providerSelection.providers[index];
+      const { provider, model } = candidate;
+
+      if (!provider.generateText) {
+        throw new AgentRuntimeError({
+          code: "provider_unavailable",
+          userMessage: "The selected runtime cannot run this text request.",
+          detail: "text_generation_unavailable",
+          retryable: false
+        });
+      }
+
+      const logRequest: AgentRunRequest = {
+        runId: `autocomplete-${safeRunIdPart(request.requestId)}-${safeRunIdPart(model)}-${Date.now()}`,
+        workspaceRoot,
+        activeFile: null,
+        messages: [],
+        prompt: "Autocomplete writing",
+        mode: "fast",
+        language: request.language
+      };
+
+      try {
+        this.logProviderSelected(logRequest, model, provider.metadata);
+        const result = await provider.generateText({
+          request: {
+            instructions: autocompleteInstructions(request.language, request.suggestionKind),
+            input: autocompleteModelInput(request),
+            maxOutputTokens: autocompleteMaxOutputTokens(request.suggestionKind),
+            language: request.language,
+            cwd: workspaceRoot
+          },
+          signal: request.signal,
+          onDiagnosticEvent: (event) => this.logProviderEvent(logRequest, model, provider.metadata, event)
+        });
+
+        return result.text;
+      } catch (error) {
+        lastError = error;
+        const nextIndex = nextAutocompleteProviderIndex(error, providerSelection.providers, index);
+        const nextCandidate = nextIndex >= 0 ? providerSelection.providers[nextIndex] : undefined;
+
+        if (nextCandidate) {
+          if (shouldMarkAutocompleteModelUnavailable(error)) {
+            this.unavailableAutocompleteModels.add(model);
+          }
+          this.logProviderEvent(logRequest, model, provider.metadata, {
+            event: "provider.retry",
+            reason: normalizeAgentError(error).code,
+            from: model,
+            fromProvider: provider.metadata.id,
+            to: nextCandidate.model,
+            toProvider: nextCandidate.provider.metadata.id
+          });
+          index = nextIndex - 1;
+          continue;
+        }
+
+        throw error;
+      }
+    }
+
+    throw lastError ?? new Error("Autocomplete provider failed.");
+  }
+
+  async writingAssistStatus(request: { autocompleteApiFallbackEnabled: boolean }) {
+    const [settings, apiKey, codexStatus] = await Promise.all([
+      this.settingsStore.snapshot(),
+      this.settingsStore.getApiKey(),
+      this.codexStatus().catch(() => null)
+    ]);
+    const codexAvailable = Boolean(codexStatus?.available && codexStatus.connected);
+    const apiFallbackAvailable = Boolean(apiKey);
+
+    return {
+      corrector: {
+        available: true,
+        provider: "local" as const
+      },
+      autocomplete: {
+        available: codexAvailable || (request.autocompleteApiFallbackEnabled && apiFallbackAvailable),
+        provider: codexAvailable ? ("codex-app-server" as const) : request.autocompleteApiFallbackEnabled && apiFallbackAvailable ? ("openai-api" as const) : null,
+        apiFallbackAvailable,
+        apiFallbackEnabled: request.autocompleteApiFallbackEnabled,
+        model: codexAvailable
+          ? this.preferredAutocompleteCodexModel()
+          : request.autocompleteApiFallbackEnabled && apiFallbackAvailable
+            ? AUTOCOMPLETE_API_MODEL
+            : settings.model
+      }
+    };
   }
 
   async transcribeAudio(request: unknown): Promise<AgentTranscribeAudioResponse> {
@@ -904,6 +1018,64 @@ const controller = new AbortController();
     };
   }
 
+  private async selectWritingAssistTextProviders(allowApiFallback: boolean): Promise<AgentRuntimeProviderCandidateSelection> {
+    const [codexStatus, apiKey] = await Promise.all([
+      this.codexStatus().catch(() => null),
+      allowApiFallback ? this.settingsStore.getApiKey() : Promise.resolve("")
+    ]);
+    const providers: Array<{ provider: AgentRuntimeProvider; model: string }> = [];
+
+    if (codexStatus?.available && codexStatus.connected) {
+      const models = AUTOCOMPLETE_CODEX_MODEL_PREFERENCES.filter((model) => !this.unavailableAutocompleteModels.has(model));
+
+      providers.push(
+        ...(models.length > 0 ? models : [this.preferredAutocompleteCodexModel()]).map((model) => ({
+          provider: new CodexAppServerRuntimeProvider({
+            client: this.codexClient(),
+            model
+          }),
+          model
+        }))
+      );
+    }
+
+    if (allowApiFallback && apiKey) {
+      providers.push({
+        provider: new OpenAiResponsesRuntimeProvider({
+          apiKey,
+          model: AUTOCOMPLETE_API_MODEL
+        }),
+        model: AUTOCOMPLETE_API_MODEL
+      });
+    }
+
+    if (providers.length > 0) {
+      return { providers };
+    }
+
+    if (!allowApiFallback) {
+      return {
+        error: {
+          code: "missing_api_key",
+          userMessage: "Connect Codex or explicitly enable OpenAI API fallback for autocomplete.",
+          detail: "autocomplete_api_fallback_disabled",
+          retryable: false
+        }
+      };
+    }
+
+    return {
+      error: missingApiKeyError().agentError
+    };
+  }
+
+  private preferredAutocompleteCodexModel() {
+    return (
+      AUTOCOMPLETE_CODEX_MODEL_PREFERENCES.find((model) => !this.unavailableAutocompleteModels.has(model)) ??
+      AUTOCOMPLETE_CODEX_MODEL_PREFERENCES[AUTOCOMPLETE_CODEX_MODEL_PREFERENCES.length - 1]
+    );
+  }
+
   private async saveDraftProposals({
     request,
     responseId,
@@ -1158,6 +1330,69 @@ type AgentRuntimeProviderSelection =
   | {
       error: AgentError;
     };
+
+type AgentRuntimeProviderCandidateSelection =
+  | {
+      providers: Array<{
+        provider: AgentRuntimeProvider;
+        model: string;
+      }>;
+    }
+  | {
+      error: AgentError;
+    };
+
+function shouldMarkAutocompleteModelUnavailable(error: unknown) {
+  const agentError = normalizeAgentError(error);
+
+  if (agentError.code === "model_not_found") {
+    return true;
+  }
+
+  if (agentError.code !== "provider_unavailable") {
+    return false;
+  }
+
+  return /access|model|not_found|unsupported/i.test(agentError.detail ?? "");
+}
+
+function shouldTryNextAutocompleteProvider(
+  error: unknown,
+  currentCandidate: { provider: AgentRuntimeProvider; model: string },
+  nextCandidate: { provider: AgentRuntimeProvider; model: string }
+) {
+  const agentError = normalizeAgentError(error);
+
+  if (agentError.code === "request_canceled") {
+    return false;
+  }
+
+  if (currentCandidate.provider.metadata.id === nextCandidate.provider.metadata.id) {
+    return currentCandidate.model !== nextCandidate.model && shouldMarkAutocompleteModelUnavailable(error);
+  }
+
+  return ["provider_unavailable", "request_timeout", "network_unreachable", "dns_failure", "unknown"].includes(agentError.code);
+}
+
+export function nextAutocompleteProviderIndex(
+  error: unknown,
+  candidates: Array<{ provider: AgentRuntimeProvider; model: string }>,
+  currentIndex: number
+) {
+  const currentCandidate = candidates[currentIndex];
+
+  if (!currentCandidate) {
+    return -1;
+  }
+
+  for (let index = currentIndex + 1; index < candidates.length; index += 1) {
+    if (shouldTryNextAutocompleteProvider(error, currentCandidate, candidates[index])) {
+      return index;
+    }
+  }
+
+  return -1;
+}
 
 function failedRunResponse(
   runId: string,

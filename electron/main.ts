@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, protocol, session, type MenuItemConstructorOptions } from "electron";
 import path from "node:path";
 import { registerAgentIpc } from "./ipc/agent.js";
+import { registerAutocompleteIpc } from "./ipc/autocomplete.js";
 import { registerAssetIpc, registerAssetProtocol } from "./ipc/assets.js";
 import { registerFileIpc } from "./ipc/files.js";
 import { registerRemoteIpc } from "./ipc/remote.js";
@@ -8,6 +9,7 @@ import { registerSelectionCommentsIpc } from "./ipc/selectionComments.js";
 import { registerShellIpc } from "./ipc/shell.js";
 import { registerTightenIpc } from "./ipc/tighten.js";
 import { registerWorkspaceIpc } from "./ipc/workspace.js";
+import { registerWritingCorrectorMemoryIpc } from "./ipc/writingCorrectorMemory.js";
 import { parseLaunchWorkspacePath } from "./launch/argv.js";
 import { canonicalizeWorkspaceDirectory, type WorkspaceInfo } from "./launch/workspace.js";
 import { AgentService } from "./agent/agentService.js";
@@ -235,6 +237,29 @@ app.whenReady().then(async () => {
     }
   });
   registerSelectionCommentsIpc({
+    resolveWorkspaceRootForSession: (event, workspaceSessionId) => {
+      const workspace = windowManager.getWindowWorkspace(event.sender.id);
+
+      if (!workspace || workspace.sessionId !== workspaceSessionId) {
+        return null;
+      }
+
+      return workspace.path;
+    }
+  });
+  registerWritingCorrectorMemoryIpc({
+    resolveWorkspaceRootForSession: (event, workspaceSessionId) => {
+      const workspace = windowManager.getWindowWorkspace(event.sender.id);
+
+      if (!workspace || workspace.sessionId !== workspaceSessionId) {
+        return null;
+      }
+
+      return workspace.path;
+    }
+  });
+  registerAutocompleteIpc({
+    service: agentService,
     resolveWorkspaceRootForSession: (event, workspaceSessionId) => {
       const workspace = windowManager.getWindowWorkspace(event.sender.id);
 

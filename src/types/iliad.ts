@@ -36,10 +36,7 @@ export type AgentRunProfile = "desktop" | "remote_read_only";
 export type AgentModelId =
   | "gpt-5.5"
   | "gpt-5.4"
-  | "gpt-5.4-mini"
-  | "gpt-5.3-codex"
-  | "gpt-5.3-codex-spark"
-  | "gpt-5.2";
+  | "gpt-5.4-mini";
 
 export interface AgentRuntimeCapabilities {
   text: boolean;
@@ -348,6 +345,53 @@ export type TightenResult =
   | { ok: true; rewrite: string; unchanged: boolean }
   | { ok: false; reason: TightenFailureReason };
 
+export interface IdeaAutocompleteRequest {
+  requestId: string;
+  workspaceSessionId: string;
+  documentRelativePath: string;
+  language: "en" | "es";
+  cursor: number;
+  prefix: string;
+  suffix: string;
+  headingPath: string[];
+  documentTitle: string;
+  nearbyHeadings: string[];
+  trigger?: "automatic" | "manual";
+  suggestionKind?: "inline" | "paragraph";
+  autocompleteApiFallbackEnabled: boolean;
+}
+
+export type IdeaAutocompleteFailureReason =
+  | "disabled"
+  | "no_key"
+  | "invalid_api_key"
+  | "rate_limited"
+  | "too_long"
+  | "empty"
+  | "timeout"
+  | "provider"
+  | "no_suggestion"
+  | "aborted"
+  | "untrusted";
+
+export type IdeaAutocompleteResult =
+  | { ok: true; insert: string }
+  | { ok: false; reason: IdeaAutocompleteFailureReason };
+
+export interface WritingAssistStatus {
+  corrector: {
+    available: boolean;
+    provider: "local" | null;
+  };
+  autocomplete: {
+    available: boolean;
+    provider: "codex-app-server" | "openai-api" | null;
+    apiFallbackAvailable: boolean;
+    apiFallbackEnabled: boolean;
+    model: AgentModelId | string | null;
+  };
+}
+
 export type SelectionCommentStatus = "pending" | "sent" | "discarded";
 
 /**
@@ -378,6 +422,26 @@ export interface SelectionCommentsApi {
     documentRelativePath: string,
     comments: SelectionComment[]
   ) => Promise<SelectionComment[]>;
+}
+
+export interface WritingCorrectorMemorySnapshot {
+  ignoredIssueFingerprints: string[];
+  customWords: string[];
+}
+
+export interface WritingCorrectorMemoryApi {
+  get: (request: {
+    workspaceSessionId: string;
+    documentRelativePath: string;
+    language: "en" | "es";
+  }) => Promise<WritingCorrectorMemorySnapshot>;
+  ignoreIssue: (request: {
+    workspaceSessionId: string;
+    documentRelativePath: string;
+    language: "en" | "es";
+    fingerprint: string;
+  }) => Promise<WritingCorrectorMemorySnapshot>;
+  addDictionaryWord: (request: { language: "en" | "es"; word: string }) => Promise<{ customWords: string[] }>;
 }
 
 export type AgentChatThreadTitleSource = "fallback" | "ai";
@@ -761,8 +825,12 @@ export interface IliadApi {
   listMarkdownContextDocuments?: (workspaceSessionId: string) => Promise<AgentMarkdownContextDocumentListResponse>;
   normalizeContextDrop?: (workspaceSessionId: string, absolutePath: string) => Promise<NormalizeContextDropResponse>;
   selectionComments?: SelectionCommentsApi;
+  writingCorrectorMemory?: WritingCorrectorMemoryApi;
   tightenSelection: (request: TightenSelectionRequest) => Promise<TightenResult>;
   cancelTighten: (requestId: string) => void;
+  autocompleteIdea: (request: IdeaAutocompleteRequest) => Promise<IdeaAutocompleteResult>;
+  cancelAutocompleteIdea: (requestId: string) => void;
+  getWritingAssistStatus: (request: { autocompleteApiFallbackEnabled: boolean }) => Promise<WritingAssistStatus>;
   assetUrl: (absolutePath: string) => string;
   agent: AgentApi;
   remote: TelegramRemoteApi;

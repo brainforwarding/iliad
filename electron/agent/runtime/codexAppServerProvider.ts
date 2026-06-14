@@ -110,6 +110,7 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
       completionResolve = resolve;
       completionReject = reject;
     });
+    completion.catch(() => undefined);
     const completionTimeout = setTimeout(() => {
       emitPhase({
         phase: "turn_wait_timeout",
@@ -1353,6 +1354,12 @@ function codexRuntimeError(userMessage: string, retryable: boolean, detail?: str
 }
 
 function codexCouldNotCompleteMessage(language: AgentProviderRunRequest["language"], failure: CodexFailureInfo) {
+  if (isInvalidRequestFailure(failure.code)) {
+    return language === "es"
+      ? "Codex rechazó parámetros no compatibles para esta solicitud. Intenta de nuevo."
+      : "Codex rejected unsupported request parameters. Try again.";
+  }
+
   if (isUsageLimitFailure(failure.code)) {
     return language === "es"
       ? "Codex informó un límite de uso o facturación. Revisa tu cuenta de OpenAI e intenta de nuevo."
@@ -1445,10 +1452,14 @@ function sanitizeFailureCode(value: string) {
 }
 
 function safeFailureMessageCategoryFromRecord(record: Record<string, unknown> | null): string {
-  const message = safeStringFromRecord(record, ["userMessage", "message", "errorMessage", "detail", "description"]);
+  const message = rawFailureMessageFromRecord(record, ["userMessage", "message", "errorMessage", "detail", "description"]);
 
   if (!message) {
     return "";
+  }
+
+  if (isInvalidRequestFailure(message)) {
+    return "invalid_request";
   }
 
   if (isUsageLimitFailure(message)) {
@@ -1466,7 +1477,7 @@ function safeFailureMessageCategoryFromRecord(record: Record<string, unknown> | 
   return "";
 }
 
-function safeStringFromRecord(record: Record<string, unknown> | null, keys: string[]): string {
+function rawFailureMessageFromRecord(record: Record<string, unknown> | null, keys: string[]): string {
   if (!record) {
     return "";
   }
@@ -1474,12 +1485,8 @@ function safeStringFromRecord(record: Record<string, unknown> | null, keys: stri
   for (const key of keys) {
     const value = record[key];
 
-    if (typeof value === "string") {
-      const clean = sanitizeSafeUserMessage(value);
-
-      if (clean) {
-        return clean;
-      }
+    if (typeof value === "string" && value.trim() && value.length <= 5_000) {
+      return value;
     }
   }
 
@@ -1488,7 +1495,7 @@ function safeStringFromRecord(record: Record<string, unknown> | null, keys: stri
       continue;
     }
 
-    const nested = safeStringFromRecord(value as Record<string, unknown>, keys);
+    const nested = rawFailureMessageFromRecord(value as Record<string, unknown>, keys);
 
     if (nested) {
       return nested;
@@ -1498,20 +1505,8 @@ function safeStringFromRecord(record: Record<string, unknown> | null, keys: stri
   return "";
 }
 
-function sanitizeSafeUserMessage(value: string) {
-  const clean = value.replace(/\s+/g, " ").trim();
-
-  if (
-    clean.length < 4 ||
-    clean.length > 220 ||
-    SECRET_VALUE_PATTERN.test(clean) ||
-    ABSOLUTE_PATH_PATTERN.test(clean) ||
-    /```|<[^>]+>|^\s*[{[]|active markdown|base hash|workspace root|developer instructions/i.test(clean)
-  ) {
-    return "";
-  }
-
-  return clean;
+function isInvalidRequestFailure(code: string) {
+  return /invalid_request|bad_request|reasoning\.effort|unsupported request|cannot be used with reasoning/i.test(code);
 }
 
 function isUsageLimitFailure(code: string) {

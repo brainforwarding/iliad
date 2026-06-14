@@ -1,7 +1,25 @@
-import { Text } from "@codemirror/state";
+import { EditorState, Text } from "@codemirror/state";
+import { EditorView, type DecorationSet } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
 import { collectInlineMarkdownRanges } from "../../src/editor/visualMarkdown/inline";
+import { visualMarkdown } from "../../src/editor/visualMarkdown";
 import { collectDisplayMathBlocks } from "../../src/editor/visualMarkdown/math";
+
+function collectDecorationSpecs(state: EditorState) {
+  const specs: unknown[] = [];
+
+  for (const decorationSet of state.facet(EditorView.decorations)) {
+    if (typeof decorationSet === "function") {
+      continue;
+    }
+
+    (decorationSet as DecorationSet).between(0, state.doc.length, (_from, _to, value) => {
+      specs.push(value.spec);
+    });
+  }
+
+  return specs;
+}
 
 describe("visual Markdown inline ranges", () => {
   it("keeps a bold-wrapped link renderable as both strong text and a link", () => {
@@ -71,5 +89,27 @@ describe("visual Markdown inline ranges", () => {
       toLine: 4,
       tex: "x^2 + y^2"
     });
+  });
+
+  it("keeps Markdown source visible on the active line when initialized focused", () => {
+    const state = EditorState.create({
+      doc: "A **bold** statement",
+      selection: { anchor: 4 },
+      extensions: [
+        visualMarkdown({
+          documentPath: "/ws/doc.md",
+          initialEditorFocused: true,
+          labels: {
+            markdownImage: "image",
+            youtubeVideo: "video",
+            markTaskIncomplete: "incomplete",
+            markTaskComplete: "complete"
+          },
+          onOpenLink: () => undefined
+        })
+      ]
+    });
+
+    expect(collectDecorationSpecs(state).some((spec) => Boolean((spec as { widget?: unknown }).widget))).toBe(false);
   });
 });

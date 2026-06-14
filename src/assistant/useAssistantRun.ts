@@ -44,6 +44,7 @@ import type {
   AgentMessage,
   AgentMode,
   AgentRunEvent,
+  AgentSettingsUpdate,
   AgentSettingsSnapshot,
   CodexAccountStatusResponse,
   CodexDeviceLoginResponse,
@@ -301,6 +302,8 @@ export function useAssistantRun({
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const contextStatusTimer = useRef<number | null>(null);
+  const settingsSaveQueue = useRef<Promise<void>>(Promise.resolve());
+  const settingsSaveSequence = useRef(0);
   const workspaceApiSessionId = useMemo(
     () => workspaceContextApiSessionId(workspace),
     [workspace.path, workspace.sessionId]
@@ -828,17 +831,66 @@ export function useAssistantRun({
     setPrompt
   });
 
-  const saveSettings = useCallback(async () => {
-    const snapshot = await window.iliad.agent.updateSettings({
-      openAiApiKey: apiKeyDraft,
-      model: modelDraft,
-      mode
-    });
-    setSettings(snapshot);
-    setModelDraft(snapshot.model);
-    setApiKeyDraft("");
-    setSettingsOpen(false);
-  }, [apiKeyDraft, mode, modelDraft]);
+  const persistSettings = useCallback(async (update: AgentSettingsUpdate, options: { clearApiKeyDraft?: boolean } = {}) => {
+    const sequence = ++settingsSaveSequence.current;
+    const next = settingsSaveQueue.current
+      .catch(() => undefined)
+      .then(() => window.iliad.agent.updateSettings(update));
+
+    settingsSaveQueue.current = next.then(() => undefined, () => undefined);
+
+    try {
+      const snapshot = await next;
+
+      if (sequence === settingsSaveSequence.current) {
+        setSettings(snapshot);
+        setModelDraft(snapshot.model);
+        setMode(snapshot.mode);
+
+        if (options.clearApiKeyDraft) {
+          setApiKeyDraft("");
+        }
+      }
+
+      return snapshot;
+    } catch (error) {
+      console.warn("agent:update-settings failed", error);
+      throw error;
+    }
+  }, []);
+
+  const saveApiKey = useCallback(async () => {
+    const openAiApiKey = apiKeyDraft.trim();
+
+    if (!openAiApiKey) {
+      return;
+    }
+
+    await persistSettings(
+      {
+        openAiApiKey,
+        model: modelDraft,
+        mode
+      },
+      { clearApiKeyDraft: true }
+    );
+  }, [apiKeyDraft, mode, modelDraft, persistSettings]);
+
+  const changeAgentModel = useCallback(
+    (value: string) => {
+      setModelDraft(value);
+      void persistSettings({ model: value });
+    },
+    [persistSettings]
+  );
+
+  const changeAgentMode = useCallback(
+    (value: AgentMode) => {
+      setMode(value);
+      void persistSettings({ mode: value });
+    },
+    [persistSettings]
+  );
 
   const connectCodex = useCallback(async () => {
     const agent = window.iliad.agent as AgentApiWithCodexAccount;
@@ -1683,12 +1735,12 @@ export function useAssistantRun({
     refreshChatThreads,
     dictation,
     runningRunId,
-    saveSettings,
+    saveApiKey,
     removeContextAttachment,
     removeLastContextAttachment,
     setApiKeyDraft,
-    setMode,
-    setModelDraft,
+    setMode: changeAgentMode,
+    setModelDraft: changeAgentModel,
     setPrompt,
     setSettingsOpen,
     settings,

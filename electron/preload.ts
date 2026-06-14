@@ -52,10 +52,45 @@ const api = {
   cancelTighten: (requestId: string) => {
     void ipcRenderer.invoke("tighten:cancel", requestId);
   },
+  autocompleteIdea: (request: {
+    requestId: string;
+    workspaceSessionId: string;
+    documentRelativePath: string;
+    language: "en" | "es";
+    cursor: number;
+    prefix: string;
+    suffix: string;
+    headingPath: string[];
+    documentTitle: string;
+    nearbyHeadings: string[];
+    trigger?: "automatic" | "manual";
+    suggestionKind?: "inline" | "paragraph";
+    autocompleteApiFallbackEnabled: boolean;
+  }) => ipcRenderer.invoke("autocomplete:run", request),
+  cancelAutocompleteIdea: (requestId: string) => {
+    void ipcRenderer.invoke("autocomplete:cancel", requestId);
+  },
+  getWritingAssistStatus: (request: { autocompleteApiFallbackEnabled: boolean }) =>
+    ipcRenderer.invoke("writing-assist:status", request),
   selectionComments: {
     list: (workspaceSessionId: string) => ipcRenderer.invoke("selection-comments:list", workspaceSessionId),
     save: (workspaceSessionId: string, documentRelativePath: string, comments: unknown) =>
       ipcRenderer.invoke("selection-comments:save", workspaceSessionId, documentRelativePath, comments)
+  },
+  writingCorrectorMemory: {
+    get: (request: {
+      workspaceSessionId: string;
+      documentRelativePath: string;
+      language: "en" | "es";
+    }) => ipcRenderer.invoke("writing-corrector-memory:get", request),
+    ignoreIssue: (request: {
+      workspaceSessionId: string;
+      documentRelativePath: string;
+      language: "en" | "es";
+      fingerprint: string;
+    }) => ipcRenderer.invoke("writing-corrector-memory:ignore", request),
+    addDictionaryWord: (request: { language: "en" | "es"; word: string }) =>
+      ipcRenderer.invoke("writing-corrector-memory:add-dictionary-word", request)
   },
   agent: {
     getSettings: () => ipcRenderer.invoke("agent:get-settings"),

@@ -116,7 +116,7 @@ describe("Codex account settings copy", () => {
         onApiKeyDraftChange: () => undefined,
         onModeChange: () => undefined,
         onModelDraftChange: () => undefined,
-        onSave: () => undefined
+        onSaveApiKey: () => undefined
       })
     );
 
@@ -167,7 +167,7 @@ describe("Codex account settings copy", () => {
         onApiKeyDraftChange: () => undefined,
         onModeChange: () => undefined,
         onModelDraftChange: () => undefined,
-        onSave: () => undefined
+        onSaveApiKey: () => undefined
       })
     );
 
@@ -249,17 +249,47 @@ describe("Codex account settings copy", () => {
         onApiKeyDraftChange: () => undefined,
         onModeChange: () => undefined,
         onModelDraftChange: () => undefined,
-        onSave: () => undefined
+        onSaveApiKey: () => undefined
       })
     );
 
     expect(html).toContain(">Model</h3>");
-    expect(html).toContain("Codex-compatible models. gpt-5.5 is recommended.");
+    expect(html).toContain("Works with Codex and API fallback. gpt-5.5 is recommended.");
     for (const option of agentModelOptions) {
       expect(html).toContain(`value="${option.id}"`);
     }
     expect(html).not.toContain("gpt-5-mini");
+    expect(html).not.toContain("gpt-5.3-codex");
+    expect(html).not.toContain("gpt-5.3-codex-spark");
+    expect(html).not.toContain("gpt-5.2");
     expect(html).not.toContain("OpenAI model");
+  });
+
+  it("saves only typed API keys explicitly and does not render a persistent settings save button", () => {
+    const clean = renderSettings(remoteConnection(), {
+      settings: {
+        hasOpenAiApiKey: true,
+        model: "gpt-5.5",
+        mode: "balanced",
+        runtimeProvider: openAiRuntimeProvider()
+      }
+    });
+
+    expect(clean).not.toContain("Save settings");
+    expect(clean).not.toContain("Save key");
+
+    const withDraft = renderSettings(remoteConnection(), {
+      apiKeyDraft: "sk-test",
+      settings: {
+        hasOpenAiApiKey: false,
+        model: "gpt-5.5",
+        mode: "balanced",
+        runtimeProvider: openAiRuntimeProvider()
+      }
+    });
+
+    expect(withDraft).toContain(">Save key</button>");
+    expect(withDraft).not.toContain("Save settings");
   });
 
   it("keeps connection, remote access, and model settings in the reviewed order", () => {
@@ -570,6 +600,7 @@ describe("Codex account settings copy", () => {
 function renderSettings(
   remote: TelegramRemoteConnectionState,
   overrides: {
+    apiKeyDraft?: string;
     codexStatus?: CodexAccountStatusResponse;
     settings?: AgentSettingsSnapshot | null;
   } = {}
@@ -594,7 +625,7 @@ function renderSettings(
 
   return renderToStaticMarkup(
     createElement(AssistantSettings, {
-      apiKeyDraft: "",
+      apiKeyDraft: overrides.apiKeyDraft ?? "",
       codex,
       labels: appStrings.en.assistant,
       mode: "balanced",
@@ -604,7 +635,7 @@ function renderSettings(
       onApiKeyDraftChange: () => undefined,
       onModeChange: () => undefined,
       onModelDraftChange: () => undefined,
-      onSave: () => undefined
+      onSaveApiKey: () => undefined
     })
   );
 }
