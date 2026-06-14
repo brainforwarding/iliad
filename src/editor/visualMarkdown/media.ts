@@ -1,4 +1,5 @@
 const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
+const YOUTUBE_EMBED_CLIENT_ORIGIN = "https://iliad.md";
 
 const YOUTUBE_HOSTS = new Set([
   "youtube.com",
@@ -20,9 +21,13 @@ function embedFor(videoId: string): YouTubeVideoEmbed | null {
     return null;
   }
 
+  const embedUrl = new URL(`https://www.youtube-nocookie.com/embed/${videoId}`);
+  embedUrl.searchParams.set("origin", YOUTUBE_EMBED_CLIENT_ORIGIN);
+  embedUrl.searchParams.set("widget_referrer", YOUTUBE_EMBED_CLIENT_ORIGIN);
+
   return {
     videoId,
-    embedSrc: `https://www.youtube-nocookie.com/embed/${videoId}`
+    embedSrc: embedUrl.toString()
   };
 }
 

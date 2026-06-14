@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, protocol, type MenuItemConstructorOptions } from "electron";
+import { app, BrowserWindow, Menu, protocol, session, type MenuItemConstructorOptions } from "electron";
 import path from "node:path";
 import { registerAgentIpc } from "./ipc/agent.js";
 import { registerAssetIpc, registerAssetProtocol } from "./ipc/assets.js";
@@ -14,6 +14,7 @@ import { AgentService } from "./agent/agentService.js";
 import { AgentChatHistoryStore } from "./agent/chatHistoryStore.js";
 import { RemoteRelayClient } from "./remote/remoteRelayClient.js";
 import { TelegramRemoteService } from "./remote/telegramRemoteService.js";
+import { installYouTubeEmbedHeaders } from "./window/youtubeEmbedHeaders.js";
 import { IliadWindowManager } from "./window/windowManager.js";
 
 interface LaunchRequest {
@@ -185,6 +186,7 @@ app.whenReady().then(async () => {
   }
 
   installApplicationMenu();
+  installYouTubeEmbedHeaders(session.defaultSession.webRequest);
   registerAssetProtocol();
   registerWorkspaceIpc({
     getLaunchWorkspace: (webContentsId) => windowManager.getLaunchWorkspace(webContentsId),
