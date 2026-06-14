@@ -33,7 +33,6 @@ export function AssistantPanelView({ title, backLabel, onBack, actions, children
         <button
           type="button"
           className="icon-button"
-          data-tooltip={backLabel}
           aria-label={backLabel}
           onClick={onBack}
         >

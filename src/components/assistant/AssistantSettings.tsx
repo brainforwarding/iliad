@@ -74,6 +74,7 @@ export function AssistantSettings({
   const connecting = Boolean(codex.login || status?.pendingLogin);
   const unavailable = Boolean(status && !status.available);
   const notConnected = !connected && !connecting && !unavailable;
+  const canStartCodexLogin = notConnected || unavailable;
   const statusLabel = connected
     ? labels.codex.connected
     : connecting
@@ -144,7 +145,7 @@ export function AssistantSettings({
           {codex.error ? <span className="assistant-codex-error">{labels.codex.errorFallback}</span> : null}
 
           <div className="assistant-conn-actions">
-            {notConnected ? (
+            {canStartCodexLogin ? (
               <button type="button" disabled={codex.busy} onClick={() => void codex.onConnect()}>
                 {labels.codex.connect}
               </button>

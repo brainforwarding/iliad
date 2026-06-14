@@ -216,15 +216,15 @@
   text-align: center;
   transform: translate(-50%, -2px);
   transition:
-    opacity 120ms ease 520ms,
-    transform 120ms ease 520ms;
+    opacity 120ms ease,
+    transform 120ms ease;
   white-space: nowrap;
 }
 
-.icon-button[data-tooltip]:hover::after,
-.icon-button[data-tooltip]:focus-visible::after {
+.icon-button[data-tooltip]:hover::after {
   opacity: 1;
   transform: translate(-50%, 0);
+  transition-delay: 2.5s;
 }
 
 .document-close-backdrop {
@@ -300,11 +300,8 @@
 }
 
 .topbar-actions .icon-button[data-tooltip]:hover::after,
-.topbar-actions .icon-button[data-tooltip]:focus-visible::after,
 .sidebar-actions .icon-button[data-tooltip]:hover::after,
-.sidebar-actions .icon-button[data-tooltip]:focus-visible::after,
-.assistant-header-actions .icon-button[data-tooltip]:hover::after,
-.assistant-header-actions .icon-button[data-tooltip]:focus-visible::after {
+.assistant-header-actions .icon-button[data-tooltip]:hover::after {
   transform: translateY(0);
 }
 

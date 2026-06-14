@@ -41,7 +41,10 @@ describe("Codex CLI probe", () => {
       expect.objectContaining({
         shell: false,
         windowsHide: true,
-        timeout: 500
+        timeout: 500,
+        env: expect.objectContaining({
+          PATH: expect.stringContaining("/opt/homebrew/bin")
+        })
       }),
       expect.any(Function)
     );

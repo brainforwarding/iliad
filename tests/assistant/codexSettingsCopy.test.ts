@@ -193,6 +193,8 @@ describe("Codex account settings copy", () => {
     expect(disconnected).toContain("Unavailable");
     expect(disconnected).toContain("Codex CLI not found.");
     expect(disconnected).toContain("Active");
+    expect(disconnected).toContain(">Connect Codex</button>");
+    expect(disconnected).toContain(">Refresh</button>");
     expect(disconnected).toContain("Change key");
     expect(disconnected).not.toContain('placeholder="sk-..."');
 

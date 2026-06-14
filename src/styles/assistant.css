@@ -584,15 +584,15 @@
   pointer-events: none;
   transform: translate(-50%, 2px);
   transition:
-    opacity 120ms ease 420ms,
-    transform 120ms ease 420ms;
+    opacity 120ms ease,
+    transform 120ms ease;
   white-space: nowrap;
 }
 
-.assistant-remote-pairing-action[data-tooltip]:hover::after,
-.assistant-remote-pairing-action[data-tooltip]:focus-visible::after {
+.assistant-remote-pairing-action[data-tooltip]:hover::after {
   opacity: 1;
   transform: translate(-50%, 0);
+  transition-delay: 2.5s;
 }
 
 .assistant-codex-meta,
@@ -1510,15 +1510,15 @@
   pointer-events: none;
   transform: translateY(2px);
   transition:
-    opacity 120ms ease 420ms,
-    transform 120ms ease 420ms;
+    opacity 120ms ease,
+    transform 120ms ease;
   white-space: normal;
 }
 
-.assistant-context-chip[data-tooltip]:hover::after,
-.assistant-context-chip[data-tooltip]:focus-visible::after {
+.assistant-context-chip[data-tooltip]:hover::after {
   opacity: 1;
   transform: translateY(0);
+  transition-delay: 2.5s;
 }
 
 .assistant-composer .assistant-context-chip-remove {
@@ -1746,13 +1746,13 @@
   pointer-events: none;
   transform: translateY(2px);
   transition:
-    opacity 120ms ease 420ms,
-    transform 120ms ease 420ms;
+    opacity 120ms ease,
+    transform 120ms ease;
   white-space: nowrap;
 }
 
-.assistant-composer button[data-tooltip]:hover::after,
-.assistant-composer button[data-tooltip]:focus-visible::after {
+.assistant-composer button[data-tooltip]:hover::after {
   opacity: 1;
   transform: translateY(0);
+  transition-delay: 2.5s;
 }

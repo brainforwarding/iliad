@@ -72,6 +72,9 @@ describe("Codex app-server client", () => {
       method: "account/read",
       params: { refreshToken: false }
     });
+    expect(harness.spawnRequest?.executablePath).toBe("codex");
+    expect(harness.spawnRequest?.env).not.toHaveProperty("OPENAI_API_KEY");
+    expect(harness.spawnRequest?.env.PATH?.split(path.delimiter)).toContain("/opt/homebrew/bin");
   });
 
   it("keeps the device login id in main while exposing only URL and code", async () => {

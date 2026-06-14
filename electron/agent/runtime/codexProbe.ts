@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
+import { codexCliSearchPath } from "./codexCliEnv.js";
 
 export interface CodexCliProbeRequest {
   executablePath?: string;
@@ -194,7 +195,7 @@ function failedProbeResponse(
 
 function safeProbeEnv() {
   return {
-    PATH: process.env.PATH ?? "",
+    PATH: codexCliSearchPath(),
     SystemRoot: process.env.SystemRoot ?? "",
     windir: process.env.windir ?? ""
   };

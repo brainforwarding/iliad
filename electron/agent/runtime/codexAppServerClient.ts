@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { codexCliSearchPath } from "./codexCliEnv.js";
 import type {
   CodexAccount,
   CodexAccountConnectionError,
@@ -557,7 +558,7 @@ class ServerRequestResponder implements CodexAppServerRequestResponder {
 
 export function safeCodexAppServerEnv(codexHome: string): NodeJS.ProcessEnv {
   return {
-    PATH: process.env.PATH ?? "",
+    PATH: codexCliSearchPath(),
     SystemRoot: process.env.SystemRoot ?? "",
     windir: process.env.windir ?? "",
     CODEX_HOME: codexHome
