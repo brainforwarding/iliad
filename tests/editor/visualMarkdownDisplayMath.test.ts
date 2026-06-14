@@ -11,7 +11,7 @@ const labels = {
   markTaskComplete: "done"
 };
 
-function createState(doc: string, anchor = 0, blockedLineRanges?: Array<{ from: number; to: number }>) {
+function createState(doc: string, anchor = 0, blockedLineRanges?: Array<{ from: number; to: number }>, focused = true) {
   return EditorState.create({
     doc,
     selection: { anchor },
@@ -19,6 +19,7 @@ function createState(doc: string, anchor = 0, blockedLineRanges?: Array<{ from: 
       visualMarkdown({
         documentPath: "doc.md",
         blockedLineRanges,
+        initialEditorFocused: focused,
         labels,
         onOpenLink: () => {}
       })
@@ -49,6 +50,24 @@ function displayMathDecorations(state: EditorState) {
 }
 
 describe("visual markdown display math", () => {
+  it("keeps opening heading syntax hidden until the editor is focused", () => {
+    const decorations = collectDecorations(createState("# TeachView Legal", 0, undefined, false));
+
+    expect(decorations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: 0,
+          to: 2,
+          value: expect.objectContaining({
+            spec: expect.objectContaining({
+              widget: expect.anything()
+            })
+          })
+        })
+      ])
+    );
+  });
+
   it("renders an inactive fenced block as a block widget (the legal, state-derived source)", () => {
     const state = createState("Intro\n$$\nx^2 + y^2\n$$\nDone", 0);
     const blocks = displayMathDecorations(state);

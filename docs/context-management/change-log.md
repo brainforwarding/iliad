@@ -2,6 +2,21 @@
 
 Status: living change log. Started 2026-05-26.
 
+## 2026-06-13
+
+- Specified, reviewed (a UI/UX + architecture + Codex expert-dev panel), and
+  implemented Tighten — an on-demand, selection-scoped concise rewrite
+  (ADR-0020 → accepted):
+  [2026-06-13 tighten selection](../../specs/2026-06-13-tighten-selection.md).
+  A dedicated single-shot OpenAI call (its own non-streaming request body, not
+  the agent run pipeline) returns a tighter rewrite shown in an inline
+  accept/reject card next to the selection. Accept is stale-safe — it verifies
+  the active file, the exact original slice at `{from,to}`, and the current
+  requestId before a single synchronous transaction — reusing the anchored-edit
+  discipline (ADR-0019). Cancellation is requestId-keyed with a timeout; the key
+  never leaves main, which is the authority for the length cap and language
+  validation.
+
 ## 2026-06-11
 
 - Specified and implemented conversation compaction summaries (ADR-0015 →

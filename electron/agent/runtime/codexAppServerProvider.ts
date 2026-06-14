@@ -39,7 +39,9 @@ import type {
   AgentRuntimeDiagnosticEvent,
   AgentRuntimeDiagnosticEventListener,
   AgentRuntimeProvider,
-  AgentRuntimeProviderMetadata
+  AgentRuntimeProviderMetadata,
+  AgentRuntimeTextRequest,
+  AgentRuntimeTextResponse
 } from "./provider.js";
 
 export const CODEX_APP_SERVER_PROVIDER_METADATA: AgentRuntimeProviderMetadata = {
@@ -85,6 +87,344 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
       model: string;
     }
   ) {}
+
+  async generateText({
+    request,
+    signal,
+    onDiagnosticEvent
+  }: {
+    request: AgentRuntimeTextRequest;
+    signal: AbortSignal;
+    onDiagnosticEvent?: AgentRuntimeDiagnosticEventListener;
+  }): Promise<AgentRuntimeTextResponse> {
+    const startedAt = Date.now();
+    const textChunks: string[] = [];
+    let threadId = "";
+    let turnId = "";
+    let activeTurnRegistered = false;
+    let completedTurn: Record<string, unknown> | null = null;
+    let unsupportedActivity = "";
+    let completionResolve!: () => void;
+    let completionReject!: (error: Error) => void;
+    const completion = new Promise<void>((resolve, reject) => {
+      completionResolve = resolve;
+      completionReject = reject;
+    });
+    const completionTimeout = setTimeout(() => {
+      emitPhase({
+        phase: "turn_wait_timeout",
+        method: "turn/completed",
+        status: "timeout",
+        responseId: turnId || threadId,
+        failureCode: "request_timeout"
+      });
+      completionReject(
+        new AgentRuntimeError({
+          code: "request_timeout",
+          userMessage: "Codex took too long. Try again.",
+          retryable: true
+        })
+      );
+    }, 300_000);
+
+    onDiagnosticEvent?.({
+      event: "provider.request.started",
+      streaming: true,
+      reasoning: true,
+      textVerbosity: false
+    });
+
+    const removeRequestHandler = this.options.client.addServerRequestHandler((serverRequest, responder) => {
+      if (!serverRequestBelongsToTextRun(serverRequest)) {
+        return;
+      }
+
+      unsupportedActivity = serverRequest.method;
+      emitPhase({
+        phase: "request_approval",
+        method: serverRequest.method,
+        status: "declined",
+        responseId: turnId || threadId,
+        itemType: "unknown"
+      });
+
+      if (
+        serverRequest.method === "item/fileChange/requestApproval" ||
+        serverRequest.method === "item/commandExecution/requestApproval" ||
+        serverRequest.method === "item/permissions/requestApproval"
+      ) {
+        responder.respondResult({ decision: "decline" });
+        return;
+      }
+
+      responder.respondError({
+        code: -32601,
+        message: "Unsupported Codex app-server request for a single-shot text run."
+      });
+    });
+    const removeNotificationHandler = this.options.client.addNotificationHandler((notification) => {
+      handleNotification(notification);
+    });
+    const abort = () => {
+      completionReject(
+        new AgentRuntimeError({
+          code: "request_canceled",
+          userMessage: "Canceled.",
+          retryable: false
+        })
+      );
+    };
+    signal.addEventListener("abort", abort, { once: true });
+
+    try {
+      throwIfAborted(signal);
+      emitPhase({ phase: "thread_start", method: "thread/start", status: "started" });
+      let threadResponse: Record<string, unknown>;
+      try {
+        threadResponse = await this.options.client.startThread<Record<string, unknown>>({
+          cwd: request.cwd,
+          model: this.options.model,
+          sandbox: "read-only",
+          approvalPolicy: "never",
+          approvalsReviewer: "user",
+          ephemeral: true,
+          baseInstructions: request.instructions,
+          developerInstructions: codexTextRunDeveloperInstructions(request.maxOutputTokens)
+        });
+      } catch (error) {
+        const failureCode = safeFailureCode(error);
+        emitPhase({
+          phase: "thread_start",
+          method: "thread/start",
+          status: "failed",
+          failureCode
+        });
+        throw codexRuntimeError(
+          codexCouldNotCompleteMessage(request.language, { code: failureCode }),
+          true,
+          failureCode
+        );
+      }
+      threadId = readNestedString(threadResponse, ["thread", "id"]) || "";
+      emitPhase({
+        phase: "thread_started",
+        method: "thread/start",
+        status: threadId ? "started" : "unknown",
+        responseId: threadId
+      });
+
+      throwIfAborted(signal);
+      emitPhase({ phase: "turn_start", method: "turn/start", status: "started", responseId: threadId });
+      let turnResponse: Record<string, unknown>;
+      try {
+        turnResponse = await this.options.client.startTurn<Record<string, unknown>>({
+          threadId,
+          input: [
+            {
+              type: "text",
+              text: request.input,
+              text_elements: []
+            }
+          ],
+          effort: "low",
+          summary: "concise"
+        });
+      } catch (error) {
+        const failureCode = safeFailureCode(error);
+        emitPhase({
+          phase: "turn_start",
+          method: "turn/start",
+          status: "failed",
+          responseId: threadId,
+          failureCode
+        });
+        throw codexRuntimeError(
+          codexCouldNotCompleteMessage(request.language, { code: failureCode }),
+          true,
+          failureCode
+        );
+      }
+      const responseTurn = recordProperty(turnResponse, "turn");
+      turnId = stringProperty(responseTurn, "id") || turnId;
+      if (threadId && turnId) {
+        activeCodexTurnKeys.add(codexTurnKey(threadId, turnId));
+        activeTurnRegistered = true;
+      }
+      emitPhase({
+        phase: "turn_started",
+        method: "turn/start",
+        status: stringProperty(responseTurn, "status") || "unknown",
+        responseId: turnId || threadId
+      });
+
+      if (responseTurn && stringProperty(responseTurn, "status") !== "inProgress") {
+        completedTurn = responseTurn;
+        completionResolve();
+      }
+
+      await completion;
+      throwIfAborted(signal);
+
+      if (unsupportedActivity) {
+        throw codexRuntimeError(
+          "Codex tried to use a workspace capability during a single-shot text run.",
+          false,
+          sanitizeFailureCode(unsupportedActivity) || "unsupported_text_run_activity"
+        );
+      }
+
+      if (completedTurn && stringProperty(completedTurn, "status") === "failed") {
+        const failure = codexTurnFailureInfo(completedTurn);
+        throw codexRuntimeError(codexCouldNotCompleteMessage(request.language, failure), true, failure.code);
+      }
+
+      const text = textChunks.join("");
+      onDiagnosticEvent?.({
+        event: "provider.request.completed",
+        streaming: true,
+        durationMs: Date.now() - startedAt,
+        retryable: false,
+        responseId: turnId || threadId,
+        outputTextChars: text.length,
+        draftFileChangeCount: 0
+      });
+
+      return {
+        responseId: turnId || threadId,
+        text
+      };
+    } catch (error) {
+      onDiagnosticEvent?.({
+        event: "provider.request.completed",
+        streaming: true,
+        durationMs: Date.now() - startedAt,
+        retryable: true,
+        responseId: turnId || threadId,
+        errorCode: error instanceof AgentRuntimeError ? error.agentError.code : "codex_app_server_error"
+      });
+      throw error;
+    } finally {
+      clearTimeout(completionTimeout);
+      signal.removeEventListener("abort", abort);
+      removeRequestHandler();
+      removeNotificationHandler();
+      if (activeTurnRegistered) {
+        activeCodexTurnKeys.delete(codexTurnKey(threadId, turnId));
+      }
+    }
+
+    function handleNotification(notification: CodexAppServerNotification) {
+      if (!notificationBelongsToTextRun(notification)) {
+        return;
+      }
+
+      const params = recordProperty(notification, "params");
+
+      if (notification.method === "item/agentMessage/delta") {
+        const delta = stringProperty(params, "delta");
+        if (delta) {
+          textChunks.push(delta);
+        }
+        return;
+      }
+
+      if (
+        notification.method === "item/fileChange/patchUpdated" ||
+        notification.method === "turn/diff/updated" ||
+        isCommandLifecycleNotification(notification)
+      ) {
+        unsupportedActivity = notification.method;
+        emitPhase({
+          phase: "notification",
+          method: notification.method,
+          status: "observed",
+          responseId: turnId || threadId,
+          itemType: "unknown"
+        });
+        return;
+      }
+
+      if (notification.method === "item/started" || notification.method === "item/completed") {
+        const item = recordProperty(params, "item");
+        const itemType = stringProperty(item, "type");
+        if (itemType === "fileChange" || itemType === "commandExecution") {
+          unsupportedActivity = itemType;
+        }
+        return;
+      }
+
+      if (notification.method === "turn/completed") {
+        const turn = recordProperty(params, "turn");
+        completedTurn = turn;
+        emitPhase({
+          phase: "turn_completed",
+          method: notification.method,
+          status: stringProperty(turn, "status") || "unknown",
+          responseId: stringProperty(turn, "id") || turnId || threadId,
+          failureCode: stringProperty(turn, "status") === "failed" ? codexTurnFailureInfo(turn).code : undefined
+        });
+        completionResolve();
+      }
+    }
+
+    function notificationBelongsToTextRun(notification: CodexAppServerNotification) {
+      const params = recordProperty(notification, "params");
+      return paramsBelongToTextRun(params);
+    }
+
+    function serverRequestBelongsToTextRun(serverRequest: CodexAppServerRequest) {
+      const params = recordProperty(serverRequest, "params");
+      return paramsBelongToTextRun(params);
+    }
+
+    function paramsBelongToTextRun(params: Record<string, unknown> | null) {
+      if (!params) {
+        return true;
+      }
+
+      const messageThreadId = stringProperty(params, "threadId");
+      const turn = recordProperty(params, "turn");
+      const messageTurnId = stringProperty(params, "turnId") || stringProperty(turn, "id");
+
+      if (
+        (messageThreadId && messageThreadId === threadId && (!messageTurnId || messageTurnId === turnId)) ||
+        (messageTurnId && messageTurnId === turnId && (!messageThreadId || messageThreadId === threadId))
+      ) {
+        return true;
+      }
+
+      if (messageThreadId && messageTurnId && activeCodexTurnKeys.has(codexTurnKey(messageThreadId, messageTurnId))) {
+        return false;
+      }
+
+      if (messageThreadId && (!threadId || messageThreadId !== threadId)) {
+        return false;
+      }
+
+      if (messageTurnId && (!turnId || messageTurnId !== turnId)) {
+        return false;
+      }
+
+      return true;
+    }
+
+    function emitPhase(event: {
+      phase: string;
+      method?: string;
+      status?: string;
+      responseId?: string;
+      itemType?: string;
+      changeCount?: number;
+      failureCode?: string;
+    }) {
+      onDiagnosticEvent?.({
+        event: "provider.phase",
+        threadId: threadId || undefined,
+        turnId: turnId || undefined,
+        ...event
+      });
+    }
+  }
 
   async startRun({
     request,
@@ -805,6 +1145,15 @@ function codexBaseInstructions() {
     "Do not run shell commands. Do not use terminal commands. Do not execute scripts.",
     "Keep visible chat responses concise.",
     "When you change files, the host app will review changes before saving them."
+  ].join("\n");
+}
+
+function codexTextRunDeveloperInstructions(maxOutputTokens: number) {
+  return [
+    "This is a single-shot text transformation.",
+    "Do not inspect the workspace, run commands, create files, edit files, or call tools.",
+    `Keep the answer within approximately ${maxOutputTokens} output tokens.`,
+    "Return only the requested assistant text."
   ].join("\n");
 }
 

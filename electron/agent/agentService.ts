@@ -9,6 +9,7 @@ import {
   type DiagnosticsLogger
 } from "../diagnostics/logger.js";
 import {
+  AgentRuntimeError,
   agentErrorDiagnostic,
   missingApiKeyError,
   normalizeAgentError
@@ -48,6 +49,15 @@ import type {
   AgentRuntimeProviderMetadata
 } from "./runtime/provider.js";
 import { AgentSettingsStore } from "./settingsStore.js";
+import {
+  selectionTransformInstruction,
+  selectionTransformMaxOutputTokens,
+  tightenModelInput,
+  tightenSelectedText,
+  type TightenLanguage,
+  type TightenMode,
+  type TightenSelectionRange
+} from "./tighten.js";
 import {
   AGENT_TRANSCRIPTION_MODEL,
   createOpenAiAudioTranscription,
@@ -334,6 +344,66 @@ export class AgentService {
 
   cancelRun(runId: string) {
     this.activeRuns.get(runId)?.abort();
+  }
+
+  async tightenSelection(request: {
+    requestId: string;
+    text: string;
+    selection: TightenSelectionRange;
+    language: TightenLanguage;
+    mode?: TightenMode;
+    instruction?: string;
+    signal: AbortSignal;
+  }): Promise<string> {
+    const settings = await this.settingsStore.snapshot();
+    const providerSelection = await this.selectRuntimeProvider(settings.model);
+
+    if ("error" in providerSelection) {
+      throw new AgentRuntimeError(providerSelection.error);
+    }
+
+    const { provider } = providerSelection;
+
+    if (!provider.generateText) {
+      throw new AgentRuntimeError({
+        code: "provider_unavailable",
+        userMessage: "The selected runtime cannot run this text request.",
+        detail: "text_generation_unavailable",
+        retryable: false
+      });
+    }
+
+    const workspaceRoot = path.join(this.userDataPath, "assistant", "tighten-workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    const mode = request.mode ?? "tighten";
+    const logRequest: AgentRunRequest = {
+      runId: `tighten-${safeRunIdPart(request.requestId)}-${Date.now()}`,
+      workspaceRoot,
+      activeFile: null,
+      messages: [],
+      prompt: mode === "edit" ? "Edit selected text" : "Tighten selected text",
+      mode: "fast",
+      language: request.language
+    };
+
+    this.logProviderSelected(logRequest, settings.model, provider.metadata);
+    const result = await provider.generateText({
+      request: {
+        instructions: selectionTransformInstruction({
+          mode,
+          language: request.language,
+          instruction: request.instruction
+        }),
+        input: tightenModelInput(request.text, request.selection),
+        maxOutputTokens: selectionTransformMaxOutputTokens(tightenSelectedText(request.text, request.selection), mode),
+        language: request.language,
+        cwd: workspaceRoot
+      },
+      signal: request.signal,
+      onDiagnosticEvent: (event) => this.logProviderEvent(logRequest, settings.model, provider.metadata, event)
+    });
+
+    return result.text;
   }
 
   async transcribeAudio(request: unknown): Promise<AgentTranscribeAudioResponse> {
@@ -1112,6 +1182,10 @@ function runFailureDetails(provider: AgentRuntimeProviderMetadata | undefined, r
     providerLabel: provider?.label ?? null,
     ...(rawError && provider?.id !== "codex-app-server" ? sanitizeUnknownError(rawError) : {})
   };
+}
+
+function safeRunIdPart(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 80) || "request";
 }
 
 function titleGenerationMessages(thread: AgentChatThread): AgentRunRequest["messages"] | null {

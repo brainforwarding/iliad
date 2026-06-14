@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Iliad — Flow palette study (water + light)</title>
+<style>
+  /* ============================================================
+     Flow palette study — "aqua is the water, gold is the light."
+     A direction study for owl-lab; NOT wired into tokens.css yet.
+     ============================================================ */
+  :root {
+    /* canvas — unchanged from the app */
+    --editor:#fffefa; --card:#fbfaf4; --paper:#f4f3ec;
+    /* ink — unchanged */
+    --ink-1:#1f211f; --ink-2:#272a26; --muted-1:#52584f; --muted-2:#62675f;
+    --hairline:#e3e0d6; --hairline-strong:#d9d7cc; --border-control:#cfcec3;
+    --ink-inverse:#fffdf6;
+
+    /* WATER — the medium you write in (carries all interactive text) */
+    --water-ink:#0e726c;     /* links / active file / icon glyphs — AA on cream */
+    --water-deep:#0a5853;    /* hover / active */
+    --water-bright:#34c4bd;  /* the lit crest — FILLS & glints only, never text */
+    --water-tint:#e4f3f0;    /* soft tile / hover wash */
+    --water-wash:rgba(14,114,108,.18);    /* selection */
+    --water-rail:rgba(14,114,108,.72);    /* active-file rail */
+    --water-soft:rgba(14,114,108,.06);
+
+    /* LIGHT — gold + caustics. Sparingly: mark, one CTA, the agent shimmer */
+    --gold:#e8920a; --gold-bright:#ffad1f; --gold-ink:#5a3d00;
+    --glint-gold:#ffd27a; --glint-pink:#ff9ec6; --glint-aqua:#7fe3dd; --glint-mint:#a8efbf;
+
+    --radius:10px; --radius-sm:6px; --radius-pill:999px;
+    --sans:"Avenir Next", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --serif:"Iowan Old Style","New York", ui-serif, Georgia, Cambria, serif;
+    --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --shadow-card:0 8px 22px rgba(40,42,36,.08);
+    --shadow-sm:0 1px 3px rgba(36,38,34,.08);
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 80% -10%, var(--water-soft), transparent 60%),
+      var(--paper);
+    color:var(--ink-1); font-family:var(--sans);
+    -webkit-font-smoothing:antialiased; line-height:1.5;
+    padding:48px 24px 96px;
+  }
+  .wrap { max-width:980px; margin:0 auto; }
+  header.lead { margin-bottom:36px; }
+  .eyebrow { font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:var(--water-ink); font-weight:700; }
+  h1 { font-family:var(--serif); font-size:2.1rem; font-weight:600; margin:.35rem 0 .5rem; letter-spacing:-.01em; }
+  .lead p { color:var(--muted-1); max-width:62ch; font-size:1.02rem; }
+  .lead .principle { margin-top:14px; padding:12px 16px; border-radius:var(--radius);
+    background:var(--water-tint); border:1px solid var(--water-soft);
+    color:var(--water-deep); font-family:var(--serif); font-size:1.05rem; }
+
+  section { margin-top:40px; }
+  h2 { font-size:.78rem; letter-spacing:.12em; text-transform:uppercase; color:var(--muted-2);
+    font-weight:700; margin-bottom:14px; }
+
+  /* swatches */
+  .swatches { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:12px; }
+  .sw { border-radius:var(--radius); overflow:hidden; border:1px solid var(--hairline); background:var(--editor); box-shadow:var(--shadow-sm); }
+  .sw .chip { height:72px; }
+  .sw .meta { padding:9px 11px; }
+  .sw .name { font-size:.82rem; font-weight:600; color:var(--ink-2); }
+  .sw .val { font-size:.72rem; font-family:var(--mono); color:var(--muted-2); }
+
+  /* the water surface — generative caustics (SVG turbulence), not a flat rainbow */
+  .caustic-svg { display:block; width:100%; height:170px; border-radius:var(--radius);
+    border:1px solid var(--hairline); overflow:hidden; box-shadow:var(--shadow-sm); }
+  .twinkle { transform-box:fill-box; transform-origin:center; animation:twinkle 3.6s ease-in-out infinite; }
+  .twinkle.t2 { animation-duration:4.8s; animation-delay:-1.3s; }
+  .twinkle.t3 { animation-duration:5.4s; animation-delay:-2.6s; }
+  .twinkle.t4 { animation-duration:4.1s; animation-delay:-0.7s; }
+  .twinkle.t5 { animation-duration:6.0s; animation-delay:-3.1s; }
+  @keyframes twinkle { 0%,100%{ opacity:.18; transform:scale(.5);} 50%{ opacity:1; transform:scale(1.15);} }
+
+  /* mock editor */
+  .editor-demo { display:grid; grid-template-columns:200px 1fr; border-radius:var(--radius);
+    overflow:hidden; border:1px solid var(--hairline); box-shadow:var(--shadow-card); background:var(--editor); }
+  .rail { background:var(--card); border-right:1px solid var(--hairline); padding:14px 0; }
+  .brand { display:flex; align-items:center; gap:7px; padding:2px 14px 14px; font-weight:700; color:var(--ink-1); letter-spacing:-.01em; }
+  .brand .ext { color:var(--muted-2); font-weight:600; }
+  .file { padding:7px 14px; font-size:.85rem; color:var(--ink-2); cursor:default; }
+  .file:hover { background:var(--water-tint); }
+  .file.active { color:var(--water-ink); font-weight:600; box-shadow:inset 3px 0 0 var(--water-rail); background:var(--water-soft); }
+  .file .muted { color:var(--muted-2); }
+  .page { padding:30px 38px; }
+  .page h3 { font-family:var(--serif); font-size:1.5rem; font-weight:600; margin-bottom:.6rem; }
+  .page p { font-family:var(--serif); font-size:1.06rem; line-height:1.7; color:var(--ink-1); margin-bottom:1rem; max-width:58ch; }
+  .page a { color:var(--water-ink); text-decoration:underline; text-decoration-color:var(--water-bright); text-underline-offset:3px; }
+  .sel { background:var(--water-wash); border-radius:3px; padding:0 1px; }
+  .h-mark { background:linear-gradient(transparent 62%, rgba(255,210,122,.55) 0); } /* gold highlighter — the "light" */
+
+  /* agent working pill — caustic shimmer glow */
+  .agent { margin-top:18px; display:inline-flex; align-items:center; gap:9px; padding:8px 14px;
+    border-radius:var(--radius-pill); border:1px solid var(--water-soft); background:var(--editor);
+    font-size:.85rem; color:var(--water-deep); position:relative; box-shadow:var(--shadow-sm); }
+  .agent::after { content:""; position:absolute; inset:-3px; border-radius:var(--radius-pill); z-index:-1;
+    background:conic-gradient(from 0deg, var(--water-bright), var(--glint-aqua), #cdeeea, var(--glint-gold) 64%, var(--glint-aqua) 80%, var(--water-bright));
+    filter:blur(9px); opacity:.38; animation:spin 9s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--water-bright);
+    box-shadow:0 0 0 0 var(--water-bright); animation:breathe 2.6s ease-in-out infinite; }
+  @keyframes breathe { 0%,100%{ box-shadow:0 0 0 0 rgba(52,196,189,.5);} 50%{ box-shadow:0 0 0 6px rgba(52,196,189,0);} }
+
+  /* buttons */
+  .btns { margin-top:22px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .btn-cta { background:var(--gold-bright); color:var(--gold-ink); font-weight:700; border:none;
+    padding:11px 20px; border-radius:var(--radius-pill); font-size:.92rem; cursor:pointer; box-shadow:var(--shadow-sm); }
+  .btn-cta:hover { background:var(--gold); }
+  .btn-water { background:var(--water-ink); color:var(--ink-inverse); font-weight:600; border:none;
+    padding:11px 18px; border-radius:var(--radius-sm); font-size:.9rem; cursor:pointer; }
+  .btn-water:hover { background:var(--water-deep); }
+  .btn-ghost { background:transparent; color:var(--water-ink); font-weight:600; border:1px solid var(--border-control);
+    padding:10px 16px; border-radius:var(--radius-sm); font-size:.9rem; cursor:pointer; }
+  .btn-ghost:hover { border-color:var(--water-ink); background:var(--water-soft); }
+
+  .note { margin-top:10px; font-size:.82rem; color:var(--muted-2); max-width:62ch; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="lead">
+    <div class="eyebrow">Flow palette · direction study</div>
+    <h1>Aqua is the water. Gold is the light.</h1>
+    <p>The clean cream canvas stays. Cool aqua becomes the medium you write in — and because it passes contrast, it carries every interactive thing (links, active file, icons). Gold is reserved for light catching the surface: the paperclip mark, one call-to-action, and the shimmer in the agent's glow.</p>
+    <div class="principle">Calm, cool, fluid — light dancing on still water. That's flow.</div>
+  </header>
+
+  <section>
+    <h2>The light on water</h2>
+    <svg class="caustic-svg" viewBox="0 0 1200 170" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <defs>
+        <linearGradient id="water" x1="0" y1="0" x2="0.3" y2="1">
+          <stop offset="0" stop-color="#0a564f"/>
+          <stop offset=".45" stop-color="#0f8c84"/>
+          <stop offset=".78" stop-color="#26b8af"/>
+          <stop offset="1" stop-color="#49d3cb"/>
+        </linearGradient>
+        <radialGradient id="sun" cx="24%" cy="2%" r="60%">
+          <stop offset="0" stop-color="#f0fffb" stop-opacity=".7"/>
+          <stop offset="100%" stop-color="#f0fffb" stop-opacity="0"/>
+        </radialGradient>
+        <linearGradient id="irid" x1="0" y1="0" x2="1" y2="0.4">
+          <stop offset="0" stop-color="#7fe3dd"/>
+          <stop offset=".35" stop-color="#a8efbf"/>
+          <stop offset=".68" stop-color="#ffd27a"/>
+          <stop offset="1" stop-color="#ff9ec6"/>
+        </linearGradient>
+        <radialGradient id="spark" cx="50%" cy="50%" r="50%">
+          <stop offset="0" stop-color="#ffffff"/>
+          <stop offset="35%" stop-color="#ffffff" stop-opacity=".8"/>
+          <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+        </radialGradient>
+
+        <!-- filters are computed ONCE (no animated primitives). Motion comes from
+             translating the baked texture on the GPU — cheap, and it actually flows. -->
+        <filter id="swell" x="0" y="0" width="100%" height="100%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.004 0.011" numOctaves="2" seed="11" stitchTiles="stitch" result="n"/>
+          <feColorMatrix in="n" type="matrix"
+            values="0.34 0.34 0.34 0 0  0.34 0.34 0.34 0 0  0.34 0.34 0.34 0 0  0 0 0 0 1"/>
+        </filter>
+        <filter id="veins" x="0" y="0" width="100%" height="100%">
+          <feTurbulence type="turbulence" baseFrequency="0.013 0.03" numOctaves="2" seed="4" stitchTiles="stitch" result="n"/>
+          <feColorMatrix in="n" type="matrix"
+            values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0.33 0.33 0.33 0 0" result="lum"/>
+          <feComponentTransfer in="lum">
+            <feFuncA type="table" tableValues="0 0 0.05 0.95 0.12 0 0"/>
+          </feComponentTransfer>
+        </filter>
+        <filter id="iridmask" x="0" y="0" width="100%" height="100%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.009 0.02" numOctaves="2" seed="6" stitchTiles="stitch" result="n"/>
+          <feColorMatrix in="n" type="matrix"
+            values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0.5 0.5 0.5 0 -0.28" result="m"/>
+          <feComponentTransfer in="m" result="mask"><feFuncA type="table" tableValues="0 0 0.75 0"/></feComponentTransfer>
+          <feComposite in="SourceGraphic" in2="mask" operator="in"/>
+        </filter>
+
+        <!-- bake each texture into a 1200-wide stitched tile so two copies slide seamlessly -->
+        <pattern id="swellTile" patternUnits="userSpaceOnUse" width="1200" height="170">
+          <rect width="1200" height="170" filter="url(#swell)"/>
+        </pattern>
+        <pattern id="veinTile" patternUnits="userSpaceOnUse" width="1200" height="170">
+          <rect width="1200" height="170" filter="url(#veins)"/>
+        </pattern>
+        <pattern id="iridTile" patternUnits="userSpaceOnUse" width="1200" height="170">
+          <rect width="1200" height="170" fill="url(#irid)" filter="url(#iridmask)"/>
+        </pattern>
+      </defs>
+
+      <rect width="1200" height="170" fill="url(#water)"/>
+
+      <!-- each layer is 2 tiles wide and slides one tile left, looping seamlessly -->
+      <g style="mix-blend-mode:overlay; opacity:.5">
+        <rect width="2400" height="170" fill="url(#swellTile)"/>
+        <animateTransform attributeName="transform" type="translate" from="0 0" to="-1200 0" dur="46s" repeatCount="indefinite"/>
+      </g>
+      <g style="mix-blend-mode:screen; opacity:.4">
+        <rect width="2400" height="170" fill="url(#iridTile)"/>
+        <animateTransform attributeName="transform" type="translate" from="0 0" to="-1200 0" dur="66s" repeatCount="indefinite"/>
+      </g>
+      <g style="mix-blend-mode:screen; opacity:.8">
+        <rect width="2400" height="170" fill="url(#veinTile)"/>
+        <animateTransform attributeName="transform" type="translate" from="0 0" to="-1200 0" dur="28s" repeatCount="indefinite"/>
+      </g>
+
+      <rect width="1200" height="170" fill="url(#sun)"/>
+      <g>
+        <circle class="twinkle"    cx="250"  cy="58"  r="5" fill="url(#spark)"/>
+        <circle class="twinkle t2" cx="520"  cy="96"  r="7" fill="url(#spark)"/>
+        <circle class="twinkle t3" cx="690"  cy="44"  r="4" fill="url(#spark)"/>
+        <circle class="twinkle t4" cx="880"  cy="110" r="6" fill="url(#spark)"/>
+        <circle class="twinkle t5" cx="1040" cy="70"  r="5" fill="url(#spark)"/>
+        <circle class="twinkle t2" cx="150"  cy="120" r="4" fill="url(#spark)"/>
+      </g>
+    </svg>
+    <p class="note">Generative caustics — broad swells, fine light veins, drifting iridescent streaks, sparkle nodes. Aqua-dominant; the warm glints are a minority, the way the photo is. In the app this only ever appears as a slow, faint shimmer (agent glow, the mark), never as a filled surface.</p>
+  </section>
+
+  <section>
+    <h2>Water — the medium</h2>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#0e726c"></div><div class="meta"><div class="name">water-ink</div><div class="val">#0e726c · text/icons</div></div></div>
+      <div class="sw"><div class="chip" style="background:#0a5853"></div><div class="meta"><div class="name">water-deep</div><div class="val">#0a5853 · hover</div></div></div>
+      <div class="sw"><div class="chip" style="background:#34c4bd"></div><div class="meta"><div class="name">water-bright</div><div class="val">#34c4bd · fills only</div></div></div>
+      <div class="sw"><div class="chip" style="background:#e4f3f0"></div><div class="meta"><div class="name">water-tint</div><div class="val">#e4f3f0 · wash</div></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Light — gold &amp; caustics</h2>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#ffad1f"></div><div class="meta"><div class="name">gold-bright</div><div class="val">#ffad1f · CTA fill</div></div></div>
+      <div class="sw"><div class="chip" style="background:#e8920a"></div><div class="meta"><div class="name">gold</div><div class="val">#e8920a · mark</div></div></div>
+      <div class="sw"><div class="chip" style="background:#5a3d00"></div><div class="meta"><div class="name">gold-ink</div><div class="val">#5a3d00 · text on gold</div></div></div>
+      <div class="sw"><div class="chip" style="background:linear-gradient(105deg,#7fe3dd,#a8efbf 30%,#ffd27a 65%,#ff9ec6)"></div><div class="meta"><div class="name">caustics</div><div class="val">shimmer gradient</div></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>In context</h2>
+    <div class="editor-demo">
+      <div class="rail">
+        <div class="brand">
+          <svg width="15" height="28" viewBox="0 0 17 32" fill="none" aria-hidden="true"><path d="M5 9.5 V23 a3 3 0 0 0 6 0 V7 a4.5 4.5 0 0 0 -9 0 v17 a6.5 6.5 0 0 0 13 0 V10" stroke="#E8920A" stroke-width="2.6" stroke-linecap="round"/></svg>
+          iliad<span class="ext">.md</span>
+        </div>
+        <div class="file active">on-flow.md</div>
+        <div class="file">drafts <span class="muted">/ chapter-two.md</span></div>
+        <div class="file">notes.md</div>
+        <div class="file">research.md</div>
+      </div>
+      <div class="page">
+        <h3>On flow</h3>
+        <p>You write best when the tool <span class="h-mark">disappears under your eye</span>. The page is warm and still; the cursor moves like a <span class="sel">current</span>, and the only color that ever reaches you is the cool of the water and, now and then, a glint of <a href="#">light on the surface</a>.</p>
+        <div class="agent"><span class="dot"></span> Agent is reading your selection…</div>
+        <div class="btns">
+          <button class="btn-cta">Download for macOS</button>
+          <button class="btn-water">Primary action</button>
+          <button class="btn-ghost">Secondary</button>
+        </div>
+        <p class="note">CTA = gold (light). Everyday actions = water. Text accents never use bright gold (fails contrast on cream) — they use water-ink or gold-ink.</p>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

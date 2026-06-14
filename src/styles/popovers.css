@@ -123,8 +123,8 @@
 
 .font-preset-button.is-active {
   border-color: transparent;
-  background: var(--teal-tint);
-  color: var(--teal-deep);
+  background: var(--accent-tint);
+  color: var(--accent-deep);
 }
 
 .typography-reset-button {
@@ -275,7 +275,7 @@
 }
 
 .tree-context-menu button.is-danger {
-  color: var(--teal-deep);
+  color: var(--accent-deep);
 }
 
 .toast {

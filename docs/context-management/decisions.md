@@ -362,3 +362,45 @@ anchored matching closed (documented limitation); the streaming cutoff and
 Telegram marker guard both recognize the anchored opener.
 
 Spec: [2026-06-11 anchored edits search replace](../../specs/2026-06-11-anchored-edits-search-replace.md).
+
+## ADR-0020: Tighten Is A Stateless, Selection-Scoped Rewrite
+
+Status: accepted.
+
+"Tighten" is an on-demand action on an editor selection that returns a more
+concise rewrite to accept or reject in place. It is deliberately *not* the
+conversational agent: it makes a single, non-streaming provider call with its
+own dedicated instruction (no document tools, no chat history, no context
+manifest), writes nothing to the proposal store, and adds no transcript turn.
+It reuses only the configured OpenAI key/model, the response extraction, and the
+`errors.ts` taxonomy (so `invalid_api_key` / `rate_limited` stay distinct from a
+generic provider failure). The result is review-first: nothing changes until the
+user accepts, and the rewrite touches only the selected range.
+
+Apply is **stale-safe**, the same exact-match-or-fail-closed discipline as
+ADR-0019 reduced to known offsets: the renderer captures `{requestId, filePath,
+from, to, originalText}` at request time and, before dispatching, requires the
+active file to be unchanged, the slice at `{from, to}` to still equal the
+original text, and the request to still be current — any mismatch discards the
+result silently. Accept is a single synchronous CodeMirror transaction (one undo
+step) that flows through autosave like any keystroke; dismissal-on-edit is a
+convenience, not the safety boundary. The provider call is requestId-keyed,
+single-flight per window, times out, and the rewrite is the only thing that
+crosses the IPC bridge — the key never leaves main, which is also the authority
+for the length cap, language validation, and treating the passage as content
+rather than instructions.
+
+Why: writers tighten prose constantly; routing every instance through the chat
+panel produces throwaway turns and friction. A quiet, in-place, on-demand
+gesture fits the minimal editor and honors source-as-contract (explicit accept,
+verified single-range change) without the always-on cost of predictive
+autocomplete (explicitly rejected).
+
+Consequence: Tighten requires an OpenAI API key (a Codex-only connection does
+not enable it) and is gated to Markdown files; the editor reads the key-present
+flag once at launch (a key added mid-session via assistant settings takes effect
+next launch; main still re-checks and fails closed). It is not multi-selection,
+multi-file, remote, or document-wide; modes (shorten/clarify) and word-level
+diffs are explicitly future work, not v1.
+
+Spec: [2026-06-13 tighten selection](../../specs/2026-06-13-tighten-selection.md).

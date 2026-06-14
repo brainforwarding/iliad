@@ -292,6 +292,12 @@ Agent writes are always review-first:
   unsafe or colliding paths;
 - pending proposal state is local app data, not Markdown document content.
 
+Distinct from the conversational agent (multi-turn, document-wide) are
+**on-demand selection tools**: stateless, selection-scoped rewrites that make a
+single provider call and apply review-first to exactly one range, with no
+transcript turn and no proposal store. Tighten is the first (ADR-0020); its
+apply uses the same exact-match-or-discard safety as anchored edits (ADR-0019).
+
 Codex is the preferred runtime for the main workspace agent when connected.
 OpenAI API-key paths remain for dictation/media, fallback text runs, and other
 non-agent API features. Keep provider transport, app-server protocol handling,

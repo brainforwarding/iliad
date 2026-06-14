@@ -41,6 +41,17 @@ const api = {
   normalizeContextDrop: (workspaceSessionId: string, absolutePath: string) =>
     ipcRenderer.invoke("agent:normalize-context-drop", workspaceSessionId, absolutePath),
   assetUrl: (absolutePath: string) => `iliad-file://local/${encodeURIComponent(absolutePath)}`,
+  tightenSelection: (request: {
+    requestId: string;
+    mode?: "tighten" | "edit";
+    text: string;
+    selection?: { from: number; to: number };
+    instruction?: string;
+    language: string;
+  }) => ipcRenderer.invoke("tighten:run", request),
+  cancelTighten: (requestId: string) => {
+    void ipcRenderer.invoke("tighten:cancel", requestId);
+  },
   selectionComments: {
     list: (workspaceSessionId: string) => ipcRenderer.invoke("selection-comments:list", workspaceSessionId),
     save: (workspaceSessionId: string, documentRelativePath: string, comments: unknown) =>

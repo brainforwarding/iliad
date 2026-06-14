@@ -128,7 +128,7 @@
 }
 
 .document-save-state {
-  color: var(--review-delete-ink);
+  color: var(--diff-del-ink);
 }
 
 .icon-button {
@@ -171,7 +171,7 @@
   45% {
     border-color: var(--focus-ring-border);
     box-shadow: var(--focus-ring);
-    color: var(--teal-deep);
+    color: var(--accent-deep);
   }
 }
 

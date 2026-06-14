@@ -6,6 +6,7 @@ import { registerFileIpc } from "./ipc/files.js";
 import { registerRemoteIpc } from "./ipc/remote.js";
 import { registerSelectionCommentsIpc } from "./ipc/selectionComments.js";
 import { registerShellIpc } from "./ipc/shell.js";
+import { registerTightenIpc } from "./ipc/tighten.js";
 import { registerWorkspaceIpc } from "./ipc/workspace.js";
 import { parseLaunchWorkspacePath } from "./launch/argv.js";
 import { canonicalizeWorkspaceDirectory, type WorkspaceInfo } from "./launch/workspace.js";
@@ -242,6 +243,7 @@ app.whenReady().then(async () => {
       return workspace.path;
     }
   });
+  registerTightenIpc({ service: agentService });
 
   appReady = true;
   queueOrHandleLaunchRequest({

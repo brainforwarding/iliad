@@ -4,7 +4,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { aiReviewExtension } from "../editor/aiReview/extension";
-import { reviewHunksForDisplay } from "../editor/aiReview/diff";
+import { reviewHunksForDisplay, type DisplayReviewHunk } from "../editor/aiReview/diff";
 import type { EditorReviewState } from "../editor/aiReview/types";
 import { imageDropPasteExtension } from "../editor/imageDropPaste";
 import {
@@ -15,12 +15,14 @@ import {
 import {
   SelectionCommentsOverlay,
   type SelectionCommentsEditorLabels,
-  type SelectionCommentsOverlayApi
+  type SelectionCommentsOverlayApi,
+  type TightenOverlayLabels
 } from "../editor/selectionComments/overlay";
 import { visualMarkdown } from "../editor/visualMarkdown";
+import type { TightenInlineReview } from "../editor/tightenSafeRange";
 import type { EditorFontPreset } from "../preferences/editorPreferences";
-import type { FileTreeNode, SelectionComment } from "../types/iliad";
-import { IliadMark } from "./IliadMark";
+import type { FileTreeNode, SelectionComment, TightenResult } from "../types/iliad";
+import { ClipMark } from "./ClipMark";
 import { FilePlus } from "lucide-react";
 
 export interface EditorSelectionCommentsProps {
@@ -30,6 +32,20 @@ export interface EditorSelectionCommentsProps {
   onDeleteComment: (id: string) => void;
   onPositionsChanged: (documentPath: string, updates: SelectionCommentPositionUpdate[]) => void;
   onFullReplacement: (documentPath: string, documentText: string) => void;
+}
+
+export interface EditorTightenProps {
+  enabled: boolean;
+  minChars: number;
+  maxChars: number;
+  labels: TightenOverlayLabels;
+  run: (
+    requestId: string,
+    text: string,
+    selection: { from: number; to: number },
+    options?: { mode?: "tighten" | "edit"; instruction?: string }
+  ) => Promise<TightenResult>;
+  cancel: (requestId: string) => void;
 }
 
 interface EditorPaneProps {
@@ -66,6 +82,7 @@ interface EditorPaneProps {
   };
   review: EditorReviewState | null;
   selectionComments?: EditorSelectionCommentsProps;
+  tighten?: EditorTightenProps;
   onChange: (value: string) => void;
   onInsertImage: (file: File) => Promise<string>;
   onOpenLink: (href: string) => void | Promise<void>;
@@ -78,6 +95,23 @@ const fontStacks: Record<EditorFontPreset, string> = {
   sans: "'Avenir Next', Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
   mono: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace"
 };
+
+function lineNumberAt(text: string, offset: number) {
+  let line = 1;
+  const end = Math.max(0, Math.min(offset, text.length));
+
+  for (let index = 0; index < end; index += 1) {
+    if (text[index] === "\n") {
+      line += 1;
+    }
+  }
+
+  return line;
+}
+
+function splitReviewLines(text: string) {
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+}
 
 function createEditorTheme(editorFontSize: number, editorFontPreset: EditorFontPreset) {
   const fontStack = fontStacks[editorFontPreset];
@@ -95,14 +129,14 @@ function createEditorTheme(editorFontSize: number, editorFontPreset: EditorFontP
       fontFamily: "var(--editor-body-font)",
       lineHeight: editorFontPreset === "mono" ? "1.58" : "1.62",
       overflow: "auto",
-      padding: "22px 0 80px"
+      padding: "112px 0 80px"
     },
     ".cm-content": {
       maxWidth: "760px",
       minHeight: "auto",
       margin: "0 auto",
       padding: "0 44px 36vh",
-      caretColor: "#196f64"
+      caretColor: "var(--accent)"
     },
     ".cm-focused": {
       outline: "none"
@@ -114,6 +148,9 @@ function createEditorTheme(editorFontSize: number, editorFontPreset: EditorFontP
       backgroundColor: "transparent"
     },
     ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
+      backgroundColor: "var(--selection-wash)"
+    },
+    ".cm-content ::selection": {
       backgroundColor: "var(--selection-wash)"
     },
     ".cm-gutters": {
@@ -131,6 +168,7 @@ export function EditorPane({
   labels,
   review,
   selectionComments,
+  tighten,
   onChange,
   onInsertImage,
   onOpenLink,
@@ -152,6 +190,8 @@ export function EditorPane({
   const readOnly = review?.mode === "create_file";
   const [editorView, setEditorView] = useState<EditorView | null>(null);
   const [provisionalCommentRange, setProvisionalCommentRange] = useState<{ from: number; to: number } | null>(null);
+  const [provisionalTightenRange, setProvisionalTightenRange] = useState<{ from: number; to: number } | null>(null);
+  const [tightenReview, setTightenReview] = useState<TightenInlineReview | null>(null);
   const overlayApiRef = useRef<SelectionCommentsOverlayApi | null>(null);
   const selectionCommentRanges = useMemo<SelectionCommentWashRange[]>(() => {
     if (!selectionComments) {
@@ -184,6 +224,40 @@ export function EditorPane({
     (view: EditorView) => overlayApiRef.current?.handleEscape(view) ?? false,
     []
   );
+  const handleOverlayTightenShortcut = useCallback(
+    (view: EditorView) => overlayApiRef.current?.handleTightenShortcut(view) ?? false,
+    []
+  );
+  const handleRejectTightenReview = useCallback(() => {
+    setTightenReview(null);
+    setProvisionalTightenRange(null);
+    editorView?.focus();
+  }, [editorView]);
+  const handleAcceptTightenReview = useCallback(() => {
+    if (!tightenReview || !editorView || file?.path !== tightenReview.range.filePath) {
+      setTightenReview(null);
+      setProvisionalTightenRange(null);
+      return;
+    }
+
+    const { range, rewrite } = tightenReview;
+
+    // Stale-safe accept (ADR-0020): verify file + exact original text, then
+    // dispatch synchronously (no await between check and dispatch).
+    if (editorView.state.sliceDoc(range.from, range.to) !== range.originalText) {
+      setTightenReview(null);
+      setProvisionalTightenRange(null);
+      return;
+    }
+
+    setTightenReview(null);
+    setProvisionalTightenRange(null);
+    editorView.dispatch({
+      changes: { from: range.from, to: range.to, insert: rewrite },
+      selection: { anchor: range.from + rewrite.length }
+    });
+    editorView.focus();
+  }, [editorView, file?.path, tightenReview]);
 
   const activeSelectionCallbackRef = useRef(onActiveSelectionChange);
   const lastReportedSelectionRef = useRef<{ from: number; to: number } | null>(null);
@@ -196,7 +270,16 @@ export function EditorPane({
   useEffect(() => {
     lastReportedSelectionRef.current = null;
     activeSelectionCallbackRef.current?.(null);
+    setTightenReview(null);
+    setProvisionalTightenRange(null);
   }, [file?.path]);
+
+  useEffect(() => {
+    if (review) {
+      setTightenReview(null);
+      setProvisionalTightenRange(null);
+    }
+  }, [review]);
 
   const reportActiveSelection = useCallback((update: ViewUpdate) => {
     const selection = update.state.selection.main;
@@ -212,6 +295,38 @@ export function EditorPane({
     }
   }, []);
 
+  const tightenReviewHunk = useMemo<DisplayReviewHunk | null>(() => {
+    if (!tightenReview) {
+      return null;
+    }
+
+    const oldStartLine = lineNumberAt(value, tightenReview.range.from);
+    const oldLines = splitReviewLines(tightenReview.range.originalText);
+    const newLines = splitReviewLines(tightenReview.rewrite);
+    const oldLineCount = Math.max(1, oldLines.length);
+    const displayOldEndLine = oldStartLine + oldLineCount - 1;
+
+    return {
+      id: "tighten-inline-review",
+      status: "pending",
+      anchorLine: displayOldEndLine,
+      oldStartLine,
+      oldLines,
+      newLines,
+      displayOldStartLine: oldStartLine,
+      displayOldEndLine,
+      displayAnchorLine: displayOldEndLine
+    };
+  }, [tightenReview, value]);
+  const tightenChangedLineRanges = useMemo(
+    () => (tightenReviewHunk ? [{ from: tightenReviewHunk.displayOldStartLine, to: tightenReviewHunk.displayOldEndLine }] : []),
+    [tightenReviewHunk]
+  );
+  const blockedLineRanges = useMemo(
+    () => (review?.mode === "edit_file" ? editReviewDisplay?.changedLineRanges : tightenChangedLineRanges),
+    [editReviewDisplay?.changedLineRanges, review?.mode, tightenChangedLineRanges]
+  );
+
   const extensions = useMemo(
     () => {
       const nextExtensions = [
@@ -221,7 +336,7 @@ export function EditorPane({
       EditorView.updateListener.of(reportActiveSelection),
       visualMarkdown({
         documentPath: file?.path ?? "",
-        blockedLineRanges: review?.mode === "edit_file" ? editReviewDisplay?.changedLineRanges : undefined,
+        blockedLineRanges,
         labels: labels.visualMarkdown,
         onOpenLink
       })
@@ -233,12 +348,14 @@ export function EditorPane({
             documentPath: file.path,
             ranges: selectionCommentRanges,
             provisionalRange: provisionalCommentRange,
+            provisionalTightenRange,
             onPositionsChanged: selectionComments.onPositionsChanged,
             onFullReplacement: selectionComments.onFullReplacement,
             onMouseUpSelection: handleOverlayMouseUp,
             onMouseMove: handleOverlayMouseMove,
             onEditorUpdate: handleOverlayEditorUpdate,
             onCommentShortcut: handleOverlayShortcut,
+            onTightenShortcut: handleOverlayTightenShortcut,
             onEscape: handleOverlayEscape
           })
         );
@@ -254,9 +371,27 @@ export function EditorPane({
             onAcceptHunk: review.onAcceptHunk,
             onRejectHunk: review.onRejectHunk,
             onOpenLink,
+            renderInsertedAsSource: true,
             labels: {
               acceptChange: review.labels.acceptChange,
               rejectChange: review.labels.rejectChange
+            }
+          })
+        );
+      } else if (tightenReviewHunk) {
+        nextExtensions.push(
+          aiReviewExtension({
+            mode: "edit_file",
+            hunks: [tightenReviewHunk],
+            activeHunkId: "tighten-inline-review",
+            createLineCount: 0,
+            renderInsertedAsSource: true,
+            onAcceptHunk: handleAcceptTightenReview,
+            onRejectHunk: handleRejectTightenReview,
+            onOpenLink,
+            labels: {
+              acceptChange: labels.reviewToolbar.acceptChange,
+              rejectChange: labels.reviewToolbar.rejectChange
             }
           })
         );
@@ -282,21 +417,29 @@ export function EditorPane({
     },
     [
       editReviewDisplay,
+      blockedLineRanges,
       editorTheme,
       file?.path,
+      handleAcceptTightenReview,
       handleOverlayEditorUpdate,
       handleOverlayEscape,
       handleOverlayMouseMove,
       handleOverlayMouseUp,
       handleOverlayShortcut,
+      handleOverlayTightenShortcut,
+      handleRejectTightenReview,
       labels.visualMarkdown,
+      labels.reviewToolbar.acceptChange,
+      labels.reviewToolbar.rejectChange,
       onInsertImage,
       onOpenLink,
       provisionalCommentRange,
+      provisionalTightenRange,
       reportActiveSelection,
       review,
       selectionCommentRanges,
-      selectionComments
+      selectionComments,
+      tightenReviewHunk
     ]
   );
 
@@ -304,7 +447,7 @@ export function EditorPane({
     return (
       <main className="editor-shell">
         <div className="editor-empty">
-          <IliadMark size={76} className="editor-empty__mark" />
+          <ClipMark size={76} className="editor-empty__mark" />
           <h1>{labels.emptyTitle}</h1>
           {onCreateDocument ? (
             <button type="button" className="editor-empty__action" onClick={onCreateDocument}>
@@ -372,6 +515,7 @@ export function EditorPane({
             lineNumbers: false,
             highlightActiveLineGutter: false,
             autocompletion: false,
+            drawSelection: false,
             searchKeymap: true,
             // lintKeymap binds Mod-Shift-m to openLintPanel; the selection
             // comment shortcut owns that combination.
@@ -394,6 +538,23 @@ export function EditorPane({
             onUpdateComment={selectionComments.onUpdateComment}
             onDeleteComment={selectionComments.onDeleteComment}
             onProvisionalRangeChange={setProvisionalCommentRange}
+            tighten={
+              tighten && file
+                ? {
+                    enabled: tighten.enabled,
+                    minChars: tighten.minChars,
+                    maxChars: tighten.maxChars,
+                    labels: tighten.labels,
+                    run: tighten.run,
+                    cancel: tighten.cancel,
+                    filePath: file.path,
+                    onProposedRangeChange: setProvisionalTightenRange,
+                    reviewActive: Boolean(tightenReview),
+                    onReviewReady: setTightenReview,
+                    onRejectReview: handleRejectTightenReview
+                  }
+                : undefined
+            }
           />
         ) : null}
       </div>

@@ -42,6 +42,8 @@ interface FileActionMessages {
   renameItemFallback: string;
   duplicateItemFallback: string;
   moveToTrashFallback: string;
+  copyPathFallback: string;
+  copiedPath: string;
   revealInFinderFallback: string;
   openLinkFallback: string;
   createdFileMissing: string;
@@ -443,6 +445,21 @@ export function useFileActions({
     workspace
   ]);
 
+  const copyNodePath = useCallback(
+    async (node: FileTreeNode) => {
+      closeTreeContextMenu();
+
+      try {
+        await navigator.clipboard.writeText(node.path);
+        setNotice(messages.copiedPath);
+        setError(null);
+      } catch (copyError) {
+        setError(copyError instanceof Error ? copyError.message : messages.copyPathFallback);
+      }
+    },
+    [closeTreeContextMenu, messages, setError, setNotice]
+  );
+
   const revealNodeInFinder = useCallback(
     async (node: FileTreeNode) => {
       closeTreeContextMenu();
@@ -535,6 +552,7 @@ export function useFileActions({
   }, [messages, openNode, setError, setNotice, stateRef, tree]);
 
   return {
+    copyNodePath,
     createFolder,
     createMarkdownFile,
     creatingFile,

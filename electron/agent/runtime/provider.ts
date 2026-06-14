@@ -79,6 +79,19 @@ export type AgentRuntimeDiagnosticEvent =
 
 export type AgentRuntimeDiagnosticEventListener = (event: AgentRuntimeDiagnosticEvent) => void;
 
+export interface AgentRuntimeTextRequest {
+  instructions: string;
+  input: string;
+  maxOutputTokens: number;
+  language: "en" | "es";
+  cwd: string;
+}
+
+export interface AgentRuntimeTextResponse {
+  responseId?: string;
+  text: string;
+}
+
 export interface AgentRuntimeProvider {
   readonly metadata: AgentRuntimeProviderMetadata;
 
@@ -90,4 +103,10 @@ export interface AgentRuntimeProvider {
     onDiagnosticEvent?: AgentRuntimeDiagnosticEventListener;
     onToolContext?: (item: AgentRunContextItem) => void;
   }): Promise<AgentProviderResponse>;
+
+  generateText?(request: {
+    request: AgentRuntimeTextRequest;
+    signal: AbortSignal;
+    onDiagnosticEvent?: AgentRuntimeDiagnosticEventListener;
+  }): Promise<AgentRuntimeTextResponse>;
 }

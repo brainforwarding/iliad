@@ -3,8 +3,8 @@
  *
  * This is the ONLY file allowed to contain raw hex / rgba / hsl values. Every
  * other stylesheet must reference these tokens; `npm run lint:css` enforces it.
- * The design-system doc (owl-lab/design-system.html) <link>s this file directly,
- * so it can no longer drift from the code.
+ * The design references in docs/design-guidelines.md and owl-lab/design-guidelines.html
+ * are written from these tokens so the app and docs do not drift.
  *
  * Naming is by ROLE ("what kind of thing is this?"), never by value. To add a
  * value, add a semantic token here first — never a one-off elsewhere.
@@ -33,15 +33,21 @@
   --hairline-strong: #d9d7cc; /* popover / overlay edges */
   --border-control: #cfcec3; /* input / button outlines (the interactive edge) */
 
-  /* ---- Accent — one teal hue carries every interactive signal ---- */
-  --teal: #196f64;
-  --teal-deep: #145b52;
-  --teal-deepest: #104d46;
-  --teal-tint: #e8efe9;
-  --accent-soft: rgba(25, 111, 100, 0.06); /* soft interactive fill (user bubble) */
-  --accent-border: rgba(25, 111, 100, 0.1); /* soft interactive border */
-  --accent-wash: rgba(25, 111, 100, 0.28); /* stronger active fill */
-  --accent-rail: rgba(25, 111, 100, 0.65); /* active-file inset bar */
+  /* ---- Accent — graphite carries every interactive signal ---- */
+  --accent: #3a3f47;
+  --accent-deep: #2c3036;
+  --accent-deepest: #20242a;
+  --accent-tint: #eeede9;
+  --accent-soft: rgba(60, 66, 74, 0.07); /* soft interactive fill (user bubble) */
+  --accent-border: rgba(60, 66, 74, 0.12); /* soft interactive border */
+  --accent-wash: rgba(60, 66, 74, 0.16); /* stronger active fill */
+  --accent-rail: rgba(58, 63, 71, 0.7); /* active-file inset bar */
+
+  /* ---- Brand — warm gold is reserved for the mark and highlights ---- */
+  --brand-gold: #e8920a;
+  --brand-gold-bright: #ffad1f;
+  --brand-gold-ink: #5a3d00;
+  --agent-pulse: rgba(232, 146, 10, 0.35);
 
   /* ---- Neutral interaction washes ---- */
   --hover-wash: rgba(214, 211, 198, 0.32); /* hover/selection on cream chrome */
@@ -49,8 +55,8 @@
   --row-wash: rgba(105, 107, 96, 0.13); /* subtle row tint (pending/active rows) */
 
   /* ---- Focus (accessibility) — one ring everywhere ---- */
-  --focus-ring: 0 0 0 2px rgba(25, 111, 100, 0.14);
-  --focus-ring-border: #9db4ad;
+  --focus-ring: 0 0 0 2px rgba(60, 66, 74, 0.18);
+  --focus-ring-border: #9a9ea6;
 
   /* ---- Status — meaning, not decoration ---- */
   --error: #8a3d2a;
@@ -59,19 +65,27 @@
   --error-border: #e0b4a8;
   --pending: #c98912;
   --create: #2f9a5b;
-  /* Selection-comment wash: annotation amber derived from --pending (#c98912).
-     Never teal — teal means interactive/active, and the editor selection
-     (--selection-wash) must visibly dominate when it overlaps a comment. */
-  --comment-wash: rgba(201, 137, 18, 0.12);
-  --selection-wash: rgba(25, 111, 100, 0.2); /* editor text selection */
+  --comment: rgba(91, 141, 210, 0.2);
+  --comment-ink: #2f4d80;
+  --comment-wash: var(--comment);
+  --highlight: rgba(255, 205, 90, 0.5);
+  --selection-wash: rgba(60, 66, 74, 0.14); /* editor text selection */
+  --tighten-wash: rgba(60, 66, 74, 0.1); /* range being adjusted */
 
   /* ---- Review / diff — status applied to changes, not a new accent ---- */
-  --review-insert: rgba(93, 125, 98, 0.12);
-  --review-insert-strong: rgba(93, 125, 98, 0.18);
-  --review-insert-ink: #1f3a2c;
-  --review-delete: rgba(155, 102, 88, 0.1);
-  --review-delete-strong: rgba(155, 102, 88, 0.16);
-  --review-delete-ink: #7a463b;
+  --diff-ins-ink: #2c5a38;
+  --diff-ins-soft: rgba(108, 196, 140, 0.16);
+  --diff-ins-strong: rgba(108, 196, 140, 0.42);
+  --diff-del-ink: #9a4b36;
+  --diff-del-soft: rgba(244, 150, 118, 0.15);
+  --diff-del-strong: rgba(244, 150, 118, 0.4);
+  --diff-del-line: rgba(154, 75, 54, 0.5);
+  --review-insert: var(--diff-ins-soft);
+  --review-insert-strong: var(--diff-ins-strong);
+  --review-insert-ink: var(--diff-ins-ink);
+  --review-delete: var(--diff-del-soft);
+  --review-delete-strong: var(--diff-del-strong);
+  --review-delete-ink: var(--diff-del-ink);
 
   /* ---- Overlays & elevation ---- */
   --surface-inverse: rgba(35, 37, 35, 0.94); /* tooltips */
@@ -86,12 +100,12 @@
   --shadow-float: 0 8px 20px rgba(31, 33, 31, 0.16);
   --shadow-launch: 0 18px 54px rgba(40, 42, 36, 0.07);
   --shadow-sm: 0 1px 3px rgba(36, 38, 34, 0.08);
-  --ring-accent-soft: 0 0 0 2px rgba(25, 111, 100, 0.08); /* input focus inner */
+  --ring-accent-soft: 0 0 0 2px rgba(60, 66, 74, 0.1); /* input focus inner */
   --ring-paper: 0 0 0 2px rgba(243, 242, 236, 0.9); /* selected-on-cream ring */
-  --glow-off: inset 0 0 0 0 rgba(25, 111, 100, 0); /* working-glow keyframe start */
-  --glow-on: inset 0 0 26px 1px rgba(25, 111, 100, 0.1); /* working-glow peak */
-  --rail: inset 2px 0 0 rgba(25, 111, 100, 0.65); /* active-file left rail */
-  --review-delete-line: rgba(122, 70, 59, 0.45); /* strikethrough on deletions */
+  --glow-off: inset 0 0 0 0 rgba(232, 146, 10, 0); /* working-glow keyframe start */
+  --glow-on: inset 0 0 26px 1px var(--agent-pulse); /* working-glow peak */
+  --rail: inset 2px 0 0 var(--accent-rail); /* active-file left rail */
+  --review-delete-line: var(--diff-del-line); /* strikethrough on deletions */
 
   /* ---- Radii — two, plus pill and circle ---- */
   --radius-surface: 8px; /* panels / cards / popovers */

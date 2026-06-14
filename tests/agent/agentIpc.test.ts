@@ -115,6 +115,112 @@ describe("agent IPC trust validation", () => {
     });
   });
 
+  it("assembles Tighten output by replacing only the selected span", async () => {
+    const { handleTightenIpc } = await import("../../electron/ipc/tighten");
+    const text =
+      "La conversación parte aquí porque toca el núcleo de la promesa escolar y tensiona la confianza.";
+    const from = text.indexOf("porque toca");
+    const to = text.indexOf(" y tensiona");
+    const service = {
+      tightenSelection: vi.fn(async () => "porque aborda la promesa escolar")
+    };
+    electronMock.fromWebContents.mockReturnValue({});
+    const response = await handleTightenIpc(
+      {
+        sender: { id: 7 },
+        senderFrame: { url: "file:///Applications/Iliad.app/index.html" }
+      } as never,
+      {
+        requestId: "tighten-selected-only",
+        text,
+        language: "es",
+        selection: { from, to }
+      },
+      { service, controllers: new Map() }
+    );
+
+    expect(response).toEqual({
+      ok: true,
+      rewrite: "La conversación parte aquí porque aborda la promesa escolar y tensiona la confianza.",
+      unchanged: false
+    });
+    expect(service.tightenSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text,
+        selection: { from, to },
+        language: "es"
+      })
+    );
+  });
+
+  it("passes custom edit instructions through the same selected-span assembly", async () => {
+    const { handleTightenIpc } = await import("../../electron/ipc/tighten");
+    const text = "You write best when the tool stays quiet and out of your way.";
+    const from = text.indexOf("stays quiet and out of your way");
+    const to = from + "stays quiet and out of your way".length;
+    const service = {
+      tightenSelection: vi.fn(async () => "disappears under your eye")
+    };
+    electronMock.fromWebContents.mockReturnValue({});
+    const response = await handleTightenIpc(
+      {
+        sender: { id: 8 },
+        senderFrame: { url: "file:///Applications/Iliad.app/index.html" }
+      } as never,
+      {
+        requestId: "edit-selected-only",
+        mode: "edit",
+        instruction: "make it more vivid",
+        text,
+        language: "en",
+        selection: { from, to }
+      },
+      { service, controllers: new Map() }
+    );
+
+    expect(response).toEqual({
+      ok: true,
+      rewrite: "You write best when the tool disappears under your eye.",
+      unchanged: false
+    });
+    expect(service.tightenSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text,
+        selection: { from, to },
+        language: "en",
+        mode: "edit",
+        instruction: "make it more vivid"
+      })
+    );
+  });
+
+  it("rejects empty custom edit instructions before calling the service", async () => {
+    const { handleTightenIpc } = await import("../../electron/ipc/tighten");
+    const service = {
+      tightenSelection: vi.fn(async () => "unused")
+    };
+    electronMock.fromWebContents.mockReturnValue({});
+
+    const response = await handleTightenIpc(
+      {
+        sender: { id: 9 },
+        senderFrame: { url: "file:///Applications/Iliad.app/index.html" }
+      } as never,
+      {
+        requestId: "edit-empty-instruction",
+        mode: "edit",
+        instruction: "   ",
+        text: "Selected text",
+        language: "en",
+        selection: { from: 0, to: 8 }
+      },
+      { service, controllers: new Map() }
+    );
+
+    expect(response).toEqual({ ok: false, reason: "empty" });
+    expect(service.tightenSelection).not.toHaveBeenCalled();
+  });
+
   it("rejects untrusted Codex account IPC calls before calling the service", async () => {
     const {
       handleCodexCancelLoginIpc,

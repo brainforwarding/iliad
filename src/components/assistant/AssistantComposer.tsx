@@ -420,6 +420,7 @@ export function AssistantComposer({
               <span className="assistant-context-chip-label">{selectionChip.label}</span>
               <button
                 type="button"
+                className="assistant-context-chip-remove"
                 aria-label={labels.context.removeSelection}
                 onClick={() => onDismissSelectionChip?.()}
               >

@@ -1,5 +1,5 @@
 import { Component, type ReactNode } from "react";
-import { IliadMark } from "./IliadMark";
+import { ClipMark } from "./ClipMark";
 
 interface EditorErrorBoundaryProps {
   children: ReactNode;
@@ -47,7 +47,7 @@ export class EditorErrorBoundary extends Component<EditorErrorBoundaryProps, Edi
       return (
         <main className="editor-shell">
           <div className="editor-empty">
-            <IliadMark asleep size={72} className="editor-empty__mark" />
+            <ClipMark asleep size={72} className="editor-empty__mark" />
             <h1>{this.props.labels.crashTitle}</h1>
             <p>{this.state.error.message}</p>
           </div>

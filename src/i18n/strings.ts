@@ -53,6 +53,7 @@ export const appStrings = {
     treeContextMenu: {
       duplicate: "Duplicate",
       rename: "Rename",
+      copyPath: "Copy path",
       revealInFinder: "Reveal in Finder",
       moveToTrash: "Move to Trash"
     },
@@ -85,6 +86,22 @@ export const appStrings = {
         composerPlaceholder: "Add a comment…",
         edit: "Edit",
         delete: "Delete"
+      },
+      tighten: {
+        action: "Tighten",
+        working: "Tightening…",
+        alreadyTight: "Already tight",
+        failed: "Couldn't tighten — try again",
+        noKey: "Connect Codex or add an OpenAI API key in the assistant to tighten",
+        tooLong: "Selection too long to tighten",
+        editAction: "Edit",
+        editComposerLabel: "Edit selected text",
+        editComposerPlaceholder: "Describe the change…",
+        editWorking: "Editing…",
+        editUnchanged: "No changes",
+        editFailed: "Couldn't edit — try again",
+        editNoKey: "Connect Codex or add an OpenAI API key in the assistant to edit",
+        editTooLong: "Selection or instruction too long to edit"
       },
       reviewToolbar: {
         changes: (count: number) => (count === 1 ? "1 change" : `${count} changes`),
@@ -378,6 +395,8 @@ export const appStrings = {
       renameItemFallback: "Unable to rename item.",
       duplicateItemFallback: "Unable to duplicate item.",
       moveToTrashFallback: "Unable to move item to Trash.",
+      copyPathFallback: "Unable to copy path.",
+      copiedPath: "Copied path.",
       revealInFinderFallback: "Unable to reveal item.",
       openLinkFallback: "Unable to open link.",
       createdFileMissing: "Created file was not found after refreshing the workspace.",
@@ -446,6 +465,7 @@ export const appStrings = {
     treeContextMenu: {
       duplicate: "Duplicar",
       rename: "Renombrar",
+      copyPath: "Copiar ruta",
       revealInFinder: "Mostrar en Finder",
       moveToTrash: "Mover a la papelera"
     },
@@ -478,6 +498,22 @@ export const appStrings = {
         composerPlaceholder: "Añade un comentario…",
         edit: "Editar",
         delete: "Eliminar"
+      },
+      tighten: {
+        action: "Ajustar",
+        working: "Ajustando…",
+        alreadyTight: "Ya está conciso",
+        failed: "No se pudo ajustar; inténtalo de nuevo",
+        noKey: "Conecta Codex o añade una clave de OpenAI en el asistente para ajustar",
+        tooLong: "Selección demasiado larga para ajustar",
+        editAction: "Editar",
+        editComposerLabel: "Editar la selección",
+        editComposerPlaceholder: "Describe el cambio…",
+        editWorking: "Editando…",
+        editUnchanged: "Sin cambios",
+        editFailed: "No se pudo editar; inténtalo de nuevo",
+        editNoKey: "Conecta Codex o añade una clave de OpenAI en el asistente para editar",
+        editTooLong: "Selección o instrucción demasiado larga para editar"
       },
       reviewToolbar: {
         changes: (count: number) => (count === 1 ? "1 cambio" : `${count} cambios`),
@@ -776,6 +812,8 @@ export const appStrings = {
       renameItemFallback: "No se pudo renombrar el elemento.",
       duplicateItemFallback: "No se pudo duplicar el elemento.",
       moveToTrashFallback: "No se pudo mover el elemento a la papelera.",
+      copyPathFallback: "No se pudo copiar la ruta.",
+      copiedPath: "Ruta copiada.",
       revealInFinderFallback: "No se pudo mostrar el elemento.",
       openLinkFallback: "No se pudo abrir el enlace.",
       createdFileMissing: "El archivo creado no apareció al actualizar el espacio de trabajo.",

@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Iliad · Clip Lab — the paperclip mascot</title>
+<style>
+  :root {
+    --gold:#e8920a; --gold-bright:#ffad1f; --gold-ink:#5a3d00; --gold-muted:#c9ab86;
+    --graphite:#3a3f47; --cream:#fbfaf4; --paper:#f4f3ec; --ink:#1f211f; --muted:#777c73;
+    --hairline:#e3e0d6;
+    --serif:"Iowan Old Style","New York",ui-serif,Georgia,serif;
+    --sans:"Avenir Next",Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:40px 28px 90px; background:var(--paper); color:var(--ink); font-family:var(--serif); }
+  .wrap { max-width:980px; margin:0 auto; }
+  h1 { font-size:2rem; font-weight:500; margin:0 0 4px; }
+  h2 { font-size:1.1rem; font-weight:500; margin:38px 0 6px; }
+  .sub { font-family:var(--sans); color:var(--muted); margin:0 0 8px; font-size:.92rem; max-width:66ch; line-height:1.55; }
+  .sub.tight { margin:4px 0 16px; }
+
+  .hero { margin-top:26px; display:flex; align-items:center; gap:34px; padding:30px 34px; border-radius:18px;
+    background:var(--cream); border:1px solid var(--hairline); box-shadow:0 10px 30px rgba(40,42,36,.07); }
+  .hero .mark { cursor:pointer; }
+  .hero .blurb { font-family:var(--sans); }
+  .hero .blurb b { font-size:1rem; }
+  .hero .blurb p { color:var(--muted); font-size:.86rem; margin:6px 0 0; max-width:44ch; line-height:1.5; }
+  .hint { font-family:var(--sans); font-size:.74rem; color:var(--gold); font-weight:650; margin-top:10px; }
+
+  /* comparison */
+  .compare { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  .compare .pane { padding:26px; border-radius:16px; background:var(--cream); border:1px solid var(--hairline);
+    display:flex; align-items:center; gap:22px; }
+  .compare .pane.flag { border-color:#e6c4a6; background:#fdf5ec; }
+  .compare .mark { cursor:pointer; }
+  .compare .lbl { font-family:var(--sans); }
+  .compare .lbl b { font-size:.92rem; }
+  .compare .lbl .tag { display:inline-block; font-size:.66rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    padding:2px 8px; border-radius:999px; margin-bottom:6px; }
+  .compare .ok .tag { background:#e2efe2; color:#2c5a38; }
+  .compare .no .tag { background:#fbe6de; color:#9a4b36; }
+  .compare .lbl p { color:var(--muted); font-size:.8rem; margin:6px 0 0; max-width:24ch; line-height:1.45; }
+
+  .grid { display:grid; gap:22px; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); }
+  .card { display:grid; justify-items:center; gap:12px; }
+  .stage { width:150px; height:150px; border-radius:18px; display:grid; place-items:center; }
+  .name { font-family:var(--sans); font-weight:650; font-size:.8rem; }
+  .desc { font-family:var(--sans); color:var(--muted); font-size:.72rem; text-align:center; line-height:1.4; max-width:20ch; }
+  .sizes { display:flex; align-items:flex-end; gap:26px; margin-top:6px; }
+  .sizes .stage { width:auto; height:auto; background:none; }
+  .names { font-family:var(--sans); display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
+  .names span { font-size:.82rem; padding:5px 12px; border-radius:999px; background:var(--cream); border:1px solid var(--hairline); }
+  .names b { color:var(--gold-ink); }
+
+  /* ============================ THE MASCOT ============================ */
+  .mark { display:inline-flex; color:var(--gold); line-height:0; }
+  .mark svg { display:block; overflow:visible; }
+  .mark.asleep { color:var(--gold-muted); }
+
+  .clip-shadow { fill:currentColor; opacity:.16; transform-box:fill-box; transform-origin:50% 50%; }
+  .wire { fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+  .eye-open .white { fill:#fffefa; stroke:currentColor; stroke-width:.7; }
+  .eye-open .pupil { fill:var(--graphite); }
+  .eye-closed { fill:none; stroke:var(--graphite); stroke-width:.8; stroke-linecap:round; opacity:0; }
+  .zzz { font-family:var(--serif); font-size:9px; fill:currentColor; opacity:0; }
+
+  .clip { transform-box:fill-box; transform-origin:50% 100%; animation:clip-idle 4.6s ease-in-out infinite; }
+  .eye-open  { animation:eye-open 5.4s ease-in-out infinite; }
+  .eye-closed{ animation:eye-closed 5.4s ease-in-out infinite; }
+  .mark.is-hop .clip { animation:clip-hop .82s ease; }
+  .mark.is-hop .clip-shadow { animation:clip-shadow .82s ease; }
+
+  /* asleep: droop, desaturate, zzz, nothing moves — works with or without a face */
+  .mark.asleep .clip { animation:none; transform:rotate(8deg) translateY(2px); }
+  .mark.asleep .eye-open { opacity:0; animation:none; }
+  .mark.asleep .eye-closed { opacity:1; animation:none; }
+  .mark.asleep .zzz { opacity:.65; }
+
+  @keyframes clip-idle { 0%,100%{ transform:rotate(-1.6deg) scale(1);} 50%{ transform:rotate(1.6deg) scale(1.02);} }
+  @keyframes eye-open  { 0%,93.5%,98%,100%{ opacity:1;} 95.5%,96.5%{ opacity:0;} }
+  @keyframes eye-closed{ 0%,93.5%,98%,100%{ opacity:0;} 95.5%,96.5%{ opacity:1;} }
+  @keyframes clip-hop {
+    0%{ transform:translateY(0) scale(1,1);} 15%{ transform:translateY(2px) scale(1.06,.9);}
+    45%{ transform:translateY(-17px) scale(.93,1.09);} 70%{ transform:translateY(0) scale(1.05,.95);}
+    85%{ transform:translateY(-3px) scale(1,1);} 100%{ transform:translateY(0) scale(1,1);} }
+  @keyframes clip-shadow { 0%,100%{ transform:scale(1); opacity:.16;} 45%{ transform:scale(.66); opacity:.07;} }
+
+  @media (prefers-reduced-motion: reduce) {
+    .clip,.eye-open,.eye-closed,.mark.is-hop .clip,.mark.is-hop .clip-shadow { animation:none !important; }
+    .eye-closed { opacity:0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Iliad · Clip Lab</h1>
+  <p class="sub">The paperclip mascot — Iliad's equivalent of the owl in <code>IliadMark.tsx</code>. It breathes/sways like a balancing wire, and now and then <b>hops</b> off its shadow with squash-and-stretch. Crash state = asleep (droops, desaturates, zzz). Click it to hop. All motion stops under reduced-motion.</p>
+
+  <div class="hero">
+    <span class="mark" id="hero"></span>
+    <div class="blurb">
+      <b>Recommended: no face.</b>
+      <p>Same clean gold paperclip as the site — personality comes from motion, not eyes. Alive, on-brand, and unmistakably <i>not</i> Clippy.</p>
+      <div class="hint">↑ click me — I hop</div>
+    </div>
+  </div>
+
+  <h2>The Clippy question</h2>
+  <p class="sub tight">An eyed paperclip in an AI writing app reads as Clippy — same object, same category. A faceless clip with motion keeps the charm and the dignity. Compare:</p>
+  <div class="compare">
+    <div class="pane ok"><span class="mark" id="cmp-no"></span>
+      <div class="lbl"><span class="tag">Recommended</span><b>No face</b><p>Clean glyph + motion. Matches the site. Premium, calm.</p></div>
+    </div>
+    <div class="pane flag no"><span class="mark" id="cmp-yes"></span>
+      <div class="lbl"><span class="tag">Clippy risk</span><b>With eyes</b><p>Cute, but reads as “they rebuilt Clippy” — undercuts the serious-tool feel.</p></div>
+    </div>
+  </div>
+
+  <h2>States &amp; treatments (faceless)</h2>
+  <div class="grid" id="grid"></div>
+
+  <h2>At real sizes (empty-state / about / agent avatar)</h2>
+  <div class="sizes" id="sizes"></div>
+
+  <h2>Name it</h2>
+  <div class="names">
+    <span><b>Clip</b> — plain &amp; obvious</span>
+    <span><b>Gem</b> — a “gem clip” is the real name for this shape</span>
+    <span><b>Pin</b></span>
+    <span><b>Clipo</b></span>
+    <span><b>Pico</b></span>
+  </div>
+</div>
+
+<script>
+  function clipSVG(eyes) {
+    const face = eyes ? `
+          <g class="eyes">
+            <g class="eye-open">
+              <circle class="white" cx="4.4" cy="6" r="2.1"/><circle class="white" cx="8.7" cy="6" r="2.1"/>
+              <circle class="pupil" cx="4.7" cy="6.3" r=".85"/><circle class="pupil" cx="9.0" cy="6.3" r=".85"/>
+            </g>
+            <g class="eye-closed">
+              <path d="M2.7 6.2 Q4.4 7.6 6.1 6.2"/><path d="M7.0 6.2 Q8.7 7.6 10.4 6.2"/>
+            </g>
+          </g>` : '';
+    return `
+    <svg viewBox="0 0 64 96" width="100%" height="100%" role="presentation" focusable="false">
+      <ellipse class="clip-shadow" cx="32" cy="90" rx="15" ry="3"></ellipse>
+      <g class="clip">
+        <g class="clip-body" transform="translate(11 4) scale(2.4)">
+          <path class="wire" d="M5 9.5 V23 a3 3 0 0 0 6 0 V7 a4.5 4.5 0 0 0 -9 0 v17 a6.5 6.5 0 0 0 13 0 V10"/>${face}
+        </g>
+        <text class="zzz" x="47" y="16">z</text>
+      </g>
+    </svg>`;
+  }
+
+  function liven(mark, { min=8000, max=20000 } = {}) {
+    if (mark.classList.contains('asleep')) return;
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let clearT = 0;
+    const hop = () => { clearTimeout(clearT); mark.classList.remove('is-hop'); void mark.offsetWidth;
+      mark.classList.add('is-hop'); clearT = setTimeout(() => mark.classList.remove('is-hop'), 820); };
+    mark.addEventListener('click', () => { if (!reduce) hop(); });
+    if (reduce) return;
+    const sched = () => setTimeout(() => { hop(); sched(); }, min + Math.random()*(max-min));
+    sched();
+  }
+  function makeMark({ size=110, asleep=false, eyes=false } = {}) {
+    const el = document.createElement('span');
+    el.className = 'mark' + (asleep ? ' asleep' : '');
+    el.style.width = size + 'px'; el.style.height = Math.round(size*96/64) + 'px';
+    el.innerHTML = clipSVG(eyes);
+    return el;
+  }
+  function mount(parent, opts, livenOpts) {
+    const m = makeMark(opts); parent.appendChild(m); liven(m, livenOpts); return m;
+  }
+
+  // hero — faceless
+  const hero = document.getElementById('hero');
+  hero.style.width='150px'; hero.style.height=Math.round(150*96/64)+'px';
+  hero.innerHTML = clipSVG(false);
+  liven(hero, { min:5000, max:11000 });
+
+  // comparison
+  const cn = document.getElementById('cmp-no');  cn.style.width='86px'; cn.style.height=Math.round(86*96/64)+'px'; cn.innerHTML = clipSVG(false); liven(cn,{min:6000,max:11000});
+  const cy = document.getElementById('cmp-yes'); cy.style.width='86px'; cy.style.height=Math.round(86*96/64)+'px'; cy.innerHTML = clipSVG(true);  liven(cy,{min:6000,max:11000});
+
+  // states (faceless)
+  const cards = [
+    { name:'Awake', desc:'Sway + breathe; click/idle hop.', bg:'var(--cream)' },
+    { name:'Asleep', desc:'Crash / no key. Droops, desaturates, zzz.', bg:'var(--cream)', asleep:true },
+    { name:'On graphite', desc:'For dark surfaces / pages.', bg:'var(--graphite)', color:'var(--gold-bright)' },
+    { name:'On gold badge', desc:'App-icon idea: cream clip on gold squircle.', bg:'var(--gold)', color:'var(--cream)', squircle:true },
+  ];
+  const grid = document.getElementById('grid');
+  cards.forEach((c) => {
+    const card = document.createElement('div'); card.className='card';
+    const stage = document.createElement('div'); stage.className='stage'; stage.style.background=c.bg;
+    if (c.squircle) stage.style.borderRadius='34px';
+    const m = makeMark({ size:92, asleep:!!c.asleep, eyes:false });
+    if (c.color) m.style.color = c.color;
+    stage.appendChild(m);
+    const nm = document.createElement('div'); nm.className='name'; nm.textContent=c.name;
+    const ds = document.createElement('div'); ds.className='desc'; ds.textContent=c.desc;
+    card.append(stage, nm, ds); grid.appendChild(card); liven(m);
+  });
+
+  // sizes (faceless)
+  [96,56,36,24].forEach((px) => {
+    const card = document.createElement('div'); card.className='card';
+    const stage = document.createElement('div'); stage.className='stage';
+    stage.appendChild(makeMark({ size:px }));
+    const cap = document.createElement('div'); cap.className='desc'; cap.textContent = px+'px';
+    card.append(stage, cap);
+    document.getElementById('sizes').appendChild(card);
+    liven(card.querySelector('.mark'));
+  });
+</script>
+</body>
+</html>

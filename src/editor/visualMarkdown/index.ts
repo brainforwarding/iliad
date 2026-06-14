@@ -1,4 +1,4 @@
-import type { EditorState, Range } from "@codemirror/state";
+import { StateEffect, StateField, type EditorState, type Range } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { isFenceLine } from "../../markdown/mathDelimiters";
 import { isActiveLine, type BlockedRange } from "./activeRanges";
@@ -25,6 +25,7 @@ import { DisplayMathWidget } from "./widgets";
 export interface VisualMarkdownOptions {
   documentPath: string;
   blockedLineRanges?: Array<{ from: number; to: number }>;
+  initialEditorFocused?: boolean;
   labels: {
     markdownImage: string;
     youtubeVideo: string;
@@ -34,11 +35,27 @@ export interface VisualMarkdownOptions {
   onOpenLink: (href: string) => void | Promise<void>;
 }
 
+const editorFocusedEffect = StateEffect.define<boolean>();
+const editorFocusedField = StateField.define<boolean>({
+  create() {
+    return false;
+  },
+  update(value, transaction) {
+    for (const effect of transaction.effects) {
+      if (effect.is(editorFocusedEffect)) {
+        return effect.value;
+      }
+    }
+
+    return value;
+  }
+});
+
 function lineIsBlocked(lineNumber: number, ranges: Array<{ from: number; to: number }> | undefined) {
   return ranges?.some((range) => lineNumber >= range.from && lineNumber <= range.to) ?? false;
 }
 
-function buildDecorations(state: EditorState, options: VisualMarkdownOptions): DecorationSet {
+function buildDecorations(state: EditorState, options: VisualMarkdownOptions, editorFocused: boolean): DecorationSet {
   const ranges: Range<Decoration>[] = [];
   const document = state.doc;
 
@@ -76,7 +93,7 @@ function buildDecorations(state: EditorState, options: VisualMarkdownOptions): D
       continue;
     }
 
-    const active = isActiveLine(state, lineNumber);
+    const active = isActiveLine(state, lineNumber, editorFocused);
     const reviewBlocked = lineIsBlocked(lineNumber, options.blockedLineRanges);
     const displayMathBlock = displayMathBlocks.get(lineNumber);
     const insideDisplayMathBlock = displayMathLineBlocks.get(lineNumber);
@@ -84,7 +101,7 @@ function buildDecorations(state: EditorState, options: VisualMarkdownOptions): D
     const blockedRanges: BlockedRange[] = [];
     const setextHeadingLevel = setextHeadings.contentLineLevels.get(lineNumber);
     const setextMarkerLevel = setextHeadings.markerLineLevels.get(lineNumber);
-    const setextContentActive = Boolean(setextMarkerLevel && isActiveLine(state, lineNumber - 1));
+    const setextContentActive = Boolean(setextMarkerLevel && isActiveLine(state, lineNumber - 1, editorFocused));
 
     const headingMatch = addBlockLineDecorations(ranges, line.from, text);
 
@@ -96,7 +113,7 @@ function buildDecorations(state: EditorState, options: VisualMarkdownOptions): D
       const displayMathBlocked = Array.from(
         { length: displayMathBlock.toLine - displayMathBlock.fromLine + 1 },
         (_, index) => displayMathBlock.fromLine + index
-      ).some((mathLineNumber) => isActiveLine(state, mathLineNumber) || lineIsBlocked(mathLineNumber, options.blockedLineRanges));
+      ).some((mathLineNumber) => isActiveLine(state, mathLineNumber, editorFocused) || lineIsBlocked(mathLineNumber, options.blockedLineRanges));
 
       if (!displayMathBlocked) {
         ranges.push(Decoration.line({ class: "cm-md-display-math-line" }).range(line.from));
@@ -146,18 +163,18 @@ function buildDecorations(state: EditorState, options: VisualMarkdownOptions): D
       addStrongDecorations(ranges, line.from, text, blockedRanges);
       addEmphasisDecorations(ranges, line.from, text, blockedRanges);
       addInlineCodeDecorations(ranges, line.from, text, blockedRanges);
-      addInlineMathDecorations(ranges, state, line.from, text, blockedRanges);
+      addInlineMathDecorations(ranges, state, line.from, text, blockedRanges, editorFocused);
     }
 
-    addLinkDecorations(ranges, state, line.from, text, blockedRanges, options.onOpenLink);
+    addLinkDecorations(ranges, state, line.from, text, blockedRanges, options.onOpenLink, editorFocused);
   }
 
   return Decoration.set(ranges, true);
 }
 
-function safeBuildDecorations(state: EditorState, options: VisualMarkdownOptions): DecorationSet {
+function safeBuildDecorations(state: EditorState, options: VisualMarkdownOptions, editorFocused: boolean): DecorationSet {
   try {
-    return buildDecorations(state, options);
+    return buildDecorations(state, options, editorFocused);
   } catch (error) {
     console.warn("Visual Markdown decorations disabled for this update.", error);
     return Decoration.none;
@@ -168,8 +185,12 @@ export function visualMarkdown(options: VisualMarkdownOptions) {
   // State-derived decoration source (not a ViewPlugin): this is the only legal
   // place to emit block decorations such as the display-math widget. Recomputes
   // on document and selection changes.
-  const decorations = EditorView.decorations.compute(["doc", "selection"], (state) =>
-    safeBuildDecorations(state, options)
+  const focusField = options.initialEditorFocused
+    ? editorFocusedField.init(() => true)
+    : editorFocusedField;
+
+  const decorations = EditorView.decorations.compute(["doc", "selection", editorFocusedField], (state) =>
+    safeBuildDecorations(state, options, state.field(editorFocusedField))
   );
 
   const linkHandler = EditorView.domEventHandlers({
@@ -199,5 +220,10 @@ export function visualMarkdown(options: VisualMarkdownOptions) {
     }
   });
 
-  return [decorations, linkHandler];
+  return [
+    focusField,
+    EditorView.focusChangeEffect.of((_state, focusing) => editorFocusedEffect.of(focusing)),
+    decorations,
+    linkHandler
+  ];
 }

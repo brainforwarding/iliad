@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Iliad — Accent palette study (3 options)</title>
+<style>
+  :root {
+    --editor:#fffefa; --card:#fbfaf4; --paper:#f4f3ec;
+    --ink-1:#1f211f; --ink-2:#272a26; --muted-1:#52584f; --muted-2:#62675f;
+    --hairline:#e3e0d6; --border-control:#cfcec3; --ink-inverse:#fffdf6;
+    --gold:#e8920a; --gold-bright:#ffad1f; --gold-ink:#5a3d00;
+    /* diff channels — fixed across all options */
+    --ins-ink:#2c5a38; --ins:108,196,140;   /* fresh green */
+    --del-ink:#9a4b36; --del:244,150,118;    /* warm coral */
+    --del-line:rgba(154,75,54,.5);
+    /* default accent (overridden per .acc-* block) */
+    --acc-ink:#3a4eb0; --acc-deep:#30409a; --acc-bright:#5566d6; --acc-tint:#eceefb;
+    --acc-soft:rgba(85,102,214,.1); --acc-rail:rgba(58,78,176,.85);
+    --acc-pulse:rgba(85,102,214,.35); --acc-sheen:rgba(85,102,214,.1);
+
+    --radius:12px; --radius-sm:7px; --pill:999px;
+    --sans:"Avenir Next", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --serif:"Iowan Old Style","New York", ui-serif, Georgia, Cambria, serif;
+    --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  /* ===================== THE THREE ACCENT PALETTES ===================== */
+  /* A — Indigo (fountain-pen ink) — Radix Indigo / Material */
+  .acc-indigo {
+    --acc-ink:#3a4eb0; --acc-deep:#30409a; --acc-bright:#5566d6; --acc-tint:#eceefb;
+    --acc-soft:rgba(85,102,214,.1); --acc-rail:rgba(58,78,176,.85);
+    --acc-pulse:rgba(85,102,214,.35); --acc-sheen:rgba(85,102,214,.1); }
+  /* B — Plum / aubergine — Radix Plum (pairs with gold) */
+  .acc-plum {
+    --acc-ink:#8a3f7a; --acc-deep:#74356a; --acc-bright:#a85699; --acc-tint:#f6eaf3;
+    --acc-soft:rgba(168,86,153,.1); --acc-rail:rgba(138,63,122,.85);
+    --acc-pulse:rgba(168,86,153,.35); --acc-sheen:rgba(168,86,153,.1); }
+  /* C — Graphite (near-monochrome) — iA Writer / Linear neutral */
+  .acc-slate {
+    --acc-ink:#3a3f47; --acc-deep:#2c3036; --acc-bright:#7c828c; --acc-tint:#eeede9;
+    --acc-soft:rgba(60,66,74,.07); --acc-rail:rgba(58,63,71,.7);
+    --acc-pulse:rgba(124,130,140,.4); --acc-sheen:rgba(124,130,140,.12); }
+
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:#eceae2; color:var(--ink-1); font-family:var(--sans); -webkit-font-smoothing:antialiased;
+    line-height:1.5; padding:44px 22px 110px; }
+  .stage { max-width:1000px; margin:0 auto; }
+
+  .eyebrow { font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:var(--muted-2); font-weight:700; }
+  h1 { font-family:var(--serif); font-size:2rem; font-weight:600; margin:.3rem 0 .5rem; letter-spacing:-.01em; }
+  .intro p { color:var(--muted-1); max-width:64ch; }
+
+  .opt { margin-top:42px; }
+  .opt-head { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .opt-num { font-family:var(--mono); font-weight:700; font-size:.8rem; color:var(--acc-ink);
+    background:var(--acc-soft); padding:3px 9px; border-radius:var(--pill); }
+  .opt-head h2 { font-size:1.18rem; font-weight:700; letter-spacing:-.01em; }
+  .opt-head .ref { font-size:.82rem; color:var(--muted-2); font-family:var(--mono); }
+  .swatchset { display:inline-flex; gap:5px; margin-left:auto; }
+  .swatchset i { width:22px; height:22px; border-radius:5px; border:1px solid rgba(0,0,0,.06); display:block; }
+
+  /* =================== the mock Iliad window =================== */
+  .win { position:relative; height:392px; border-radius:16px; overflow:hidden; background:var(--paper);
+    box-shadow:0 24px 60px rgba(30,40,40,.2), 0 2px 6px rgba(30,40,40,.1); isolation:isolate; }
+  .win-grid { height:100%; display:grid; grid-template-columns:180px 1fr 244px; grid-template-rows:42px 1fr; }
+
+  .bar { grid-column:1 / -1; display:flex; align-items:center; gap:10px; padding:0 14px;
+    background:var(--card); border-bottom:1px solid var(--hairline); }
+  .lights { display:flex; gap:7px; } .lights i { width:11px; height:11px; border-radius:50%; display:block; }
+  .lights .r{ background:#ff6b5e;} .lights .y{ background:#ffbd2e;} .lights .g{ background:#28c840;}
+  .bar .name { margin:0 auto; font-size:.82rem; color:var(--ink-2); display:flex; align-items:center; gap:6px; font-weight:600; }
+  .bar .name .ext{ color:var(--muted-2); font-weight:500; }
+  .bar .tool { width:24px; height:24px; border-radius:50%; border:1px solid var(--border-control);
+    display:grid; place-items:center; color:var(--muted-1); font-size:.78rem; }
+
+  .side { background:var(--card); border-right:1px solid var(--hairline); padding:12px 0; }
+  .brand { display:flex; align-items:center; gap:7px; padding:0 14px 12px; font-weight:700; letter-spacing:-.01em; }
+  .brand .ext{ color:var(--muted-2); font-weight:600; }
+  .file { padding:6px 14px; font-size:.82rem; color:var(--ink-2); }
+  .file .m{ color:var(--muted-2); }
+  .file.active { color:var(--acc-ink); font-weight:600; box-shadow:inset 3px 0 0 var(--acc-rail);
+    background:var(--acc-soft); position:relative; overflow:hidden; }
+  .file.active::after { content:""; position:absolute; inset:0; pointer-events:none;
+    background:linear-gradient(115deg, transparent 42%, var(--acc-sheen) 50%, transparent 58%);
+    background-size:320% 100%; animation:sheen 13s ease-in-out infinite; }
+  @keyframes sheen { 0%{ background-position:130% 0; } 100%{ background-position:-80% 0; } }
+
+  .doc { background:var(--editor); padding:26px 30px; position:relative; }
+  .doc h3 { font-family:var(--serif); font-size:1.42rem; font-weight:600; margin-bottom:.5rem; }
+  .doc p { font-family:var(--serif); font-size:1.04rem; line-height:1.78; color:var(--ink-1); margin-bottom:.85rem; max-width:48ch; }
+
+  /* diff — both tiers share ONE fixed band; only alpha differs; inline + clone hugs the text */
+  .diff { margin-bottom:.85rem; }
+  .diff .line { font-family:var(--serif); font-size:1.04rem; line-height:1.85; max-width:48ch; }
+  .diff .line + .line { margin-top:.12rem; }
+  .del-s, .ins-s, .del-s .w, .ins-s .w, .hl {
+    -webkit-box-decoration-break:clone; box-decoration-break:clone;
+    background-repeat:no-repeat; background-position:0 90%; background-size:100% .62em; border-radius:2px; }
+  .del-s { background-image:linear-gradient(rgba(var(--del),.15),rgba(var(--del),.15)); color:var(--del-ink);
+    text-decoration:line-through; text-decoration-color:var(--del-line); }
+  .ins-s { background-image:linear-gradient(rgba(var(--ins),.16),rgba(var(--ins),.16)); color:var(--ins-ink); }
+  .del-s .w { background-image:linear-gradient(rgba(var(--del),.4),rgba(var(--del),.4)); }
+  .ins-s .w { background-image:linear-gradient(rgba(var(--ins),.42),rgba(var(--ins),.42)); }
+  .hl { background-image:linear-gradient(rgba(255,205,90,.5),rgba(255,205,90,.5)); }
+
+  .agent { background:var(--card); border-left:1px solid var(--hairline); padding:14px;
+    display:flex; flex-direction:column; gap:10px; }
+  .ah { display:flex; align-items:center; gap:7px; font-size:.7rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--muted-2); font-weight:700; }
+  .ah .live { width:6px; height:6px; border-radius:50%; background:var(--acc-bright); animation:breathe 3.4s ease-in-out infinite; }
+  @keyframes breathe { 0%,100%{ opacity:.4; box-shadow:0 0 0 0 var(--acc-pulse);} 50%{ opacity:1; box-shadow:0 0 0 4px transparent;} }
+  .bubble { font-size:.82rem; line-height:1.45; padding:8px 11px; border-radius:11px; }
+  .bubble.user { align-self:flex-end; background:var(--acc-soft); color:var(--acc-deep); max-width:88%; }
+  .bubble.bot { align-self:flex-start; color:var(--ink-2); max-width:96%; }
+
+  .review { margin-top:auto; border-top:1px solid var(--hairline); padding-top:11px; display:flex; flex-direction:column; gap:9px; }
+  .review .count { font-size:.74rem; color:var(--muted-1); }
+  .review .count b.i{ color:var(--ins-ink); } .review .count b.d{ color:var(--del-ink); }
+  .review .btns { display:flex; gap:8px; }
+  .btn { flex:1; padding:7px 0; border-radius:var(--radius-sm); font-size:.8rem; font-weight:600; text-align:center; cursor:default; }
+  .btn.accept { background:var(--acc-ink); color:var(--ink-inverse); }
+  .btn.reject { background:transparent; color:var(--acc-ink); border:1px solid var(--border-control); }
+
+  .pop { position:absolute; z-index:3; right:258px; bottom:18px; width:152px; padding:11px; border-radius:var(--radius);
+    background:rgba(255,254,250,.68); -webkit-backdrop-filter:blur(16px) saturate(140%); backdrop-filter:blur(16px) saturate(140%);
+    border:1px solid rgba(255,255,255,.55); box-shadow:0 16px 40px rgba(40,42,36,.16), inset 0 1px 0 rgba(255,255,255,.7); }
+  .pop .row { display:flex; align-items:center; justify-content:space-between; font-size:.78rem; color:var(--ink-2); margin-bottom:8px; }
+  .pop .aa { font-family:var(--serif); }
+  .pop .track { height:4px; border-radius:3px; background:var(--hairline); position:relative; }
+  .pop .track::after{ content:""; position:absolute; top:-3px; left:58%; width:10px; height:10px; border-radius:50%; background:var(--acc-ink); }
+</style>
+</head>
+<body>
+<div class="stage">
+  <header class="intro">
+    <div class="eyebrow">Accent palette · pick one</div>
+    <h1>Three accents for the interactive color</h1>
+    <p>Same mockup, three palettes for the one thing that's currently teal — the Accept button, the active file, the agent dot, and the user bubble. Everything else is fixed: warm paper canvas, gold paperclip, and the green/coral diff. Each accent is a proven, tasteful family chosen to sit well on warm cream and never collide with the diff colors.</p>
+  </header>
+
+  <!-- ============================ OPTION A — INDIGO ============================ -->
+  <section class="opt">
+    <div class="opt-head acc-indigo">
+      <span class="opt-num">A</span><h2>Indigo — fountain-pen ink</h2><span class="ref">Radix Indigo / Material</span>
+      <span class="swatchset"><i style="background:#3a4eb0"></i><i style="background:#5566d6"></i><i style="background:#eceefb"></i></span>
+    </div>
+    <div class="win acc-indigo">
+      <div class="win-grid">
+        <div class="bar">
+          <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+          <div class="name"><svg width="13" height="24" viewBox="0 0 17 32" fill="none"><path d="M5 9.5 V23 a3 3 0 0 0 6 0 V7 a4.5 4.5 0 0 0 -9 0 v17 a6.5 6.5 0 0 0 13 0 V10" stroke="#E8920A" stroke-width="2.6" stroke-linecap="round"/></svg>on-flow<span class="ext">.md</span></div>
+          <div class="tool">Aa</div>
+        </div>
+        <div class="side">
+          <div class="brand"><svg width="13" height="24" viewBox="0 0 17 32" fill="none"><path d="M5 9.5 V23 a3 3 0 0 0 6 0 V7 a4.5 4.5 0 0 0 -9 0 v17 a6.5 6.5 0 0 0 13 0 V10" stroke="#E8920A" stroke-width="2.6" stroke-linecap="round"/></svg>iliad<span class="ext">.md</span></div>
+          <div class="file active">on-flow.md</div>
+          <div class="file">drafts <span class="m">/ ch-two.md</span></div>
+          <div class="file">notes.md</div>
+          <div class="file">research.md</div>
+        </div>
+        <div class="doc">
+          <h3>On flow</h3>
+          <div class="diff">
+            <div class="line"><span class="del-s">You write best when the tool <span class="w">stays quiet and out of your way</span>.</span></div>
+            <div class="line"><span class="ins-s">You write best when the tool <span class="w">disappears under your eye</span>.</span></div>
+          </div>
+          <p>It keeps your hands on the keys, so you <span class="hl">never lose your place</span>.</p>
+        </div>
+        <div class="agent">
+          <div class="ah"><span class="live"></span> Agent</div>
+          <div class="bubble user">Tighten the opening.</div>
+          <div class="bubble bot">Rewrote your opening sentence — same idea, fewer words. Review below.</div>
+          <div class="review">
+            <div class="count"><b class="i">+1 sentence</b> · <b class="d">−1 sentence</b></div>
+            <div class="btns"><div class="btn accept">Accept</div><div class="btn reject">Reject</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="pop"><div class="row"><span class="aa">Aa</span><span>Serif</span></div><div class="track"></div></div>
+    </div>
+  </section>
+
+  <!-- ============================ OPTION B — PLUM ============================ -->
+  <section class="opt">
+    <div class="opt-head acc-plum">
+      <span class="opt-num">B</span><h2>Plum — aubergine</h2><span class="ref">Radix Plum · pairs with gold</span>
+      <span class="swatchset"><i style="background:#8a3f7a"></i><i style="background:#a85699"></i><i style="background:#f6eaf3"></i></span>
+    </div>
+    <div class="win acc-plum">
+      <div class="win-grid">
+        <div class="bar">
+          <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+          <div class="name"><svg width="13" height="24" viewBox="0 0 17 32" fill="none"><path d="M5 9.5 V23 a3 3 0 0 0 6 0 V7 a4.5 4.5 0 0 0 -9 0 v17 a6.5 6.5 0 0 0 13 0 V10" stroke="#E8920A" stroke-width="2.6" stroke-linecap="round"/></svg>on-flow<span class="ext">.md</span></div>
+          <div class="tool">Aa</div>
+        </div>
+        <div class="side">
+          <div class="brand"><svg width="13" height="24" viewBox="0 0 17 32" fill="none"><path d="M5 9.5 V23 a3 3 0 0 0 6 0 V7 a4.5 4.5 0 0 0 -9 0 v17 a6.5 6.5 0 0 0 13 0 V10" stroke="#E8920A" stroke-width="2.6" stroke-linecap="round"/></svg>iliad<span class="ext">.md</span></div>
+          <div class="file active">on-flow.md</div>
+          <div class="file">drafts <span class="m">/ ch-two.md</span></div>
+          <div class="file">notes.md</div>
+          <div class="file">research.md</div>
+        </div>
+        <div class="doc">
+          <h3>On flow</h3>
+          <div class="diff">
+            <div class="line"><span class="del-s">You write best when the tool <span class="w">stays quiet and out of your way</span>.</span></div>
+            <div class="line"><span class="ins-s">You write best when the tool <span class="w">disappears under your eye</span>.</span></div>
+          </div>
+          <p>It keeps your hands on the keys, so you <span class="hl">never lose your place</span>.</p>
+        </div>
+        <div class="agent">
+          <div class="ah"><span class="live"></span> Agent</div>
+          <div class="bubble user">Tighten the opening.</div>
+          <div class="bubble bot">Rewrote your opening sentence — same idea, fewer words. Review below.</div>
+          <div class="review">
+            <div class="count"><b class="i">+1 sentence</b> · <b class="d">−1 sentence</b></div>
+            <div class="btns"><div class="btn accept">Accept</div><div class="btn reject">Reject</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="pop"><div class="row"><span class="aa">Aa</span><span>Serif</span></div><div class="track"></div></div>
+    </div>
+  </section>
+
+  <!-- ============================ OPTION C — GRAPHITE ============================ -->
+  <section class="opt">
+    <div class="opt-head acc-slate">
+      <span class="opt-num">C</span><h2>Graphite — near-monochrome</h2><span class="ref">iA Writer / Linear neutral</span>
+      <span class="swatchset"><i style="background:#3a3f47"></i><i style="background:#7c828c"></i><i style="background:#eeede9"></i></span>
+    </div>
+    <div class="win acc-slate">
+      <div class="win-grid">
+        <div class="bar">
+          <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+          <div class="name"><svg width="13" height="24" viewBox="0 0 17 32" fill="none"><path d="M5 9.5 V23 a3 3 0 0 0 6 0 V7 a4.5 4.5 0 0 0 -9 0 v17 a6.5 6.5 0 0 0 13 0 V10" stroke="#E8920A" stroke-width="2.6" stroke-linecap="round"/></svg>on-flow<span class="ext">.md</span></div>
+          <div class="tool">Aa</div>
+        </div>
+        <div class="side">
+          <div class="brand"><svg width="13" height="24" viewBox="0 0 17 32" fill="none"><path d="M5 9.5 V23 a3 3 0 0 0 6 0 V7 a4.5 4.5 0 0 0 -9 0 v17 a6.5 6.5 0 0 0 13 0 V10" stroke="#E8920A" stroke-width="2.6" stroke-linecap="round"/></svg>iliad<span class="ext">.md</span></div>
+          <div class="file active">on-flow.md</div>
+          <div class="file">drafts <span class="m">/ ch-two.md</span></div>
+          <div class="file">notes.md</div>
+          <div class="file">research.md</div>
+        </div>
+        <div class="doc">
+          <h3>On flow</h3>
+          <div class="diff">
+            <div class="line"><span class="del-s">You write best when the tool <span class="w">stays quiet and out of your way</span>.</span></div>
+            <div class="line"><span class="ins-s">You write best when the tool <span class="w">disappears under your eye</span>.</span></div>
+          </div>
+          <p>It keeps your hands on the keys, so you <span class="hl">never lose your place</span>.</p>
+        </div>
+        <div class="agent">
+          <div class="ah"><span class="live"></span> Agent</div>
+          <div class="bubble user">Tighten the opening.</div>
+          <div class="bubble bot">Rewrote your opening sentence — same idea, fewer words. Review below.</div>
+          <div class="review">
+            <div class="count"><b class="i">+1 sentence</b> · <b class="d">−1 sentence</b></div>
+            <div class="btns"><div class="btn accept">Accept</div><div class="btn reject">Reject</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="pop"><div class="row"><span class="aa">Aa</span><span>Serif</span></div><div class="track"></div></div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

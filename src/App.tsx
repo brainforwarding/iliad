@@ -21,8 +21,8 @@ import { useAgentProposals } from "./app/useAgentProposals";
 import { useSelectionComments } from "./app/useSelectionComments";
 import { useWorkspace } from "./app/useWorkspace";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
-import { EditorPane, type EditorSelectionCommentsProps } from "./components/EditorPane";
-import { IliadMark } from "./components/IliadMark";
+import { EditorPane, type EditorSelectionCommentsProps, type EditorTightenProps } from "./components/EditorPane";
+import { ClipMark } from "./components/ClipMark";
 import { AssistantPanel, type AssistantPanelSelectionComments } from "./components/AssistantPanel";
 import { FileTree } from "./components/FileTree";
 import { LanguageMenu } from "./components/LanguageMenu";
@@ -134,6 +134,7 @@ export default function App() {
     recordNormalNavigation
   } = useDocumentHistory(tree);
   const {
+    copyNodePath,
     createFolder,
     createMarkdownFile,
     creatingFile,
@@ -249,6 +250,34 @@ export default function App() {
   const handleEditorViewChange = useCallback((view: EditorView) => {
     editorViewRef.current = view;
   }, []);
+  // Gates the editor's Tighten action; main re-checks identity on each request.
+  const [editorCanTighten, setEditorCanTighten] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      let hasOpenAiApiKey = false;
+      let hasCodexAccount = false;
+
+      try {
+        const snapshot = await window.iliad.agent.getSettings();
+        hasOpenAiApiKey = snapshot.hasOpenAiApiKey;
+      } catch {}
+
+      try {
+        const codexStatus = await window.iliad.agent.codexStatus();
+        hasCodexAccount = Boolean(codexStatus.available && codexStatus.connected);
+      } catch {}
+
+      if (!cancelled) {
+        setEditorCanTighten(hasOpenAiApiKey || hasCodexAccount);
+      }
+    };
+
+    void refresh();
+    return () => {
+      cancelled = true;
+    };
+  }, [assistantOpen]);
   const scrollToSelectionComment = useCallback(
     (commentId: string) => {
       const view = editorViewRef.current;
@@ -687,6 +716,28 @@ export default function App() {
     pendingSelectionComments,
     updateSelectionComment
   ]);
+  const editorTighten = useMemo<EditorTightenProps | undefined>(() => {
+    if (!activeFile || activeFile.kind !== "markdown" || editorFile !== activeFile) {
+      return undefined;
+    }
+
+    return {
+      enabled: editorCanTighten,
+      minChars: 12,
+      maxChars: 4000,
+      labels: strings.editor.tighten,
+      run: (requestId, text, selection, options) =>
+        window.iliad.tightenSelection({
+          requestId,
+          text,
+          selection,
+          language,
+          mode: options?.mode,
+          instruction: options?.instruction
+        }),
+      cancel: (requestId) => window.iliad.cancelTighten(requestId)
+    };
+  }, [activeFile, editorCanTighten, editorFile, language, strings.editor.tighten]);
   // The chip always reflects the open document; no chip for non-open documents.
   const assistantSelectionComments = useMemo<AssistantPanelSelectionComments | undefined>(() => {
     if (!activeFile || activeFile.kind !== "markdown") {
@@ -727,7 +778,7 @@ export default function App() {
     return (
       <div className="launch-screen">
         <div className="launch-panel">
-          <IliadMark size={60} className="launch-mark" />
+          <ClipMark size={60} className="launch-mark" />
           <span className="launch-name">{strings.appName}</span>
           <h1>{isInitializing ? strings.launch.openingWorkspace : strings.launch.localMarkdownWriting}</h1>
           <button type="button" className="primary-button" onClick={openWorkspace} disabled={isInitializing}>
@@ -899,6 +950,7 @@ export default function App() {
             labels={strings.editor}
             review={editorReview}
             selectionComments={editorSelectionComments}
+            tighten={editorTighten}
             onActiveSelectionChange={handleActiveSelectionChange}
             onChange={handleEditorChange}
             onInsertImage={insertImage}
@@ -935,6 +987,7 @@ export default function App() {
         menu={treeContextMenu}
         menuRef={treeContextMenuRef}
         labels={strings.treeContextMenu}
+        onCopyPath={copyNodePath}
         onDuplicate={duplicateNodeWithNavigation}
         onMoveToTrash={moveNodeToTrashWithNavigation}
         onRename={startRenameFromContextMenu}

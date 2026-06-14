@@ -25,6 +25,105 @@ afterEach(async () => {
 });
 
 describe("Codex app-server runtime provider", () => {
+  it("runs single-shot text through a read-only Codex turn without document tools", async () => {
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "iliad-codex-provider-text-run-"));
+    tempDirs.push(workspaceRoot);
+    const client = new FakeCodexClient();
+    const provider = new CodexAppServerRuntimeProvider({
+      client: client as any,
+      model: "gpt-5.5"
+    });
+
+    const promise = provider.generateText!({
+      request: {
+        instructions: "Rewrite this passage only.",
+        input: "This passage is rather wordy.",
+        maxOutputTokens: 384,
+        language: "en",
+        cwd: workspaceRoot
+      },
+      signal: new AbortController().signal
+    });
+
+    await client.waitForTurnStart();
+    client.emitNotification("item/agentMessage/delta", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "message-1",
+      delta: "This passage is wordy."
+    });
+    completeTurn(client);
+
+    await expect(promise).resolves.toEqual({
+      responseId: "turn-1",
+      text: "This passage is wordy."
+    });
+    expect(client.threadParams).toMatchObject({
+      cwd: workspaceRoot,
+      model: "gpt-5.5",
+      sandbox: "read-only",
+      approvalPolicy: "never",
+      ephemeral: true,
+      baseInstructions: "Rewrite this passage only."
+    });
+    expect((client.threadParams as { dynamicTools?: unknown }).dynamicTools).toBeUndefined();
+    expect((client.threadParams as { developerInstructions?: string }).developerInstructions).toContain(
+      "single-shot text transformation"
+    );
+    expect(client.turnParams).toMatchObject({
+      threadId: "thread-1",
+      effort: "low",
+      summary: "concise",
+      input: [
+        {
+          type: "text",
+          text: "This passage is rather wordy.",
+          text_elements: []
+        }
+      ]
+    });
+  });
+
+  it("surfaces Codex single-shot usage limits as sanitized provider details", async () => {
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "iliad-codex-provider-text-limit-"));
+    tempDirs.push(workspaceRoot);
+    const client = new FakeCodexClient();
+    const provider = new CodexAppServerRuntimeProvider({
+      client: client as any,
+      model: "gpt-5.5"
+    });
+
+    const promise = provider.generateText!({
+      request: {
+        instructions: "Rewrite.",
+        input: "Wordy.",
+        maxOutputTokens: 384,
+        language: "en",
+        cwd: workspaceRoot
+      },
+      signal: new AbortController().signal
+    });
+
+    await client.waitForTurnStart();
+    client.emitNotification("turn/completed", {
+      threadId: "thread-1",
+      turn: {
+        id: "turn-1",
+        status: "failed",
+        error: {
+          code: "usage_limit"
+        }
+      }
+    });
+
+    await expect(promise).rejects.toMatchObject({
+      agentError: {
+        code: "provider_unavailable",
+        detail: "usage_limit"
+      }
+    });
+  });
+
   it("starts a Codex thread with dynamic document tools when documentTools are provided", async () => {
     const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "iliad-codex-provider-dynamic-tools-"));
     tempDirs.push(workspaceRoot);

@@ -321,6 +321,33 @@ export interface AgentRunRequest {
   editorSelection?: { from: number; to: number };
 }
 
+export interface TightenSelectionRequest {
+  /** Monotonic, renderer-owned; lets a late resolve be discarded as stale (ADR-0020). */
+  requestId: string;
+  /** `edit` uses a bounded custom instruction; omitted means fixed Tighten behavior. */
+  mode?: "tighten" | "edit";
+  text: string;
+  /** Relative focus span within `text`; main validates and falls back to the whole text. */
+  selection?: { from: number; to: number };
+  instruction?: string;
+  language: "en" | "es";
+}
+
+export type TightenFailureReason =
+  | "no_key"
+  | "invalid_api_key"
+  | "rate_limited"
+  | "too_long"
+  | "empty"
+  | "timeout"
+  | "provider"
+  | "aborted"
+  | "untrusted";
+
+export type TightenResult =
+  | { ok: true; rewrite: string; unchanged: boolean }
+  | { ok: false; reason: TightenFailureReason };
+
 export type SelectionCommentStatus = "pending" | "sent" | "discarded";
 
 /**
@@ -734,6 +761,8 @@ export interface IliadApi {
   listMarkdownContextDocuments?: (workspaceSessionId: string) => Promise<AgentMarkdownContextDocumentListResponse>;
   normalizeContextDrop?: (workspaceSessionId: string, absolutePath: string) => Promise<NormalizeContextDropResponse>;
   selectionComments?: SelectionCommentsApi;
+  tightenSelection: (request: TightenSelectionRequest) => Promise<TightenResult>;
+  cancelTighten: (requestId: string) => void;
   assetUrl: (absolutePath: string) => string;
   agent: AgentApi;
   remote: TelegramRemoteApi;

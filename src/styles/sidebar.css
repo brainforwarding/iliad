@@ -90,8 +90,6 @@
 
 .tree-open-button:focus-visible {
   outline: none;
-  border-radius: var(--radius-control);
-  box-shadow: var(--focus-ring);
 }
 
 .tree-item:hover,
@@ -153,16 +151,16 @@
 }
 
 .tree-item.is-pending-create {
-  color: var(--teal-deep);
+  color: var(--accent-deep);
 }
 
 .tree-item.is-pending-create .tree-icon,
 .tree-item.is-pending-dir .tree-icon {
-  color: var(--teal);
+  color: var(--accent);
 }
 
 .tree-item.is-pending-create .tree-name {
-  color: var(--teal-deep);
+  color: var(--accent-deep);
   font-weight: 600;
 }
 

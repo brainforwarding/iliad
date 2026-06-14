@@ -24,12 +24,15 @@ export interface SelectionCommentsExtensionOptions {
   documentPath: string;
   ranges: SelectionCommentWashRange[];
   provisionalRange: { from: number; to: number } | null;
+  /** Distinct graphite wash on the range being adjusted; decoration-only. */
+  provisionalTightenRange?: { from: number; to: number } | null;
   onPositionsChanged?: (documentPath: string, updates: SelectionCommentPositionUpdate[]) => void;
   onFullReplacement?: (documentPath: string, documentText: string) => void;
   onMouseUpSelection?: (view: EditorView) => void;
   onMouseMove?: (event: MouseEvent, view: EditorView) => void;
   onEditorUpdate?: (update: ViewUpdate) => void;
   onCommentShortcut?: (view: EditorView) => boolean;
+  onTightenShortcut?: (view: EditorView) => boolean;
   onEscape?: (view: EditorView) => boolean;
 }
 
@@ -113,7 +116,8 @@ export function mergeWashSpans(
 export function buildSelectionCommentDecorations(
   state: EditorState,
   ranges: SelectionCommentWashRange[],
-  provisionalRange: { from: number; to: number } | null
+  provisionalRange: { from: number; to: number } | null,
+  provisionalTightenRange: { from: number; to: number } | null = null
 ): DecorationSet {
   try {
     const spans = mergeWashSpans(ranges, provisionalRange, state.doc.length);
@@ -122,6 +126,16 @@ export function buildSelectionCommentDecorations(
         class: span.fading ? "cm-comment-wash cm-comment-wash-fading" : "cm-comment-wash"
       }).range(span.from, span.to)
     );
+
+    if (provisionalTightenRange) {
+      const clamp = (value: number) => Math.max(0, Math.min(value, state.doc.length));
+      const from = clamp(provisionalTightenRange.from);
+      const to = clamp(provisionalTightenRange.to);
+
+      if (to > from) {
+        decorations.push(Decoration.mark({ class: "cm-tighten-wash" }).range(from, to));
+      }
+    }
 
     return Decoration.set(decorations, true);
   } catch (error) {
@@ -179,7 +193,12 @@ export function selectionCommentMappingForChanges(
 export function selectionCommentsExtension(options: SelectionCommentsExtensionOptions) {
   const decorations = StateField.define<DecorationSet>({
     create(state) {
-      return buildSelectionCommentDecorations(state, options.ranges, options.provisionalRange);
+      return buildSelectionCommentDecorations(
+        state,
+        options.ranges,
+        options.provisionalRange,
+        options.provisionalTightenRange ?? null
+      );
     },
     update(value, transaction) {
       return transaction.docChanged ? value.map(transaction.changes) : value;
@@ -232,6 +251,10 @@ export function selectionCommentsExtension(options: SelectionCommentsExtensionOp
       {
         key: "Mod-Shift-m",
         run: (view) => options.onCommentShortcut?.(view) ?? false
+      },
+      {
+        key: "Mod-Shift-j",
+        run: (view) => options.onTightenShortcut?.(view) ?? false
       },
       {
         key: "Escape",

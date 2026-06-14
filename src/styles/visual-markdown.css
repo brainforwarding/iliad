@@ -156,7 +156,7 @@
 }
 
 .cm-md-link {
-  color: var(--teal);
+  color: var(--accent);
   cursor: pointer;
   text-decoration: underline;
   text-decoration-thickness: 1px;
@@ -167,16 +167,16 @@
 }
 
 .cm-md-link:hover {
-  color: var(--teal-deep);
-  text-decoration-color: var(--teal-deep);
+  color: var(--accent-deep);
+  text-decoration-color: var(--accent-deep);
   text-decoration-thickness: 1.5px;
 }
 
 .cm-md-inline-code {
-  border: 1px solid var(--teal-tint);
+  border: 1px solid var(--accent-tint);
   border-radius: 5px;
-  background: var(--teal-tint);
-  color: var(--teal-deep);
+  background: var(--accent-tint);
+  color: var(--accent-deep);
   font-family: var(--font-mono);
   font-size: 0.86em;
   padding: 1px 5px;
@@ -228,7 +228,7 @@
 .cm-list-bullet {
   display: inline-block;
   width: 1ch;
-  color: var(--teal);
+  color: var(--accent);
   font-family: var(--font-sans);
   font-weight: 700;
 }
@@ -250,8 +250,8 @@
 }
 
 .cm-task-checkbox.is-checked {
-  border-color: var(--teal);
-  background: var(--teal);
+  border-color: var(--accent);
+  background: var(--accent);
 }
 
 .cm-image-block {

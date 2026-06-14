@@ -11,11 +11,13 @@ interface TreeContextMenuProps {
   labels: {
     duplicate: string;
     rename: string;
+    copyPath: string;
     revealInFinder: string;
     moveToTrash: string;
   };
   menu: TreeContextMenuState | null;
   menuRef: RefObject<HTMLDivElement>;
+  onCopyPath: (node: FileTreeNode) => void | Promise<void>;
   onDuplicate: (node: FileTreeNode) => void | Promise<void>;
   onMoveToTrash: (node: FileTreeNode) => void | Promise<void>;
   onRename: (node: FileTreeNode) => void;
@@ -24,7 +26,7 @@ interface TreeContextMenuProps {
 
 function contextMenuPosition(menu: TreeContextMenuState) {
   const width = 178;
-  const height = menu.node.kind === "directory" ? 124 : 160;
+  const height = menu.node.kind === "directory" ? 164 : 200;
 
   return {
     left: Math.min(menu.x, Math.max(8, window.innerWidth - width - 8)),
@@ -36,6 +38,7 @@ export function TreeContextMenu({
   labels,
   menu,
   menuRef,
+  onCopyPath,
   onDuplicate,
   onMoveToTrash,
   onRename,
@@ -63,6 +66,9 @@ export function TreeContextMenu({
       ) : null}
       <button type="button" role="menuitem" onClick={() => onRename(menu.node)}>
         {labels.rename}
+      </button>
+      <button type="button" role="menuitem" onClick={() => void onCopyPath(menu.node)}>
+        {labels.copyPath}
       </button>
       <button type="button" role="menuitem" onClick={() => void onRevealInFinder(menu.node)}>
         {labels.revealInFinder}

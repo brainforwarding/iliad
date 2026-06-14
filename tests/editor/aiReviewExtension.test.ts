@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { aiReviewExtension } from "../../src/editor/aiReview/extension";
 import type { DisplayReviewHunk } from "../../src/editor/aiReview/diff";
 
-function createReviewState(doc: string, hunks: DisplayReviewHunk[]) {
+function createReviewState(doc: string, hunks: DisplayReviewHunk[], renderInsertedAsSource = false) {
   return EditorState.create({
     doc,
     extensions: [
@@ -13,6 +13,7 @@ function createReviewState(doc: string, hunks: DisplayReviewHunk[]) {
         hunks,
         activeHunkId: null,
         createLineCount: 0,
+        renderInsertedAsSource,
         labels: {}
       })
     ]
@@ -64,6 +65,35 @@ describe("ai review extension", () => {
         })
       ])
     );
-    expect(decorations.some(({ value }) => value.spec.class === "cm-ai-review-removed-text")).toBe(false);
+    expect(decorations.some(({ value }) => value.spec.class === "cm-ai-review-removed-token")).toBe(false);
+  });
+
+  it("collapses a one-line pure insertion into one inserted source line", () => {
+    const oldLine = '* ¿Qué principios serán "línea roja" (privacidad, transparencia, no reemplazar aprendizaje, equidad)?';
+    const newLine = '* ¿Qué principios serán "línea roja" (privacidad, transparencia, no reemplazar el aprendizaje, equidad)?';
+    const hunk: DisplayReviewHunk = {
+      id: "hunk-1",
+      status: "pending",
+      anchorLine: 1,
+      oldStartLine: 1,
+      oldLines: [oldLine],
+      newLines: [newLine],
+      displayOldStartLine: 1,
+      displayOldEndLine: 1,
+      displayAnchorLine: 1
+    };
+
+    const decorations = collectDecorations(createReviewState(oldLine, [hunk], true));
+    const collapsedSource = decorations.find(({ from, to, value }) => from === 0 && to === oldLine.length && value.spec.widget);
+
+    expect(collapsedSource?.value.spec.widget).toMatchObject({
+      baseClassName: "cm-ai-review-line-inserted",
+      changedClassName: "cm-ai-review-inserted-token",
+      changedRanges: [{ from: 79, to: 82 }],
+      text: newLine
+    });
+    expect(decorations.some(({ value }) => value.spec.class === "cm-ai-review-line-inserted")).toBe(false);
+    expect(decorations.some(({ value }) => value.spec.class === "cm-ai-review-line-removed")).toBe(false);
+    expect(decorations.some(({ value }) => value.spec.class === "cm-ai-review-removed-token")).toBe(false);
   });
 });

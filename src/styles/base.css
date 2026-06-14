@@ -73,7 +73,7 @@ button {
 }
 
 .launch-name {
-  color: var(--teal);
+  color: var(--accent);
   font-size: var(--text-sm);
   font-weight: 700;
   letter-spacing: 0;
@@ -97,14 +97,14 @@ button {
   gap: 10px;
   min-height: 42px;
   padding: 0 16px;
-  border: 1px solid var(--teal-deep);
+  border: 1px solid var(--accent-deep);
   border-radius: 6px;
-  background: var(--teal);
+  background: var(--accent);
   color: white;
   cursor: pointer;
   font-weight: 700;
 }
 
 .primary-button:hover {
-  background: var(--teal-deep);
+  background: var(--accent-deep);
 }

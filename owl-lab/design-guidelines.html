@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Iliad — Design Guidelines (Flow)</title>
+<style>
+  :root {
+    --editor:#fffefa; --card:#fbfaf4; --paper:#f4f3ec;
+    --ink-1:#1f211f; --ink-2:#272a26; --muted-1:#52584f; --muted-2:#62675f; --ink-inverse:#fffdf6;
+    --hairline:#e3e0d6; --hairline-strong:#d9d7cc; --border-control:#cfcec3;
+    /* accent — graphite */
+    --accent:#3a3f47; --accent-deep:#2c3036; --accent-soft:rgba(60,66,74,.07);
+    --accent-rail:rgba(58,63,71,.70); --selection-wash:rgba(60,66,74,.14); --focus-ring-border:#9a9ea6;
+    /* brand gold */
+    --gold:#e8920a; --gold-bright:#ffad1f; --gold-ink:#5a3d00; --gold-muted:#c9ab86;
+    /* marks */
+    --highlight:rgba(255,205,90,.5);
+    --comment:rgba(91,141,210,.20); --comment-ink:#2f4d80;
+    --ins:108,196,140; --ins-ink:#2c5a38;
+    --del:244,150,118; --del-ink:#9a4b36; --del-line:rgba(154,75,54,.5);
+    /* status */
+    --pending:#c98912; --create:#2f9a5b; --error:#8a3d2a; --graphite:#3a3f47;
+    --serif:"Iowan Old Style","New York",ui-serif,Georgia,serif;
+    --sans:"Avenir Next",Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:0 0 120px; background:var(--paper); color:var(--ink-1); font-family:var(--sans);
+    -webkit-font-smoothing:antialiased; line-height:1.55; }
+  .wrap { max-width:920px; margin:0 auto; padding:0 28px; }
+
+  header.top { background:var(--editor); border-bottom:1px solid var(--hairline); padding:54px 0 40px; margin-bottom:8px; }
+  .eyebrow { font-size:.72rem; letter-spacing:.16em; text-transform:uppercase; color:var(--gold-ink); font-weight:700; }
+  h1 { font-family:var(--serif); font-size:2.6rem; font-weight:600; margin:.4rem 0 .5rem; letter-spacing:-.015em; }
+  header.top p { color:var(--muted-1); max-width:62ch; font-size:1.05rem; }
+  .clip-hero { float:right; margin:-10px 0 0 24px; cursor:pointer; }
+
+  section { margin-top:46px; }
+  h2 { font-family:var(--serif); font-size:1.5rem; font-weight:600; letter-spacing:-.01em;
+    padding-bottom:8px; border-bottom:1px solid var(--hairline); margin-bottom:18px; }
+  h3 { font-size:.78rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted-2); font-weight:700; margin:24px 0 12px; }
+  p.lead { color:var(--muted-1); max-width:68ch; margin-bottom:6px; }
+  ul.principles { list-style:none; padding:0; display:grid; gap:10px; max-width:74ch; }
+  ul.principles li { padding-left:20px; position:relative; color:var(--ink-2); }
+  ul.principles li::before { content:""; position:absolute; left:0; top:.55em; width:7px; height:7px; border-radius:50%; background:var(--gold); }
+  ul.principles b { color:var(--ink-1); }
+
+  /* swatches */
+  .swatches { display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:12px; }
+  .sw { border:1px solid var(--hairline); border-radius:10px; overflow:hidden; background:var(--editor); }
+  .sw .chip { height:62px; border-bottom:1px solid var(--hairline); }
+  .sw .meta { padding:9px 11px; }
+  .sw .nm { font-size:.82rem; font-weight:650; color:var(--ink-2); }
+  .sw .hex { font-family:var(--mono); font-size:.7rem; color:var(--muted-2); }
+  .sw .role { font-size:.72rem; color:var(--muted-1); margin-top:3px; line-height:1.35; }
+
+  .card { background:var(--editor); border:1px solid var(--hairline); border-radius:12px; padding:20px 22px; }
+  pre { background:#2a2d33; color:#e7e4da; border-radius:10px; padding:14px 16px; overflow:auto;
+    font-family:var(--mono); font-size:.78rem; line-height:1.55; }
+  pre .c { color:#9aa0a6; }
+  .note { font-size:.86rem; color:var(--muted-2); margin-top:10px; max-width:72ch; }
+
+  /* prose specimen for marks */
+  .specimen { font-family:var(--serif); font-size:1.12rem; line-height:1.85; color:var(--ink-1); max-width:54ch; }
+  .specimen + .specimen { margin-top:1rem; }
+  .mk { -webkit-box-decoration-break:clone; box-decoration-break:clone;
+    background-repeat:no-repeat; background-position:0 90%; background-size:100% .62em; border-radius:2px; }
+  .hl  { background-image:linear-gradient(var(--highlight),var(--highlight)); }
+  .cmt { background-image:linear-gradient(var(--comment),var(--comment)); color:var(--comment-ink); }
+  .sel { background:var(--selection-wash); border-radius:2px; } /* live selection = FULL height */
+
+  /* diff two-tier */
+  .diff .line { font-family:var(--serif); font-size:1.12rem; line-height:1.9; }
+  .diff .line + .line { margin-top:.1rem; }
+  .del-s,.ins-s,.del-s .w,.ins-s .w { -webkit-box-decoration-break:clone; box-decoration-break:clone;
+    background-repeat:no-repeat; background-position:0 90%; background-size:100% .62em; border-radius:2px; }
+  .del-s { background-image:linear-gradient(rgba(var(--del),.15),rgba(var(--del),.15)); color:var(--del-ink);
+    text-decoration:line-through; text-decoration-color:var(--del-line); }
+  .ins-s { background-image:linear-gradient(rgba(var(--ins),.16),rgba(var(--ins),.16)); color:var(--ins-ink); }
+  .del-s .w { background-image:linear-gradient(rgba(var(--del),.40),rgba(var(--del),.40)); }
+  .ins-s .w { background-image:linear-gradient(rgba(var(--ins),.42),rgba(var(--ins),.42)); }
+
+  .twocol { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .twocol .card .h { font-size:.72rem; letter-spacing:.07em; text-transform:uppercase; color:var(--muted-2); font-weight:700; margin-bottom:10px; }
+  .full-ex .a { background:rgba(var(--ins),.3); color:var(--ins-ink); border-radius:2px; }
+  .full-ex .d { background:rgba(var(--del),.3); color:var(--del-ink); text-decoration:line-through; border-radius:2px; }
+
+  .legend { display:flex; flex-wrap:wrap; gap:14px 22px; margin-top:14px; }
+  .leg { display:flex; align-items:center; gap:8px; font-size:.86rem; color:var(--ink-2); }
+  .leg i { width:46px; height:22px; border-radius:5px; border:1px solid var(--hairline); display:inline-block;
+    background-repeat:no-repeat; background-position:0 80%; background-size:100% 9px; }
+
+  /* type scale */
+  .type div { margin:6px 0; }
+  .t-serif { font-family:var(--serif); } .t-sans { font-family:var(--sans); }
+  .meta { font-family:var(--mono); font-size:.72rem; color:var(--muted-2); margin-left:10px; }
+
+  .radii { display:flex; gap:22px; align-items:flex-end; }
+  .radii .b { background:var(--accent-soft); border:1px solid var(--hairline); width:80px; height:64px; display:grid; place-items:end center; padding-bottom:6px; font-family:var(--mono); font-size:.7rem; color:var(--muted-1); }
+
+  .files { font-family:var(--mono); font-size:.82rem; color:var(--ink-2); line-height:1.9; }
+  .files b { color:var(--gold-ink); }
+
+  /* ===== mascot ===== */
+  .mark { display:inline-flex; color:var(--gold); line-height:0; }
+  .mark svg { display:block; overflow:visible; }
+  .mark.asleep { color:var(--gold-muted); }
+  .clip-shadow { fill:currentColor; opacity:.16; transform-box:fill-box; transform-origin:50% 50%; }
+  .wire { fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+  .zzz { font-family:var(--serif); font-size:9px; fill:currentColor; opacity:0; }
+  .clip { transform-box:fill-box; transform-origin:50% 100%; animation:clip-idle 4.6s ease-in-out infinite; }
+  .mark.is-hop .clip { animation:clip-hop .82s ease; }
+  .mark.is-hop .clip-shadow { animation:clip-shadow .82s ease; }
+  .mark.asleep .clip { animation:none; transform:rotate(8deg) translateY(2px); }
+  .mark.asleep .zzz { opacity:.65; }
+  @keyframes clip-idle { 0%,100%{ transform:rotate(-1.6deg) scale(1);} 50%{ transform:rotate(1.6deg) scale(1.02);} }
+  @keyframes clip-hop { 0%{transform:translateY(0) scale(1,1);}15%{transform:translateY(2px) scale(1.06,.9);}
+    45%{transform:translateY(-17px) scale(.93,1.09);}70%{transform:translateY(0) scale(1.05,.95);}
+    85%{transform:translateY(-3px) scale(1,1);}100%{transform:translateY(0) scale(1,1);} }
+  @keyframes clip-shadow { 0%,100%{transform:scale(1);opacity:.16;}45%{transform:scale(.66);opacity:.07;} }
+  .mascot-row { display:flex; gap:30px; align-items:flex-end; flex-wrap:wrap; }
+  .mascot-row .cell { display:grid; justify-items:center; gap:8px; }
+  .mascot-row .stage { width:130px; height:150px; border-radius:16px; display:grid; place-items:center; }
+  .mascot-row .cap { font-family:var(--sans); font-size:.74rem; color:var(--muted-1); }
+  @media (prefers-reduced-motion: reduce){ .clip,.mark.is-hop .clip,.mark.is-hop .clip-shadow{animation:none!important;} }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <span class="mark clip-hero" id="hero"></span>
+    <div class="eyebrow">Iliad · Design Guidelines</div>
+    <h1>Flow</h1>
+    <p>A calm, content-first writing workspace on warm paper. Graphite carries interaction, gold is the one warm brand note, and the agent's edits arrive as soft markers under the words — never blocks of colour over them. Values are enforced in <code>src/styles/tokens.css</code>; this page is the visual reference.</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section>
+    <h2>Principles</h2>
+    <ul class="principles">
+      <li><b>Text is the focus; chrome recedes.</b> Cream canvas, near-white panels, hairline separation. No grey mass that competes with the writing.</li>
+      <li><b>One colour, one meaning.</b> Graphite = interactive · gold = brand + highlight · green = added · coral = removed · blue = comment · amber = pending. Two families never share a hue.</li>
+      <li><b>Restraint.</b> System fonts, weights 400–700, two radii. Add a semantic token before any new value.</li>
+      <li><b>Personality through motion, not ornament.</b> The mascot has no face; it's alive because it moves. The writing column never moves.</li>
+      <li><b>Best practices over invention.</b> Adapt the converged pattern quietly; don't reinvent.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Colour</h2>
+
+    <h3>Surfaces · ink · hairlines</h3>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#fffefa"></div><div class="meta"><div class="nm">--editor</div><div class="hex">#fffefa</div><div class="role">canvas, inputs, panels</div></div></div>
+      <div class="sw"><div class="chip" style="background:#fbfaf4"></div><div class="meta"><div class="nm">--card</div><div class="hex">#fbfaf4</div><div class="role">rails, topbar</div></div></div>
+      <div class="sw"><div class="chip" style="background:#f4f3ec"></div><div class="meta"><div class="nm">--paper</div><div class="hex">#f4f3ec</div><div class="role">ground, hovers</div></div></div>
+      <div class="sw"><div class="chip" style="background:#1f211f"></div><div class="meta"><div class="nm">--ink-1</div><div class="hex">#1f211f</div><div class="role">prose</div></div></div>
+      <div class="sw"><div class="chip" style="background:#62675f"></div><div class="meta"><div class="nm">--muted-2</div><div class="hex">#62675f</div><div class="role">meta floor</div></div></div>
+      <div class="sw"><div class="chip" style="background:#e3e0d6"></div><div class="meta"><div class="nm">--hairline</div><div class="hex">#e3e0d6</div><div class="role">dividers</div></div></div>
+    </div>
+
+    <h3>Accent — graphite (interactive)</h3>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#3a3f47"></div><div class="meta"><div class="nm">--accent</div><div class="hex">#3a3f47</div><div class="role">links, active file, Accept</div></div></div>
+      <div class="sw"><div class="chip" style="background:#2c3036"></div><div class="meta"><div class="nm">--accent-deep</div><div class="hex">#2c3036</div><div class="role">hover / pressed</div></div></div>
+      <div class="sw"><div class="chip" style="background:#eeede9"></div><div class="meta"><div class="nm">--accent-soft</div><div class="hex">rgba(60,66,74,.07)</div><div class="role">active row, user bubble</div></div></div>
+      <div class="sw"><div class="chip" style="background:#9a9ea6"></div><div class="meta"><div class="nm">--focus-ring-border</div><div class="hex">#9a9ea6</div><div class="role">focus ring</div></div></div>
+    </div>
+
+    <h3>Brand — gold (the one warm note)</h3>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#e8920a"></div><div class="meta"><div class="nm">--brand-gold</div><div class="hex">#e8920a</div><div class="role">paperclip mark</div></div></div>
+      <div class="sw"><div class="chip" style="background:#ffad1f"></div><div class="meta"><div class="nm">--brand-gold-bright</div><div class="hex">#ffad1f</div><div class="role">agent pulse</div></div></div>
+      <div class="sw"><div class="chip" style="background:#5a3d00"></div><div class="meta"><div class="nm">--brand-gold-ink</div><div class="hex">#5a3d00</div><div class="role">text on gold</div></div></div>
+    </div>
+
+    <h3>Text marks &amp; status</h3>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:linear-gradient(#fffefa 58%, rgba(108,196,140,.42) 0)"></div><div class="meta"><div class="nm">diff · added</div><div class="hex">rgb(108,196,140)</div><div class="role">green · ink #2c5a38</div></div></div>
+      <div class="sw"><div class="chip" style="background:linear-gradient(#fffefa 58%, rgba(244,150,118,.40) 0)"></div><div class="meta"><div class="nm">diff · removed</div><div class="hex">rgb(244,150,118)</div><div class="role">coral · ink #9a4b36 · strike</div></div></div>
+      <div class="sw"><div class="chip" style="background:linear-gradient(#fffefa 58%, rgba(91,141,210,.20) 0)"></div><div class="meta"><div class="nm">--comment</div><div class="hex">rgba(91,141,210,.20)</div><div class="role">blue · ink #2f4d80</div></div></div>
+      <div class="sw"><div class="chip" style="background:linear-gradient(#fffefa 58%, rgba(255,205,90,.5) 0)"></div><div class="meta"><div class="nm">--highlight</div><div class="hex">rgba(255,205,90,.5)</div><div class="role">gold · user ==mark==</div></div></div>
+      <div class="sw"><div class="chip" style="background:#eceae6"></div><div class="meta"><div class="nm">--selection-wash</div><div class="hex">rgba(60,66,74,.14)</div><div class="role">live selection (full height)</div></div></div>
+      <div class="sw"><div class="chip" style="background:#c98912"></div><div class="meta"><div class="nm">--pending</div><div class="hex">#c98912</div><div class="role">in-progress (amber)</div></div></div>
+      <div class="sw"><div class="chip" style="background:#2f9a5b"></div><div class="meta"><div class="nm">--create</div><div class="hex">#2f9a5b</div><div class="role">create</div></div></div>
+      <div class="sw"><div class="chip" style="background:#8a3d2a"></div><div class="meta"><div class="nm">--error</div><div class="hex">#8a3d2a</div><div class="role">error</div></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The bottom-half wash</h2>
+    <p class="lead">Every persistent mark over readable text (diff, comment, highlight) is a fixed band low on the line — not a full-height block. Glyphs stay clean; a page of edits reads as calm annotation. Live text selection is the one exception (full height, so it dominates).</p>
+    <div class="twocol" style="margin:14px 0 16px">
+      <div class="card full-ex"><div class="h">✗ Full background</div>
+        <p class="specimen" style="margin:0">The tool <span class="d">gets in your way</span> <span class="a">disappears under your eye</span>.</p></div>
+      <div class="card"><div class="h">✓ Bottom-half marker</div>
+        <p class="specimen" style="margin:0">The tool <span class="del-s" style="text-decoration:none"><span class="w">gets in your way</span></span> <span class="ins-s"><span class="w">disappears under your eye</span></span>.</p></div>
+    </div>
+    <pre><span class="c">/* same recipe for diff · comment · highlight */</span>
+.mark {
+  background-image: linear-gradient(var(--c), var(--c));
+  background-size: 100% 0.62em;        <span class="c">/* fixed band — identical for every tier */</span>
+  background-position: 0 90%;           <span class="c">/* low on the line */</span>
+  background-repeat: no-repeat;
+  box-decoration-break: clone;          <span class="c">/* hug text, stop at its end, wrap right */</span>
+}</pre>
+  </section>
+
+  <section>
+    <h2>Diff — two tiers, sentence-level</h2>
+    <p class="lead">The agent's review shows whole sentences added/removed, with the <b>words that actually changed</b> in a stronger shade. Both tiers share the band; only the alpha differs.</p>
+    <div class="card">
+      <div class="diff">
+        <div class="line"><span class="del-s">You write best when the tool <span class="w">stays quiet and out of your way</span>.</span></div>
+        <div class="line"><span class="ins-s">You write best when the tool <span class="w">disappears under your eye</span>.</span></div>
+      </div>
+    </div>
+    <div class="legend">
+      <span class="leg"><i style="background-image:linear-gradient(rgba(108,196,140,.16),rgba(108,196,140,.16))"></i> sentence added</span>
+      <span class="leg"><i style="background-image:linear-gradient(rgba(108,196,140,.42),rgba(108,196,140,.42))"></i> word changed</span>
+      <span class="leg"><i style="background-image:linear-gradient(rgba(244,150,118,.15),rgba(244,150,118,.15))"></i> sentence removed</span>
+      <span class="leg"><i style="background-image:linear-gradient(rgba(244,150,118,.40),rgba(244,150,118,.40))"></i> word changed</span>
+    </div>
+    <p class="note"><b>Rules:</b> compute a word-level intradiff (common prefix/suffix stay soft, only the differing run goes strong). Removed adds strikethrough. <b>Collapse single-sided edits</b> — a pure one-word insertion/deletion shows on one line, not two near-identical washed sentences. Impl: <code>src/editor/aiReview/diff.ts</code> + <code>extension.ts</code>.</p>
+  </section>
+
+  <section>
+    <h2>Comments &amp; highlight</h2>
+    <p class="specimen">A reviewer leaves a note on <span class="mk cmt">this commented passage</span> — a blue bottom-half wash, distinct from the agent's green/coral diff.</p>
+    <p class="specimen">Your own emphasis uses the gold marker: <span class="mk hl">this is highlighted text</span> (<code>==like this==</code>).</p>
+    <p class="specimen">And a live <span class="sel">text selection</span> is the one full-height wash, so it dominates if it overlaps a mark.</p>
+    <p class="note">Comment = <code>--comment</code> blue (`src/editor/selectionComments/`). Highlight = <code>--highlight</code> gold (`src/editor/visualMarkdown/inline.ts`). Selection = <code>--selection-wash</code> graphite.</p>
+  </section>
+
+  <section>
+    <h2>Mascot — the clip</h2>
+    <p class="lead">A faceless gold paperclip — <b>no eyes</b> (an eyed clip in an AI writing app reads as Clippy). Personality comes from motion: it sways/breathes, hops on click or idle, and droops to sleep on a crash. Click it. Component: <code>src/components/ClipMark.tsx</code>.</p>
+    <div class="mascot-row">
+      <div class="cell"><div class="stage" style="background:var(--editor);border:1px solid var(--hairline)"><span class="mark" id="m-awake"></span></div><div class="cap">Awake · click to hop</div></div>
+      <div class="cell"><div class="stage" style="background:var(--editor);border:1px solid var(--hairline)"><span class="mark asleep" id="m-asleep"></span></div><div class="cap">Asleep (crash / no key)</div></div>
+      <div class="cell"><div class="stage" style="background:var(--graphite)"><span class="mark" id="m-dark" style="color:var(--gold-bright)"></span></div><div class="cap">On dark</div></div>
+      <div class="cell"><div class="stage" style="background:var(--gold);border-radius:30px"><span class="mark" id="m-badge" style="color:var(--cream)"></span></div><div class="cap">App-icon idea</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Typography</h2>
+    <p class="lead">System stacks are the brand — no web fonts (offline, fast, native).</p>
+    <div class="type card">
+      <div class="t-serif" style="font-size:1.8rem;font-weight:600">Serif canvas — Iowan Old Style <span class="meta">--font-serif · prose &amp; headings</span></div>
+      <div class="t-sans" style="font-size:1.05rem;font-weight:600">Sans chrome — Avenir Next / system-ui <span class="meta">--font-sans · UI</span></div>
+      <div class="t-sans" style="font-family:var(--mono)">Mono — ui-monospace / Menlo <span class="meta">--font-mono</span></div>
+      <div class="t-sans" style="margin-top:10px"><b>Weights:</b> 400 · 500 · <b>600 (emphasis)</b> · 700 (avoid in chrome)</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Radii &amp; motion</h2>
+    <div class="radii">
+      <div class="b" style="border-radius:8px">8px<br>surface</div>
+      <div class="b" style="border-radius:6px">6px<br>control</div>
+      <div class="b" style="border-radius:999px;width:120px">999px · pill</div>
+    </div>
+    <p class="note">Motion is ambient and quiet: active-file light sheen ~7–10% over ~13s; agent presence = a slow breathing dot (pulses gold). Glass (<code>backdrop-filter</code>) only on floating surfaces (typography popover, launch/overlay) — never the file rail or editor. <b>The writing column never animates.</b></p>
+  </section>
+
+  <section>
+    <h2>Where things live</h2>
+    <div class="files">
+      <div><b>Colour source of truth</b> · src/styles/tokens.css <span class="meta">(lint-enforced; no raw hex elsewhere)</span></div>
+      <div><b>Diff</b> · src/editor/aiReview/{diff,extension}.ts</div>
+      <div><b>Comments</b> · src/editor/selectionComments/</div>
+      <div><b>Highlight</b> · src/editor/visualMarkdown/inline.ts</div>
+      <div><b>Mascot</b> · src/components/ClipMark.tsx</div>
+      <div><b>Brand assets</b> · public/favicon.svg · build/icon.svg</div>
+      <div><b>Full plan</b> · specs/2026-06-13-flow-visual-identity.md</div>
+    </div>
+  </section>
+</div>
+
+<script>
+  function clipSVG() {
+    return `<svg viewBox="0 0 64 96" width="100%" height="100%" role="presentation" focusable="false">
+      <ellipse class="clip-shadow" cx="32" cy="90" rx="15" ry="3"></ellipse>
+      <g class="clip"><g transform="translate(11 4) scale(2.4)">
+        <path class="wire" d="M5 9.5 V23 a3 3 0 0 0 6 0 V7 a4.5 4.5 0 0 0 -9 0 v17 a6.5 6.5 0 0 0 13 0 V10"/>
+      </g><text class="zzz" x="47" y="16">z</text></g></svg>`;
+  }
+  function liven(mark,{min=8000,max=20000}={}) {
+    if (mark.classList.contains('asleep')) return;
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let t=0; const hop=()=>{clearTimeout(t);mark.classList.remove('is-hop');void mark.offsetWidth;
+      mark.classList.add('is-hop');t=setTimeout(()=>mark.classList.remove('is-hop'),820);};
+    mark.addEventListener('click',()=>{if(!reduce)hop();});
+    if(reduce)return; const s=()=>setTimeout(()=>{hop();s();},min+Math.random()*(max-min)); s();
+  }
+  function fit(el,size){ el.style.width=size+'px'; el.style.height=Math.round(size*96/64)+'px'; el.innerHTML=clipSVG(); }
+  const hero=document.getElementById('hero'); fit(hero,84); liven(hero,{min:5000,max:10000});
+  [['m-awake',92,true],['m-asleep',92,false],['m-dark',82,true],['m-badge',74,true]].forEach(([id,sz,live])=>{
+    const el=document.getElementById(id); fit(el,sz); if(live) liven(el);
+  });
+</script>
+</body>
+</html>

@@ -356,13 +356,14 @@ export function addInlineMathDecorations(
   state: EditorState,
   lineFrom: number,
   text: string,
-  blockedRanges: BlockedRange[]
+  blockedRanges: BlockedRange[],
+  editorFocused = true
 ) {
   for (const mathRange of collectInlineMarkdownRanges(text).math) {
     const from = lineFrom + mathRange.from;
     const to = lineFrom + mathRange.to;
 
-    if (rangeOverlapsBlocked(blockedRanges, from, to) || selectionIntersectsRange(state, from, to)) {
+    if (rangeOverlapsBlocked(blockedRanges, from, to) || selectionIntersectsRange(state, from, to, editorFocused)) {
       continue;
     }
 
@@ -381,7 +382,8 @@ export function addLinkDecorations(
   lineFrom: number,
   text: string,
   blockedRanges: BlockedRange[],
-  _onOpenLink: (href: string) => void | Promise<void>
+  _onOpenLink: (href: string) => void | Promise<void>,
+  editorFocused = true
 ) {
   for (const linkRange of collectInlineMarkdownRanges(text).links) {
     const from = lineFrom + linkRange.from;
@@ -399,7 +401,7 @@ export function addLinkDecorations(
       }
     }
 
-    if (selectionIntersectsRange(state, from, to)) {
+    if (selectionIntersectsRange(state, from, to, editorFocused)) {
       continue;
     }
 
