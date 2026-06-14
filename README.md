@@ -71,21 +71,24 @@ npm audit --audit-level=high
 
 ### Release builds (macOS)
 
-Signed and notarized macOS builds are produced with:
+Public releases are manual. Pushing source code does not update the public
+downloadable app; the public version changes only when a signed, notarized
+artifact is uploaded to a GitHub release.
+
+Read [`docs/release.md`](docs/release.md) before releasing. In particular:
+
+- The public GitHub repository uses a squashed public history. Do not push the
+  private/local development history directly to `brainforwarding/iliad`.
+- `npm run dist:mac:signed` signs the app, but it may skip notarization unless
+  Apple notarization credentials are available to Electron Builder.
+- This machine has a stored `notarytool` profile named `iliad-notary`; use that
+  profile for manual notarization when the Apple env vars are not present.
+
+The base macOS build command is:
 
 ```bash
 npm run dist:mac:signed
 ```
-
-electron-builder reads the signing and notarization credentials from the
-environment, so the following variables must be set before running the command:
-
-- `APPLE_ID` — the Apple ID used for notarization.
-- `APPLE_APP_SPECIFIC_PASSWORD` — an app-specific password for that Apple ID.
-- `APPLE_TEAM_ID` — the Apple Developer Team ID.
-
-No credentials live in the repository. Provide them through your shell
-environment (or a local, git-ignored `.env`) at build time.
 
 ## Product Direction
 
