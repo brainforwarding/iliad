@@ -72,7 +72,11 @@ describe("Codex account settings copy", () => {
 
   it("keeps device login copy compact and localized", () => {
     expect(appStrings.en.assistant.codex.copyCode).toBe("Copy code");
+    expect(appStrings.en.assistant.codex.copyCodeCopied).toBe("Copied");
+    expect(appStrings.en.assistant.codex.copyCodeFailed).toBe("Copy failed");
     expect(appStrings.es.assistant.codex.copyCode).toBe("Copiar código");
+    expect(appStrings.es.assistant.codex.copyCodeCopied).toBe("Copiado");
+    expect(appStrings.es.assistant.codex.copyCodeFailed).toBe("No se copió");
     expect(appStrings.es.assistant.codex.deviceAuthorizationHelp).toBe(
       "Si OpenAI lo solicita, activa la autorización por código de dispositivo en la configuración de seguridad de ChatGPT."
     );
@@ -118,6 +122,8 @@ describe("Codex account settings copy", () => {
 
     expect(html).toContain("<code>ABCD-EFGH</code>");
     expect(html).toContain("Copiar código");
+    expect(html).toContain('class="assistant-codex-copy-button is-idle"');
+    expect(html).toContain('aria-live="polite"');
     expect(html).toContain(appStrings.es.assistant.codex.deviceAuthorizationHelp);
     expect(html).not.toContain("Código: ABCD-EFGH");
     expect(html).not.toContain("Code: ABCD-EFGH");

@@ -519,6 +519,18 @@
   cursor: default;
 }
 
+.assistant-codex-copy-button.is-copied {
+  border-color: var(--diff-ins-strong);
+  background: var(--diff-ins-soft);
+  color: var(--diff-ins-ink);
+}
+
+.assistant-codex-copy-button.is-failed {
+  border-color: var(--error-border);
+  background: var(--error-surface);
+  color: var(--error-strong);
+}
+
 .assistant-remote-pairing-row {
   display: flex;
   min-width: 0;

@@ -193,6 +193,8 @@ export const appStrings = {
         refresh: "Refresh",
         deviceUrl: "Go to auth.openai.com/codex/device",
         copyCode: "Copy code",
+        copyCodeCopied: "Copied",
+        copyCodeFailed: "Copy failed",
         deviceAuthorizationHelp: "If OpenAI asks, enable device-code authorization in ChatGPT security settings.",
         signedInAs: (email: string) => `Signed in as ${email}`,
         plan: (plan: string) => `Plan: ${plan}`,
@@ -609,6 +611,8 @@ export const appStrings = {
         refresh: "Actualizar",
         deviceUrl: "Ve a auth.openai.com/codex/device",
         copyCode: "Copiar código",
+        copyCodeCopied: "Copiado",
+        copyCodeFailed: "No se copió",
         deviceAuthorizationHelp:
           "Si OpenAI lo solicita, activa la autorización por código de dispositivo en la configuración de seguridad de ChatGPT.",
         signedInAs: (email: string) => `Conectado como ${email}`,

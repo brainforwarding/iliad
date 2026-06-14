@@ -1,5 +1,5 @@
 import { Check, Copy, ExternalLink } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { agentModelOptions } from "../../assistant/agentModels";
 import {
   modeOptions,
@@ -38,16 +38,44 @@ export function AssistantSettings({
 }: AssistantSettingsProps) {
   const hasSavedKey = Boolean(settings?.hasOpenAiApiKey);
   const [editingKey, setEditingKey] = useState(false);
+  const [codexCodeCopyState, setCodexCodeCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const codexCodeCopyTimerRef = useRef<number | null>(null);
+
+  const clearCodexCodeCopyTimer = () => {
+    if (codexCodeCopyTimerRef.current) {
+      window.clearTimeout(codexCodeCopyTimerRef.current);
+      codexCodeCopyTimerRef.current = null;
+    }
+  };
+
+  const showCodexCodeCopyState = (state: "copied" | "failed") => {
+    clearCodexCodeCopyTimer();
+    setCodexCodeCopyState(state);
+    codexCodeCopyTimerRef.current = window.setTimeout(() => {
+      setCodexCodeCopyState("idle");
+      codexCodeCopyTimerRef.current = null;
+    }, 1800);
+  };
+
+  useEffect(() => {
+    setCodexCodeCopyState("idle");
+    return () => clearCodexCodeCopyTimer();
+  }, [codex.login?.userCode]);
 
   const openApiKeys = () => {
     void window.iliad.openUrl("https://platform.openai.com/api-keys");
   };
-  const copyCodexUserCode = () => {
+  const copyCodexUserCode = async () => {
     if (!codex.login) {
       return;
     }
 
-    void navigator.clipboard.writeText(codex.login.userCode);
+    try {
+      await navigator.clipboard.writeText(codex.login.userCode);
+      showCodexCodeCopyState("copied");
+    } catch {
+      showCodexCodeCopyState("failed");
+    }
   };
   const copyRemotePairingValue = () => {
     if (!remote.pairing) {
@@ -110,6 +138,12 @@ export function AssistantSettings({
   const remoteDotState = remoteEnabled ? (remotePairedChat ? "on" : "pending") : "off";
   const showRemoteDetails = Boolean(remoteSettings && remoteEnabled);
   const validRemotePairingUrl = getValidTelegramPairingUrl(remotePairing?.pairingUrl);
+  const codexCodeCopyLabel =
+    codexCodeCopyState === "copied"
+      ? labels.codex.copyCodeCopied
+      : codexCodeCopyState === "failed"
+        ? labels.codex.copyCodeFailed
+        : labels.codex.copyCode;
 
   return (
     <div className="assistant-settings">
@@ -133,8 +167,14 @@ export function AssistantSettings({
               <span>{labels.codex.deviceUrl}</span>
               <div className="assistant-codex-code-row">
                 <code>{codex.login.userCode}</code>
-                <button type="button" disabled={codex.busy} onClick={copyCodexUserCode}>
-                  {labels.codex.copyCode}
+                <button
+                  type="button"
+                  className={`assistant-codex-copy-button is-${codexCodeCopyState}`}
+                  disabled={codex.busy}
+                  aria-live="polite"
+                  onClick={() => void copyCodexUserCode()}
+                >
+                  {codexCodeCopyLabel}
                 </button>
               </div>
               <small>{labels.codex.deviceAuthorizationHelp}</small>
