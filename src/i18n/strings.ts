@@ -142,11 +142,13 @@ export const appStrings = {
       missingKey: "Connect Codex or add an OpenAI API key before asking the agent.",
       connection: "Connection",
       apiKey: "OpenAI API key",
-      apiKeySaved: "Saved locally",
+      apiKeyActive: "Active",
+      apiKeySaved: "Saved",
       apiKeyPlaceholder: "sk-...",
       apiKeyHelper: "Saved locally. API usage is separate from ChatGPT plans.",
       getApiKey: "Get an API key",
       changeKey: "Change key",
+      apiKeyRole: "Chat, editing, and dictation.",
       powersChat: "Powers chat",
       powersDictation: "Powers dictation",
       modelSection: "Model",
@@ -172,7 +174,8 @@ export const appStrings = {
         }
       },
       codex: {
-        title: "Codex agent",
+        title: "Codex",
+        role: "ChatGPT plan.",
         checking: "Checking",
         notConnected: "Not connected",
         connecting: "Connecting",
@@ -195,18 +198,19 @@ export const appStrings = {
         plan: (plan: string) => `Plan: ${plan}`,
         rateLimit: (percent: number, windowDurationMins: number | null) =>
           windowDurationMins ? `${percent}% used in ${windowDurationMins} min window` : `${percent}% used`,
-        unavailableCopy: "Codex account connection is not available in this build.",
+        unavailableCopy: "Codex unavailable.",
+        cliNotFound: "Codex CLI not found.",
         errorFallback: "Could not update Codex connection. Try again."
       },
       remote: {
         section: "Remote access",
-        title: "Telegram Remote Chat",
+        title: "Telegram",
         checking: "Checking",
         disabled: "Disabled",
         enabled: "Enabled",
         paired: "Paired",
         unpaired: "Unpaired",
-        role: "Remote questions",
+        role: "Ask from Telegram.",
         privacyCopy:
           "Telegram messages and Iliad replies pass through Telegram. Markdown files stay on this computer unless quoted or summarized in a reply.",
         readOnlyCopy: "Remote chat can answer questions with sources. It cannot edit files or approve changes.",
@@ -554,11 +558,13 @@ export const appStrings = {
       missingKey: "Conecta Codex o agrega una clave API de OpenAI antes de preguntar al agente.",
       connection: "Conexión",
       apiKey: "Clave API de OpenAI",
-      apiKeySaved: "Guardada localmente",
+      apiKeyActive: "Activa",
+      apiKeySaved: "Guardada",
       apiKeyPlaceholder: "sk-...",
       apiKeyHelper: "Se guarda localmente. El uso de la API es independiente de los planes de ChatGPT.",
       getApiKey: "Obtener una clave API",
       changeKey: "Cambiar clave",
+      apiKeyRole: "Chat, edición y dictado.",
       powersChat: "Potencia el chat",
       powersDictation: "Potencia el dictado",
       modelSection: "Modelo",
@@ -584,7 +590,8 @@ export const appStrings = {
         }
       },
       codex: {
-        title: "Agente Codex",
+        title: "Codex",
+        role: "Plan de ChatGPT.",
         checking: "Revisando",
         notConnected: "Sin conexión",
         connecting: "Conectando",
@@ -608,18 +615,19 @@ export const appStrings = {
         plan: (plan: string) => `Plan: ${plan}`,
         rateLimit: (percent: number, windowDurationMins: number | null) =>
           windowDurationMins ? `${percent}% usado en ventana de ${windowDurationMins} min` : `${percent}% usado`,
-        unavailableCopy: "La conexión de cuenta Codex no está disponible en esta versión.",
+        unavailableCopy: "Codex no está disponible.",
+        cliNotFound: "No se encontró Codex CLI.",
         errorFallback: "No se pudo actualizar la conexión Codex. Intenta de nuevo."
       },
       remote: {
         section: "Acceso remoto",
-        title: "Chat remoto de Telegram",
+        title: "Telegram",
         checking: "Revisando",
         disabled: "Desactivado",
         enabled: "Activado",
         paired: "Vinculado",
         unpaired: "Sin vincular",
-        role: "Preguntas remotas",
+        role: "Pregunta desde Telegram.",
         privacyCopy:
           "Los mensajes de Telegram y las respuestas de Iliad pasan por Telegram. Los archivos Markdown quedan en este computador salvo que una respuesta los cite o resuma.",
         readOnlyCopy:

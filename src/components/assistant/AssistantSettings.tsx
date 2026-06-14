@@ -37,8 +37,7 @@ export function AssistantSettings({
   onSave
 }: AssistantSettingsProps) {
   const hasSavedKey = Boolean(settings?.hasOpenAiApiKey);
-  // Collapse the key behind "Change key" once one is saved; reveal it for first setup.
-  const [editingKey, setEditingKey] = useState(!hasSavedKey);
+  const [editingKey, setEditingKey] = useState(false);
 
   const openApiKeys = () => {
     void window.iliad.openUrl("https://platform.openai.com/api-keys");
@@ -92,16 +91,23 @@ export function AssistantSettings({
         ? labels.codex.plan(status.account.planType)
         : labels.codex.connected
     : null;
+  const codexUnavailableCopy =
+    status?.error?.code === "app_server_unavailable" ? labels.codex.cliNotFound : labels.codex.unavailableCopy;
+  const apiKeyStatusLabel = hasSavedKey ? (connected ? labels.apiKeySaved : labels.apiKeyActive) : "";
+  const showApiKeyInput = !hasSavedKey || editingKey;
   const remoteSettings = remote.settings;
   const remoteEnabled = Boolean(remoteSettings?.enabled);
   const remotePairedChat = remoteSettings?.pairedChat ?? null;
   const remotePairing = remoteEnabled && !remotePairedChat ? remote.pairing : null;
   const remoteStatusLabel = remoteSettings
     ? remoteEnabled
-      ? labels.remote.enabled
+      ? remotePairedChat
+        ? labels.remote.paired
+        : labels.remote.enabled
       : labels.remote.disabled
     : labels.remote.checking;
   const remoteDotState = remoteEnabled ? (remotePairedChat ? "on" : "pending") : "off";
+  const showRemoteDetails = Boolean(remoteSettings && remoteEnabled);
   const validRemotePairingUrl = getValidTelegramPairingUrl(remotePairing?.pairingUrl);
 
   return (
@@ -109,7 +115,7 @@ export function AssistantSettings({
       <section className="assistant-settings-group">
         <h3 className="assistant-settings-section">{labels.connection}</h3>
 
-        {/* Codex — powers chat */}
+        {/* Codex route */}
         <div className="assistant-conn-card">
           <div className="assistant-conn-top">
             <span className="assistant-conn-name">{labels.codex.title}</span>
@@ -118,7 +124,7 @@ export function AssistantSettings({
               {statusLabel}
             </span>
           </div>
-          <span className="assistant-conn-role">{labels.powersChat}</span>
+          <span className="assistant-conn-role">{labels.codex.role}</span>
           {accountLine ? <span className="assistant-conn-meta">{accountLine}</span> : null}
 
           {connecting && codex.login ? (
@@ -134,7 +140,7 @@ export function AssistantSettings({
             </div>
           ) : null}
 
-          {unavailable ? <span className="assistant-conn-meta">{labels.codex.unavailableCopy}</span> : null}
+          {unavailable ? <span className="assistant-conn-meta">{codexUnavailableCopy}</span> : null}
           {codex.error ? <span className="assistant-codex-error">{labels.codex.errorFallback}</span> : null}
 
           <div className="assistant-conn-actions">
@@ -171,20 +177,20 @@ export function AssistantSettings({
           </div>
         </div>
 
-        {/* OpenAI API key — powers dictation */}
+        {/* OpenAI API key route */}
         <div className="assistant-conn-card">
           <div className="assistant-conn-top">
             <span className="assistant-conn-name">{labels.apiKey}</span>
-            {hasSavedKey && !editingKey ? (
+            {apiKeyStatusLabel ? (
               <span className="assistant-conn-status">
                 <i className="assistant-conn-dot is-on" aria-hidden="true" />
-                {labels.apiKeySaved}
+                {apiKeyStatusLabel}
               </span>
             ) : null}
           </div>
-          <span className="assistant-conn-role">{labels.powersDictation}</span>
+          <span className="assistant-conn-role">{labels.apiKeyRole}</span>
 
-          {editingKey ? (
+          {showApiKeyInput ? (
             <input
               value={apiKeyDraft}
               type="password"
@@ -207,6 +213,34 @@ export function AssistantSettings({
       </section>
 
       <section className="assistant-settings-group">
+        <h3 className="assistant-settings-section">{labels.modelSection}</h3>
+        <select value={modelDraft} onChange={(event) => onModelDraftChange(event.target.value)}>
+          {agentModelOptions.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <small className="assistant-settings-note">{labels.modelHelper}</small>
+      </section>
+
+      <section className="assistant-settings-group">
+        <h3 className="assistant-settings-section">{labels.mode}</h3>
+        <div className="assistant-mode-row" role="group" aria-label={labels.mode}>
+          {modeOptions(labels).map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={mode === option.value ? "is-active" : ""}
+              onClick={() => onModeChange(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="assistant-settings-group">
         <h3 className="assistant-settings-section">{labels.remote.section}</h3>
 
         {/* Telegram Remote Chat - read-only remote access */}
@@ -219,18 +253,18 @@ export function AssistantSettings({
             </span>
           </div>
           <span className="assistant-conn-role">{labels.remote.role}</span>
-          {remoteSettings ? (
+          {showRemoteDetails ? (
             <span className="assistant-conn-meta">
               {remotePairedChat ? labels.remote.paired : labels.remote.unpaired}
             </span>
           ) : null}
-          {remotePairedChat ? (
+          {showRemoteDetails && remotePairedChat ? (
             <>
               <span className="assistant-conn-meta">{labels.remote.pairedWith(telegramChatLabel(remotePairedChat))}</span>
               <span className="assistant-conn-meta">{labels.remote.pairedAt(formatRemotePairedAt(remotePairedChat.pairedAt))}</span>
             </>
           ) : null}
-          {remoteSettings ? (
+          {showRemoteDetails ? (
             <div className="assistant-remote-thread-row">
               <span className="assistant-conn-meta">{labels.remote.iliadChat(remote.activeChatLabel)}</span>
               {remote.canUseCurrentChat ? (
@@ -240,8 +274,12 @@ export function AssistantSettings({
               ) : null}
             </div>
           ) : null}
-          <span className="assistant-conn-meta">{labels.remote.privacyCopy}</span>
-          <span className="assistant-conn-meta">{labels.remote.readOnlyCopy}</span>
+          {showRemoteDetails ? (
+            <>
+              <span className="assistant-conn-meta">{labels.remote.readOnlyCopy}</span>
+              <span className="assistant-conn-meta">{labels.remote.privacyCopy}</span>
+            </>
+          ) : null}
           {remotePairing ? (
             <div className="assistant-remote-pairing">
               <span>{remotePairing.pairingUrl ? labels.remote.pairingLink : labels.remote.pairingCode}</span>
@@ -299,34 +337,6 @@ export function AssistantSettings({
               </button>
             ) : null}
           </div>
-        </div>
-      </section>
-
-      <section className="assistant-settings-group">
-        <h3 className="assistant-settings-section">{labels.modelSection}</h3>
-        <select value={modelDraft} onChange={(event) => onModelDraftChange(event.target.value)}>
-          {agentModelOptions.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <small className="assistant-settings-note">{labels.modelHelper}</small>
-      </section>
-
-      <section className="assistant-settings-group">
-        <h3 className="assistant-settings-section">{labels.mode}</h3>
-        <div className="assistant-mode-row" role="group" aria-label={labels.mode}>
-          {modeOptions(labels).map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={mode === option.value ? "is-active" : ""}
-              onClick={() => onModeChange(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
         </div>
       </section>
 

@@ -13,17 +13,29 @@ import {
   type TelegramRemoteConnectionState
 } from "../../src/assistant/useAssistantRun";
 import { appStrings } from "../../src/i18n/strings";
+import type {
+  AgentRuntimeProviderMetadata,
+  AgentSettingsSnapshot,
+  CodexAccountStatusResponse
+} from "../../src/types/iliad";
 
 describe("Codex account settings copy", () => {
-  it("keeps the current assistant/API-key boundary explicit", () => {
+  it("keeps the assistant provider routes explicit", () => {
     expect(appStrings.en.assistant.codex.connectedCopy).toBe("Chat uses Codex.");
     expect(appStrings.en.assistant.codex.dictationUsesApiKey).toBe("Dictation uses the OpenAI API.");
     expect(appStrings.en.assistant.codex.disconnectedCopy).toBe(
       "Connect Codex or use an OpenAI API key for chat."
     );
+    expect(appStrings.en.assistant.codex.title).toBe("Codex");
+    expect(appStrings.en.assistant.codex.role).toBe("ChatGPT plan.");
+    expect(appStrings.en.assistant.apiKeyRole).toBe("Chat, editing, and dictation.");
+    expect(appStrings.en.assistant.apiKeyActive).toBe("Active");
     expect(appStrings.es.assistant.codex.disconnectedCopy).toBe(
       "Conecta Codex o usa una clave API de OpenAI para el chat."
     );
+    expect(appStrings.es.assistant.codex.role).toBe("Plan de ChatGPT.");
+    expect(appStrings.es.assistant.apiKeyRole).toBe("Chat, edición y dictado.");
+    expect(appStrings.es.assistant.apiKeyActive).toBe("Activa");
   });
 
   it("does not imply ChatGPT subscriptions power the current API-backed chat", () => {
@@ -153,9 +165,49 @@ describe("Codex account settings copy", () => {
       })
     );
 
-    expect(html).toContain("Powers chat");
-    expect(html).toContain("Powers dictation");
+    expect(html).toContain("ChatGPT plan.");
+    expect(html).toContain("Chat, editing, and dictation.");
     expect(html).not.toContain("42% used");
+  });
+
+  it("marks the OpenAI API key active only when Codex is not connected", () => {
+    const disconnected = renderSettings(remoteConnection(), {
+      codexStatus: {
+        available: false,
+        connected: false,
+        requiresOpenaiAuth: true,
+        pendingLogin: false,
+        error: {
+          code: "app_server_unavailable",
+          message: "Codex app-server is not running."
+        }
+      },
+      settings: {
+        hasOpenAiApiKey: true,
+        model: "gpt-5.5",
+        mode: "balanced",
+        runtimeProvider: openAiRuntimeProvider()
+      }
+    });
+
+    expect(disconnected).toContain("Unavailable");
+    expect(disconnected).toContain("Codex CLI not found.");
+    expect(disconnected).toContain("Active");
+    expect(disconnected).toContain("Change key");
+    expect(disconnected).not.toContain('placeholder="sk-..."');
+
+    const connected = renderSettings(remoteConnection(), {
+      settings: {
+        hasOpenAiApiKey: true,
+        model: "gpt-5.5",
+        mode: "balanced",
+        runtimeProvider: openAiRuntimeProvider()
+      }
+    });
+
+    expect(connected).toContain("Connected");
+    expect(connected).toContain("Saved");
+    expect(connected).not.toContain("Active");
   });
 
   it("renders a constrained Codex-compatible agent model selector", () => {
@@ -205,29 +257,32 @@ describe("Codex account settings copy", () => {
   it("keeps connection, remote access, and model settings in the reviewed order", () => {
     const html = renderSettings(remoteConnection());
     const connectionIndex = html.indexOf(">Connection</h3>");
-    const codexIndex = html.indexOf("Codex agent");
+    const codexIndex = html.indexOf("Codex");
     const apiKeyIndex = html.indexOf("OpenAI API key");
-    const remoteSectionIndex = html.indexOf(">Remote access</h3>");
-    const telegramIndex = html.indexOf("Telegram Remote Chat");
     const modelIndex = html.indexOf(">Model</h3>");
+    const modeIndex = html.indexOf(">Mode</h3>");
+    const remoteSectionIndex = html.indexOf(">Remote access</h3>");
+    const telegramIndex = html.indexOf("Telegram");
 
     expect(connectionIndex).toBeGreaterThanOrEqual(0);
     expect(codexIndex).toBeGreaterThan(connectionIndex);
     expect(apiKeyIndex).toBeGreaterThan(codexIndex);
-    expect(remoteSectionIndex).toBeGreaterThan(apiKeyIndex);
+    expect(modelIndex).toBeGreaterThan(apiKeyIndex);
+    expect(modeIndex).toBeGreaterThan(modelIndex);
+    expect(remoteSectionIndex).toBeGreaterThan(modeIndex);
     expect(telegramIndex).toBeGreaterThan(remoteSectionIndex);
-    expect(modelIndex).toBeGreaterThan(telegramIndex);
   });
 
   it("renders Telegram Remote Chat disabled copy and enable action", () => {
     const html = renderSettings(remoteConnection());
 
-    expect(html).toContain("Telegram Remote Chat");
+    expect(html).toContain("Telegram");
     expect(html).toContain("Disabled");
-    expect(html).toContain("Unpaired");
-    expect(html).toContain("Iliad chat: Default remote chat");
-    expect(html).toContain(appStrings.en.assistant.remote.privacyCopy);
-    expect(html).toContain(appStrings.en.assistant.remote.readOnlyCopy);
+    expect(html).toContain("Ask from Telegram.");
+    expect(html).not.toContain("Unpaired");
+    expect(html).not.toContain("Iliad chat: Default remote chat");
+    expect(html).not.toContain(appStrings.en.assistant.remote.privacyCopy);
+    expect(html).not.toContain(appStrings.en.assistant.remote.readOnlyCopy);
     expect(html).toContain(">Enable</button>");
     expect(html).not.toContain(">Disable</button>");
     expect(html).not.toContain(">Revoke</button>");
@@ -252,7 +307,6 @@ describe("Codex account settings copy", () => {
       })
     );
 
-    expect(html).toContain("Enabled");
     expect(html).toContain("Paired");
     expect(html).toContain("Paired with Sebastian");
     expect(html).toContain(">Disable</button>");
@@ -505,13 +559,19 @@ describe("Codex account settings copy", () => {
   });
 });
 
-function renderSettings(remote: TelegramRemoteConnectionState) {
+function renderSettings(
+  remote: TelegramRemoteConnectionState,
+  overrides: {
+    codexStatus?: CodexAccountStatusResponse;
+    settings?: AgentSettingsSnapshot | null;
+  } = {}
+) {
   const onCodexAction = async () => undefined;
   const codex: CodexConnectionState = {
     busy: false,
     error: null,
     login: null,
-    status: {
+    status: overrides.codexStatus ?? {
       available: true,
       connected: true,
       requiresOpenaiAuth: true,
@@ -532,13 +592,34 @@ function renderSettings(remote: TelegramRemoteConnectionState) {
       mode: "balanced",
       modelDraft: "gpt-5.5",
       remote,
-      settings: null,
+      settings: overrides.settings ?? null,
       onApiKeyDraftChange: () => undefined,
       onModeChange: () => undefined,
       onModelDraftChange: () => undefined,
       onSave: () => undefined
     })
   );
+}
+
+function openAiRuntimeProvider(): AgentRuntimeProviderMetadata {
+  return {
+    id: "openai-api",
+    label: "OpenAI API",
+    billing: "openai_platform_api",
+    capabilities: {
+      text: true,
+      thinkingSummaries: true,
+      reviewableProposals: true,
+      workspaceEvents: false,
+      managedAccountAuth: false,
+      rateLimits: false,
+      media: {
+        transcription: true,
+        images: false,
+        realtime: false
+      }
+    }
+  };
 }
 
 function remoteConnection(
