@@ -1,4 +1,4 @@
-import { cp, lstat, mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   ensureInsideWorkspace,
@@ -34,6 +34,12 @@ export interface SavedImageAsset {
   filePath: string;
   relativePath: string;
   markdown: string;
+}
+
+export interface ReferenceImageAssetRequest {
+  workspaceRoot: string;
+  documentPath: string;
+  imagePath: string;
 }
 
 function fileTreeNode(workspaceRoot: string, filePath: string, isDirectory: boolean): FileTreeNode {
@@ -296,28 +302,29 @@ function timestampForFileName() {
   ].join("");
 }
 
-function extensionFromDataUrl(dataUrl: string, originalName?: string) {
-  const originalExtension = originalName ? path.extname(originalName).toLowerCase() : "";
+const supportedImageMimeExtensions = new Map([
+  ["image/png", ".png"],
+  ["image/jpeg", ".jpg"],
+  ["image/gif", ".gif"],
+  ["image/webp", ".webp"],
+  ["image/svg+xml", ".svg"]
+]);
+const supportedImageExtensions = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]);
 
-  if (originalExtension && [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(originalExtension)) {
-    return originalExtension;
+function supportedImageExtension(filePath: string) {
+  const extension = path.extname(filePath).toLowerCase();
+  return supportedImageExtensions.has(extension) ? extension : null;
+}
+
+function extensionFromDataUrl(dataUrl: string) {
+  const mime = /^data:([^;]+);base64,/.exec(dataUrl)?.[1]?.toLowerCase();
+  const extension = mime ? supportedImageMimeExtensions.get(mime) : null;
+
+  if (!extension) {
+    throw new Error("This image format is not supported.");
   }
 
-  const mime = /^data:([^;]+);base64,/.exec(dataUrl)?.[1];
-
-  switch (mime) {
-    case "image/jpeg":
-      return ".jpg";
-    case "image/gif":
-      return ".gif";
-    case "image/webp":
-      return ".webp";
-    case "image/svg+xml":
-      return ".svg";
-    case "image/png":
-    default:
-      return ".png";
-  }
+  return extension;
 }
 
 function dataUrlToBuffer(dataUrl: string) {
@@ -332,31 +339,134 @@ function dataUrlToBuffer(dataUrl: string) {
 
 function markdownRelativePath(fromDocument: string, toAsset: string) {
   const relativePath = path.relative(path.dirname(fromDocument), toAsset).split(path.sep).join("/");
+  const normalizedRelativePath = relativePath.startsWith("../")
+    ? relativePath
+    : relativePath.startsWith(".")
+      ? relativePath
+      : `./${relativePath}`;
 
-  if (relativePath.startsWith("../")) {
-    return relativePath;
+  return normalizedRelativePath
+    .split("/")
+    .map((segment) =>
+      segment === "." || segment === ".."
+        ? segment
+        : encodeURIComponent(segment).replace(/\(/g, "%28").replace(/\)/g, "%29")
+    )
+    .join("/");
+}
+
+function assetSlugFromDocument(documentPath: string) {
+  const slug = path
+    .basename(documentPath, path.extname(documentPath))
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return slug || "image";
+}
+
+function imageAltText(filePath: string, fallback = "Image") {
+  const stem = path.basename(filePath, path.extname(filePath)).replace(/[-_]+/g, " ").trim();
+  const alt = stem || fallback;
+
+  return alt.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
+}
+
+function assertWorkspacePathHasNoIgnoredSegments(workspaceRoot: string, filePath: string) {
+  ensureVisibleWorkspacePath(workspaceRoot, filePath);
+
+  const relative = path.relative(path.resolve(workspaceRoot), path.resolve(filePath));
+  const segments = relative.split(path.sep).filter(Boolean);
+
+  if (segments.some((segment) => ignoredNames.has(segment))) {
+    throw new Error("Ignored paths are not available in this workspace.");
+  }
+}
+
+async function assertWorkspaceAssetPathIsVisible(workspaceRoot: string, filePath: string) {
+  assertWorkspacePathHasNoIgnoredSegments(workspaceRoot, filePath);
+
+  const root = path.resolve(workspaceRoot);
+  const target = path.resolve(filePath);
+  const relative = path.relative(root, target);
+
+  if (!relative) {
+    return;
   }
 
-  return relativePath.startsWith(".") ? relativePath : `./${relativePath}`;
+  let currentPath = root;
+
+  for (const segment of relative.split(path.sep)) {
+    if (!segment) {
+      continue;
+    }
+
+    currentPath = path.join(currentPath, segment);
+    const stats = await lstat(currentPath);
+
+    if (stats.isSymbolicLink()) {
+      throw new Error("Symlinked image paths are not supported.");
+    }
+  }
+
+  const realRoot = await realpath(root);
+  const realTarget = await realpath(target);
+  const realRelative = path.relative(realRoot, realTarget);
+
+  if (realRelative.startsWith("..") || path.isAbsolute(realRelative)) {
+    throw new Error("Requested path is outside the current workspace.");
+  }
+}
+
+async function assertExistingWorkspaceImage(workspaceRoot: string, imagePath: string) {
+  await assertWorkspaceAssetPathIsVisible(workspaceRoot, imagePath);
+
+  if (!supportedImageExtension(imagePath)) {
+    throw new Error("This image format is not supported.");
+  }
+
+  const stats = await lstat(imagePath);
+
+  if (!stats.isFile()) {
+    throw new Error("Image path must be a file.");
+  }
 }
 
 export async function saveImageAsset(request: SaveImageAssetRequest): Promise<SavedImageAsset> {
-  ensureInsideWorkspace(request.workspaceRoot, request.documentPath);
-  const documentSlug = path.basename(request.documentPath, path.extname(request.documentPath)).replace(/\s+/g, "-");
-  const assetDirectory = path.join(request.workspaceRoot, "assets", documentSlug);
+  ensureMarkdownFile(request.workspaceRoot, request.documentPath);
+  const documentSlug = assetSlugFromDocument(request.documentPath);
+  const assetDirectory = path.join(path.dirname(request.documentPath), "assets");
+  ensureInsideWorkspace(request.workspaceRoot, assetDirectory);
   await mkdir(assetDirectory, { recursive: true });
 
-  const extension = extensionFromDataUrl(request.dataUrl, request.originalName);
-  const fileName = `image-${timestampForFileName()}${extension}`;
+  const extension = extensionFromDataUrl(request.dataUrl);
+  const fileName = `${documentSlug}-${timestampForFileName()}${extension}`;
   const filePath = await uniquePath(assetDirectory, fileName);
   ensureInsideWorkspace(request.workspaceRoot, filePath);
   await writeFile(filePath, dataUrlToBuffer(request.dataUrl));
 
   const relativePath = markdownRelativePath(request.documentPath, filePath);
+  const altText = request.originalName ? imageAltText(request.originalName) : "Image";
 
   return {
     filePath,
     relativePath,
-    markdown: `![Image](${relativePath})`
+    markdown: `![${altText}](${relativePath})`
+  };
+}
+
+export async function referenceWorkspaceImageAsset(
+  request: ReferenceImageAssetRequest
+): Promise<SavedImageAsset> {
+  ensureMarkdownFile(request.workspaceRoot, request.documentPath);
+  await assertExistingWorkspaceImage(request.workspaceRoot, request.imagePath);
+
+  const relativePath = markdownRelativePath(request.documentPath, request.imagePath);
+
+  return {
+    filePath: request.imagePath,
+    relativePath,
+    markdown: `![${imageAltText(request.imagePath)}](${relativePath})`
   };
 }

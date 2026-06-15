@@ -140,7 +140,8 @@ interface EditorPaneProps {
   tighten?: EditorTightenProps;
   writingAssists?: EditorWritingAssistsProps;
   onChange: (value: string) => void;
-  onInsertImage: (file: File) => Promise<string>;
+  onInsertImage: (file: File) => Promise<string | null>;
+  onInsertImageReference: (relativePath: string) => Promise<string | null>;
   onOpenLink: (href: string) => void | Promise<void>;
   onCreateDocument?: () => void;
   onEditorViewChange?: (view: EditorView) => void;
@@ -239,6 +240,7 @@ export function EditorPane({
   writingAssists,
   onChange,
   onInsertImage,
+  onInsertImageReference,
   onOpenLink,
   onCreateDocument,
   onEditorViewChange,
@@ -790,7 +792,13 @@ export function EditorPane({
           })
         );
       } else {
-        nextExtensions.push(imageDropPasteExtension(onInsertImage));
+        nextExtensions.push(
+          imageDropPasteExtension({
+            insertImage: onInsertImage,
+            insertImageReference: onInsertImageReference,
+            workspaceSessionId: writingAssists?.workspaceSessionId
+          })
+        );
       }
 
       return nextExtensions;
@@ -816,6 +824,7 @@ export function EditorPane({
       labels.reviewToolbar.acceptChange,
       labels.reviewToolbar.rejectChange,
       onInsertImage,
+      onInsertImageReference,
       onOpenLink,
       openWritingIssue,
       provisionalCommentRange,

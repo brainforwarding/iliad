@@ -177,6 +177,32 @@ export function useWorkspace({ messages, onError }: UseWorkspaceOptions) {
     });
   }, [onError, refreshTree, setWorkspace, workspace?.path]);
 
+  useEffect(() => {
+    const workspacePath = workspace?.path;
+
+    if (!workspacePath) {
+      return;
+    }
+
+    if (!window.iliad.watchWorkspace) {
+      return;
+    }
+
+    return window.iliad.watchWorkspace(workspacePath, () => {
+      if (currentWorkspacePathRef.current !== workspacePath) {
+        return;
+      }
+
+      refreshTree(workspacePath).catch((refreshError: unknown) => {
+        if (currentWorkspacePathRef.current !== workspacePath) {
+          return;
+        }
+
+        onError(refreshError instanceof Error ? refreshError.message : messagesRef.current.readWorkspaceFallback);
+      });
+    });
+  }, [onError, refreshTree, workspace?.path]);
+
   return {
     isInitializing,
     workspace,

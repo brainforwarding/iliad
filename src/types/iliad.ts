@@ -18,6 +18,10 @@ export type ReadDirectoryResponse =
   | { status: "ok"; workspace: WorkspaceInfo; tree: FileTreeNode[] }
   | { status: "missing" };
 
+export interface WorkspaceChangeEvent {
+  workspaceRoot: string;
+}
+
 export interface SaveImageAssetRequest {
   workspaceRoot: string;
   documentPath: string;
@@ -29,6 +33,18 @@ export interface SavedImageAsset {
   filePath: string;
   relativePath: string;
   markdown: string;
+}
+
+export interface ReferenceImageAssetRequest {
+  workspaceRoot: string;
+  documentPath: string;
+  imagePath: string;
+}
+
+export interface ReferenceImageAssetByRelativePathRequest {
+  workspaceSessionId: string;
+  documentPath: string;
+  imageRelativePath: string;
 }
 
 export interface MarkdownContentSearchRequest {
@@ -875,6 +891,7 @@ export interface IliadApi {
   getLaunchWorkspace: () => Promise<WorkspaceInfo | null>;
   openWorkspaceDialog: (language?: "en" | "es") => Promise<WorkspaceInfo | null>;
   readDirectory: (workspaceRoot: string) => Promise<ReadDirectoryResponse>;
+  watchWorkspace?: (workspaceRoot: string, listener: (event: WorkspaceChangeEvent) => void) => () => void;
   readMarkdown: (workspaceRoot: string, filePath: string) => Promise<string>;
   writeMarkdown: (workspaceRoot: string, filePath: string, content: string) => Promise<{ savedAt: string }>;
   createMarkdown: (workspaceRoot: string, directoryPath: string, requestedName: string) => Promise<FileTreeNode>;
@@ -888,6 +905,9 @@ export interface IliadApi {
   openExternalFile: (workspaceRoot: string, filePath: string) => Promise<string>;
   revealInFinder: (workspaceRoot: string, filePath: string) => Promise<void>;
   saveImageAsset: (request: SaveImageAssetRequest) => Promise<SavedImageAsset>;
+  referenceImageAsset: (request: ReferenceImageAssetRequest) => Promise<SavedImageAsset>;
+  referenceImageAssetByRelativePath: (request: ReferenceImageAssetByRelativePathRequest) => Promise<SavedImageAsset>;
+  pathForFile?: (file: File) => string;
   listMarkdownContextDocuments?: (workspaceSessionId: string) => Promise<AgentMarkdownContextDocumentListResponse>;
   normalizeContextDrop?: (workspaceSessionId: string, absolutePath: string) => Promise<NormalizeContextDropResponse>;
   selectionComments?: SelectionCommentsApi;

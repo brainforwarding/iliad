@@ -213,6 +213,7 @@ export default function App() {
     creatingFolder,
     duplicateNode,
     insertImage,
+    insertImageReference,
     moveNode,
     moveNodeToTrash,
     openDocumentLink,
@@ -1433,6 +1434,7 @@ export default function App() {
             onActiveSelectionChange={handleActiveSelectionChange}
             onChange={handleEditorChange}
             onInsertImage={insertImage}
+            onInsertImageReference={insertImageReference}
             onOpenLink={openDocumentLinkWithNavigation}
             onCreateDocument={createMarkdownFileWithNavigation}
             onEditorViewChange={handleEditorViewChange}

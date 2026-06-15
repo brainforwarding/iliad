@@ -66,6 +66,7 @@ import {
   resolveFileTreeDropTarget,
   type FileTreeMoveDropTarget
 } from "../files/fileTreeMove";
+import { createImageReferenceDragPayload, imageReferenceDragMimeType } from "../files/imageReferenceDrag";
 import type { FileTreeNode, MarkdownContentSearchResponse, WorkspaceInfo } from "../types/iliad";
 
 interface FileTreeProps {
@@ -182,7 +183,7 @@ interface TreeRowProps {
   onMoveDragOver: (target: FileTreeMoveDropTarget, event: DragEvent<HTMLElement>, expandPath?: string) => void;
   onMoveDragLeave: (targetKey: string, event: DragEvent<HTMLElement>) => void;
   onMoveDrop: (target: FileTreeMoveDropTarget, event: DragEvent<HTMLElement>) => void;
-  onMoveDragEnd: () => void;
+  onMoveDragEnd: (event: DragEvent<HTMLDivElement>) => void;
   onSearchRowKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
   onOpenNode: (node: FileTreeNode) => void;
   onOpenPendingChange: (target: PendingFileTreeChange) => void | Promise<void>;
@@ -238,6 +239,10 @@ interface TreePathPeekOptions {
 
 function isAssetNode(node: FileTreeNode) {
   return node.name === "assets" || node.relativePath.split(/[\\/]/).includes("assets");
+}
+
+function isImageNode(node: FileTreeNode) {
+  return /\.(png|jpe?g|gif|webp|svg)$/i.test(node.name);
 }
 
 function pendingLabel(node: FileTreeDisplayNode, labels: FileTreeLabels) {
@@ -679,6 +684,7 @@ function TreeRow({
   const pendingIndicatorClass =
     node.source === "pending-create" || node.source === "pending-dir" ? "is-create" : "is-edit";
   const canDragContextFile = node.source === "real" && nodeKind === "markdown";
+  const canDragImageReference = node.source === "real" && nodeKind === "external" && isImageNode(node.node);
   const canDragMove = node.source === "real" && !node.pendingTarget && !node.hasPendingDescendant;
   const isDragging = node.source === "real" && draggingRelativePath === normalizeDisplayRelativePath(node.node.relativePath);
   const rowDropTargetKey =
@@ -715,21 +721,30 @@ function TreeRow({
       <div
         ref={(element) => registerRow(nodePath, element)}
         className={rowClassName}
-        draggable={canDragContextFile || canDragMove}
+        draggable={canDragContextFile || canDragImageReference || canDragMove}
         style={{ "--tree-depth": depth } as CSSProperties}
         onDragStart={(event) => {
-          if (node.source !== "real" || (!canDragContextFile && !canDragMove)) {
+          if (node.source !== "real" || (!canDragContextFile && !canDragImageReference && !canDragMove)) {
             event.preventDefault();
             return;
           }
 
-          event.dataTransfer.effectAllowed = canDragContextFile && canDragMove ? "copyMove" : canDragMove ? "move" : "copy";
+          event.dataTransfer.effectAllowed =
+            (canDragContextFile || canDragImageReference) && canDragMove ? "copyMove" : canDragMove ? "move" : "copy";
 
           if (canDragContextFile) {
             event.dataTransfer.setData(
               contextFileDragMimeType,
               JSON.stringify(createContextFileDragPayload(workspaceSessionId, node.node.relativePath))
             );
+          }
+
+          if (canDragImageReference) {
+            const payload = createImageReferenceDragPayload(workspaceSessionId, node.node.relativePath);
+
+            if (payload) {
+              event.dataTransfer.setData(imageReferenceDragMimeType, JSON.stringify(payload));
+            }
           }
 
           if (canDragMove) {
@@ -751,9 +766,9 @@ function TreeRow({
             onMoveDrop({ kind: "folder", relativePath: node.node.relativePath }, event);
           }
         }}
-        onDragEnd={() => {
+        onDragEnd={(event) => {
           if (canDragMove) {
-            onMoveDragEnd();
+            onMoveDragEnd(event);
           }
         }}
         onContextMenu={(event) => {
@@ -1918,9 +1933,9 @@ export function FileTree({
     ]
   );
 
-  const handleMoveDragEnd = useCallback(() => {
+  const handleMoveDragEnd = useCallback((event: DragEvent<HTMLDivElement>) => {
     if (draggingMoveRelativePathRef.current) {
-      clearMoveDragState(labels.fileTreeMoveCanceled);
+      clearMoveDragState(event.dataTransfer.dropEffect === "copy" ? "" : labels.fileTreeMoveCanceled);
     }
   }, [clearMoveDragState, labels.fileTreeMoveCanceled]);
 

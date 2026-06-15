@@ -62,6 +62,8 @@ interface FileActionMessages {
   movedItem: (relativePath: string) => string;
   openMarkdownBeforeImages: string;
   savedImage: (relativePath: string) => string;
+  linkedImage: (relativePath: string) => string;
+  unsupportedImage: string;
   headingLinksUnsupported: string;
   trashConfirmation: (name: string, kind: "directory" | "file") => string;
 }
@@ -555,19 +557,70 @@ export function useFileActions({
       throw new Error(messages.openMarkdownBeforeImages);
     }
 
+    const filePath = window.iliad.pathForFile?.(file) ?? "";
+
+    if (filePath) {
+      try {
+        const asset = await window.iliad.referenceImageAsset({
+          workspaceRoot: current.workspace.path,
+          documentPath: current.activeFile.path,
+          imagePath: filePath
+        });
+
+        setNotice(messages.linkedImage(asset.relativePath));
+
+        return asset.markdown;
+      } catch (referenceError) {
+        if (pathIsSameOrInside(current.workspace.path, filePath)) {
+          setError(referenceError instanceof Error ? referenceError.message : messages.unsupportedImage);
+          return null;
+        }
+      }
+    }
+
     const dataUrl = await fileToDataUrl(file, messages.readImageFallback);
-    const asset = await window.iliad.saveImageAsset({
-      workspaceRoot: current.workspace.path,
-      documentPath: current.activeFile.path,
-      dataUrl,
-      originalName: file.name
-    });
+    let asset;
+
+    try {
+      asset = await window.iliad.saveImageAsset({
+        workspaceRoot: current.workspace.path,
+        documentPath: current.activeFile.path,
+        dataUrl,
+        originalName: file.name
+      });
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : messages.unsupportedImage);
+      return null;
+    }
 
     void refreshTree(current.workspace.path);
     setNotice(messages.savedImage(asset.relativePath));
 
     return asset.markdown;
-  }, [messages, refreshTree, setNotice, stateRef]);
+  }, [messages, refreshTree, setError, setNotice, stateRef]);
+
+  const insertImageReference = useCallback(async (relativePath: string) => {
+    const current = stateRef.current;
+
+    if (!current.workspace?.sessionId || !current.activeFile) {
+      throw new Error(messages.openMarkdownBeforeImages);
+    }
+
+    try {
+      const asset = await window.iliad.referenceImageAssetByRelativePath({
+        workspaceSessionId: current.workspace.sessionId,
+        documentPath: current.activeFile.path,
+        imageRelativePath: relativePath
+      });
+
+      setNotice(messages.linkedImage(asset.relativePath));
+
+      return asset.markdown;
+    } catch (referenceError) {
+      setError(referenceError instanceof Error ? referenceError.message : messages.unsupportedImage);
+      return null;
+    }
+  }, [messages, setError, setNotice, stateRef]);
 
   const openDocumentLink = useCallback(async (href: string) => {
     const target = normalizeMarkdownLinkHref(href);
@@ -629,6 +682,7 @@ export function useFileActions({
     creatingFolder,
     duplicateNode,
     insertImage,
+    insertImageReference,
     moveNode,
     moveNodeToTrash,
     openDocumentLink,

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { IpcRendererEvent } from "electron";
 import type { MarkdownContentSearchRequest } from "./fs/contentSearch.js";
 
@@ -12,6 +12,29 @@ const api = {
       workspaceRoot,
       requestId: ++workspaceReadRequestId
     }),
+  watchWorkspace: (workspaceRoot: string, listener: (event: { workspaceRoot: string }) => void) => {
+    const handler = (_event: IpcRendererEvent, payload: unknown) => {
+      if (
+        payload &&
+        typeof payload === "object" &&
+        "workspaceRoot" in payload &&
+        typeof payload.workspaceRoot === "string" &&
+        payload.workspaceRoot === workspaceRoot
+      ) {
+        listener({ workspaceRoot: payload.workspaceRoot });
+      }
+    };
+
+    ipcRenderer.on("workspace:changed", handler);
+    void ipcRenderer.invoke("workspace:watch", workspaceRoot).catch(() => {
+      ipcRenderer.removeListener("workspace:changed", handler);
+    });
+
+    return () => {
+      ipcRenderer.removeListener("workspace:changed", handler);
+      void ipcRenderer.invoke("workspace:unwatch");
+    };
+  },
   readMarkdown: (workspaceRoot: string, filePath: string) =>
     ipcRenderer.invoke("file:read-markdown", workspaceRoot, filePath),
   writeMarkdown: (workspaceRoot: string, filePath: string, content: string) =>
@@ -41,6 +64,17 @@ const api = {
     dataUrl: string;
     originalName?: string;
   }) => ipcRenderer.invoke("asset:save-image", request),
+  referenceImageAsset: (request: {
+    workspaceRoot: string;
+    documentPath: string;
+    imagePath: string;
+  }) => ipcRenderer.invoke("asset:reference-image", request),
+  referenceImageAssetByRelativePath: (request: {
+    workspaceSessionId: string;
+    documentPath: string;
+    imageRelativePath: string;
+  }) => ipcRenderer.invoke("asset:reference-image-relative", request),
+  pathForFile: (file: File) => webUtils.getPathForFile(file),
   listMarkdownContextDocuments: (workspaceSessionId: string) =>
     ipcRenderer.invoke("agent:list-markdown-context-documents", workspaceSessionId),
   normalizeContextDrop: (workspaceSessionId: string, absolutePath: string) =>

@@ -193,6 +193,7 @@ app.whenReady().then(async () => {
   registerAssetProtocol();
   registerWorkspaceIpc({
     getLaunchWorkspace: (webContentsId) => windowManager.getLaunchWorkspace(webContentsId),
+    getWindowWorkspace: (webContentsId) => windowManager.getWindowWorkspace(webContentsId),
     setWindowWorkspace: (webContentsId, workspace) => windowManager.setWindowWorkspace(webContentsId, workspace)
   });
   registerFileIpc({
@@ -200,7 +201,18 @@ app.whenReady().then(async () => {
   });
   registerSearchIpc();
   registerShellIpc();
-  registerAssetIpc();
+  registerAssetIpc({
+    getWindowWorkspace: (webContentsId) => windowManager.getWindowWorkspace(webContentsId),
+    resolveWorkspaceRootForSession: (event, workspaceSessionId) => {
+      const workspace = windowManager.getWindowWorkspace(event.sender.id);
+
+      if (!workspace || workspace.sessionId !== workspaceSessionId) {
+        return null;
+      }
+
+      return workspace.path;
+    }
+  });
   const userDataPath = app.getPath("userData");
   const chatHistoryStore = new AgentChatHistoryStore(userDataPath);
   const agentService = new AgentService(userDataPath, { chatHistoryStore });

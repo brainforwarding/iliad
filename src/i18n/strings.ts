@@ -503,7 +503,9 @@ export const appStrings = {
       movedFileMissing: "Moved item was not found after refreshing the workspace.",
       movedItem: (relativePath: string) => `Moved ${relativePath}.`,
       openMarkdownBeforeImages: "Open a Markdown document before adding images.",
-      savedImage: (relativePath: string) => `Saved image to ${relativePath}`,
+      savedImage: (relativePath: string) => `Copied image to ${relativePath}`,
+      linkedImage: (relativePath: string) => `Inserted image link to ${relativePath}`,
+      unsupportedImage: "This image format is not supported.",
       headingLinksUnsupported: "Heading links are not supported yet.",
       trashConfirmation: (name: string, kind: "directory" | "file") =>
         kind === "directory" ? `Move "${name}" and its contents to Trash?` : `Move "${name}" to Trash?`
@@ -1020,7 +1022,9 @@ export const appStrings = {
       movedFileMissing: "El elemento movido no apareció al actualizar el espacio de trabajo.",
       movedItem: (relativePath: string) => `Se movió ${relativePath}.`,
       openMarkdownBeforeImages: "Abre un documento Markdown antes de agregar imágenes.",
-      savedImage: (relativePath: string) => `Imagen guardada en ${relativePath}`,
+      savedImage: (relativePath: string) => `Imagen copiada en ${relativePath}`,
+      linkedImage: (relativePath: string) => `Enlace de imagen insertado a ${relativePath}`,
+      unsupportedImage: "Este formato de imagen no es compatible.",
       headingLinksUnsupported: "Los enlaces a encabezados aún no están disponibles.",
       trashConfirmation: (name: string, kind: "directory" | "file") =>
         kind === "directory"
