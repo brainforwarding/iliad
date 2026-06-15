@@ -153,7 +153,7 @@ interface TreeRowProps {
   onToggle: (path: string) => void;
   registerRow: (path: string, element: HTMLDivElement | null) => void;
   registerRowButton: (path: string, element: HTMLButtonElement | null) => void;
-  onShowPathPeek: (path: string, element: HTMLElement) => void;
+  onShowPathPeek: (path: string, element: HTMLElement, options?: TreePathPeekOptions) => void;
   onHidePathPeek: (path?: string) => void;
   onSearchRowKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
   onOpenNode: (node: FileTreeNode) => void;
@@ -202,6 +202,10 @@ interface TreePathPeek {
   top: number;
   left: number;
   maxWidth: number;
+}
+
+interface TreePathPeekOptions {
+  delayMs?: number;
 }
 
 function isAssetNode(node: FileTreeNode) {
@@ -448,18 +452,18 @@ function FileTreeSearchControl({
             <button
               type="button"
               className="file-tree-search-scope-button"
-              aria-pressed={searchScope === "names"}
-              onClick={() => onSearchScopeChange("names")}
-            >
-              {labels.searchNames}
-            </button>
-            <button
-              type="button"
-              className="file-tree-search-scope-button"
               aria-pressed={searchScope === "text"}
               onClick={() => onSearchScopeChange("text")}
             >
               {labels.searchText}
+            </button>
+            <button
+              type="button"
+              className="file-tree-search-scope-button"
+              aria-pressed={searchScope === "names"}
+              onClick={() => onSearchScopeChange("names")}
+            >
+              {labels.searchNames}
             </button>
           </div>
           <span className="file-tree-search-count" aria-hidden="true">
@@ -676,12 +680,11 @@ function TreeRow({
               ref={(element) => registerRowButton(nodePath, element)}
               className="tree-open-button"
               type="button"
-              title={pendingTitle ?? fullRelativePath}
               aria-label={pendingTitle ?? undefined}
               aria-describedby={pathDescriptionId}
               aria-current={isSearchActiveMatch ? "true" : undefined}
               onBlur={() => onHidePathPeek(fullRelativePath)}
-              onFocus={(event) => onShowPathPeek(fullRelativePath, event.currentTarget)}
+              onFocus={(event) => onShowPathPeek(fullRelativePath, event.currentTarget, { delayMs: 350 })}
               onKeyDown={onSearchRowKeyDown}
               onClick={() => {
                 if (node.source === "pending-create") {
@@ -721,7 +724,6 @@ function TreeRow({
                 {showDescendantMatchCount ? (
                   <span
                     className="tree-search-descendant-count"
-                    title={labels.fileTreeDescendantMatches(descendantMatchCount)}
                     aria-hidden="true"
                   >
                     {descendantMatchCount}
@@ -827,7 +829,7 @@ export function FileTree({
 }: FileTreeProps) {
   const [durableExpanded, setDurableExpanded] = useState<Set<string>>(new Set());
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchScope, setSearchScope] = useState<FileTreeSearchScope>("names");
+  const [searchScope, setSearchScope] = useState<FileTreeSearchScope>("text");
   const [searchQuery, setSearchQuery] = useState("");
   const [nameSearchMode, setNameSearchMode] = useState<FileTreeSearchMode>("fuzzy");
   const [searchFilter, setSearchFilter] = useState(false);
@@ -844,6 +846,7 @@ export function FileTree({
   const [contentSearchUsesSavedFallback, setContentSearchUsesSavedFallback] = useState(false);
   const [contentExpandedIds, setContentExpandedIds] = useState<Set<string>>(() => new Set());
   const [pathPeek, setPathPeek] = useState<TreePathPeek | null>(null);
+  const pathPeekTimerRef = useRef<number | null>(null);
   const sidebarRef = useRef<HTMLElement | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const rowButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -1030,7 +1033,7 @@ export function FileTree({
   useEffect(() => {
     setDurableExpanded(new Set());
     setSearchOpen(false);
-    setSearchScope("names");
+    setSearchScope("text");
     setSearchQuery("");
     setNameSearchMode("fuzzy");
     setSearchFilter(false);
@@ -1265,23 +1268,52 @@ export function FileTree({
     }
   }, []);
 
-  const showPathPeek = useCallback((path: string, element: HTMLElement) => {
+  const clearPathPeekTimer = useCallback(() => {
+    if (pathPeekTimerRef.current !== null) {
+      window.clearTimeout(pathPeekTimerRef.current);
+      pathPeekTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearPathPeekTimer, [clearPathPeekTimer]);
+
+  const showPathPeek = useCallback((path: string, element: HTMLElement, options: TreePathPeekOptions = {}) => {
+    clearPathPeekTimer();
+
     if (!path) {
       return;
     }
 
-    const rect = element.getBoundingClientRect();
-    const margin = 8;
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const maxWidth = Math.max(1, Math.min(520, viewportWidth - margin * 2));
-    const left = Math.min(Math.max(margin, rect.left + 22), Math.max(margin, viewportWidth - margin - maxWidth));
-    const top = Math.min(Math.max(margin, rect.bottom + 5), Math.max(margin, viewportHeight - margin - 64));
+    const label = element.querySelector<HTMLElement>(".tree-name-text, .content-search-name");
+    const isClipped = label
+      ? label.scrollWidth > label.clientWidth + 1
+      : element.scrollWidth > element.clientWidth + 1;
 
-    setPathPeek({ path, top, left, maxWidth });
-  }, []);
+    if (!isClipped) {
+      setPathPeek((current) => (current?.path === path ? null : current));
+      return;
+    }
+
+    pathPeekTimerRef.current = window.setTimeout(() => {
+      if (!element.isConnected) {
+        return;
+      }
+
+      const rect = element.getBoundingClientRect();
+      const margin = 8;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const maxWidth = Math.max(1, Math.min(520, viewportWidth - margin * 2));
+      const left = Math.min(Math.max(margin, rect.left + 22), Math.max(margin, viewportWidth - margin - maxWidth));
+      const top = Math.min(Math.max(margin, rect.bottom + 5), Math.max(margin, viewportHeight - margin - 64));
+
+      pathPeekTimerRef.current = null;
+      setPathPeek({ path, top, left, maxWidth });
+    }, options.delayMs ?? 700);
+  }, [clearPathPeekTimer]);
 
   const hidePathPeek = useCallback((path?: string) => {
+    clearPathPeekTimer();
     setPathPeek((current) => {
       if (!current || (path && current.path !== path)) {
         return current;
@@ -1289,7 +1321,7 @@ export function FileTree({
 
       return null;
     });
-  }, []);
+  }, [clearPathPeekTimer]);
 
   useEffect(() => {
     if (!pendingChangesKey) {
@@ -1348,7 +1380,7 @@ export function FileTree({
 
       if (!searchOpen) {
         searchReturnFocusRef.current = returnFocusTarget;
-        setSearchScope("names");
+        setSearchScope("text");
         setActiveContentMatchIndex(-1);
       }
 

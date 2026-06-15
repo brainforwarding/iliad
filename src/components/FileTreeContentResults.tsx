@@ -105,7 +105,7 @@ function ContentFolderRow({
           {expanded ? <FolderOpen size={15} /> : <Folder size={15} />}
         </span>
         <span className="content-search-name">{node.name}</span>
-        <span className="content-search-count-badge" title={labels.fileTreeDescendantMatches(node.matchCount)}>
+        <span className="content-search-count-badge" aria-hidden="true">
           {node.matchCount}
         </span>
       </button>
@@ -153,7 +153,6 @@ function ContentFileRow({
       <button
         type="button"
         className="content-search-file-button"
-        title={node.file.relativePath}
         aria-label={`${node.file.relativePath}. ${labels.contentSearchCount(node.matchCount, 1)}`}
         onFocus={(event) => onShowPathPeek(node.file.relativePath, event.currentTarget)}
         onBlur={() => onHidePathPeek(node.file.relativePath)}
@@ -167,7 +166,7 @@ function ContentFileRow({
           <FileText size={15} strokeWidth={1.5} />
         </span>
         <span className="content-search-name">{node.displayName}</span>
-        <span className="content-search-count-badge" title={labels.contentSearchCount(node.matchCount, 1)}>
+        <span className="content-search-count-badge" aria-hidden="true">
           {node.matchCount}
         </span>
       </button>
