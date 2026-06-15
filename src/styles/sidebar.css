@@ -8,6 +8,10 @@
   background: var(--editor);
 }
 
+.sidebar.has-file-tree-search {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
 .sidebar-header {
   display: grid;
   min-height: 44px;
@@ -68,6 +72,199 @@
   gap: 4px;
 }
 
+.file-tree-search {
+  display: grid;
+  gap: 6px;
+  padding: 0 8px 7px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--editor);
+}
+
+.file-tree-search-input-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+}
+
+.file-tree-search-input-wrap {
+  display: grid;
+  min-width: 0;
+  height: 28px;
+  grid-template-columns: 18px minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 3px 0 7px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-control);
+  background: var(--editor);
+  color: var(--muted-1);
+}
+
+.file-tree-search-input-wrap:focus-within {
+  border-color: var(--focus-ring-border);
+  box-shadow: var(--focus-ring);
+}
+
+.file-tree-search-input-wrap input {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  outline: none;
+}
+
+.file-tree-search-input-wrap input::placeholder {
+  color: var(--muted-3);
+}
+
+.file-tree-search-input-wrap input::-webkit-search-cancel-button {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.file-tree-search-controls {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.file-tree-search-control-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.file-tree-search-mode-row {
+  justify-content: start;
+}
+
+.file-tree-search-nav-row {
+  justify-content: end;
+}
+
+.file-tree-search-count {
+  min-width: 34px;
+  color: var(--muted-2);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+
+.file-tree-search-spacer {
+  flex: 1 1 auto;
+}
+
+.file-tree-search-icon-button,
+.file-tree-search-toggle,
+.file-tree-search-clear,
+.file-tree-search-done-button {
+  position: relative;
+  display: inline-flex;
+  height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted-1);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.file-tree-search-icon-button {
+  width: 28px;
+}
+
+.file-tree-search-clear {
+  width: 22px;
+  height: 22px;
+}
+
+.file-tree-search-toggle,
+.file-tree-search-done-button {
+  min-width: 0;
+  padding: 0 7px;
+}
+
+.file-tree-search-icon-button:hover,
+.file-tree-search-toggle:hover,
+.file-tree-search-clear:hover,
+.file-tree-search-done-button:hover {
+  border-color: var(--hairline-strong);
+  background: var(--paper);
+  color: var(--ink-1);
+}
+
+.file-tree-search-icon-button:focus-visible,
+.file-tree-search-toggle:focus-visible,
+.file-tree-search-clear:focus-visible,
+.file-tree-search-done-button:focus-visible {
+  outline: none;
+  border-color: var(--focus-ring-border);
+  box-shadow: var(--focus-ring);
+}
+
+.file-tree-search-toggle[aria-pressed="true"] {
+  border-color: var(--accent-border);
+  background: var(--accent-tint);
+  color: var(--accent-deep);
+}
+
+.file-tree-search-icon-button:disabled,
+.file-tree-search-icon-button:disabled:hover,
+.file-tree-search-clear:disabled,
+.file-tree-search-clear:disabled:hover {
+  border-color: transparent;
+  background: transparent;
+  color: var(--focus-ring-border);
+  cursor: default;
+  opacity: 0.58;
+}
+
+.file-tree-search-icon-button[data-tooltip]::after,
+.file-tree-search-toggle[data-tooltip]::after,
+.file-tree-search-clear[data-tooltip]::after,
+.file-tree-search-done-button[data-tooltip]::after {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 6px);
+  left: 50%;
+  max-width: 220px;
+  padding: 5px 7px;
+  border: 1px solid var(--overlay-faint);
+  border-radius: 5px;
+  background: var(--surface-inverse);
+  box-shadow: var(--shadow-float);
+  color: var(--editor);
+  content: attr(data-tooltip);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1.15;
+  opacity: 0;
+  pointer-events: none;
+  text-align: center;
+  transform: translate(-50%, -2px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+  white-space: nowrap;
+}
+
+.file-tree-search-icon-button[data-tooltip]:hover::after,
+.file-tree-search-toggle[data-tooltip]:hover::after,
+.file-tree-search-clear[data-tooltip]:hover::after,
+.file-tree-search-done-button[data-tooltip]:hover::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  transition-delay: 2.5s;
+}
+
 .tree-scroll {
   min-height: 0;
   overflow: auto;
@@ -113,6 +310,15 @@
   background: var(--hover-wash);
   box-shadow: var(--rail);
   color: var(--ink-3);
+}
+
+.tree-item.is-search-active-match {
+  border-color: var(--focus-ring-border);
+  background: var(--accent-soft);
+}
+
+.tree-item.is-active.is-search-active-match {
+  box-shadow: var(--rail), var(--focus-ring);
 }
 
 .tree-open-button {
@@ -183,11 +389,59 @@
 }
 
 .tree-name {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
   overflow: hidden;
   font-size: var(--text-md);
   line-height: 1.1;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tree-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-search-mark {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: var(--highlight);
+  color: inherit;
+}
+
+.tree-search-descendant-count {
+  display: inline-grid;
+  min-width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0 4px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-pill);
+  background: var(--accent-tint);
+  color: var(--muted-1);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.tree-path-peek {
+  position: fixed;
+  z-index: 70;
+  padding: 5px 7px;
+  border: 1px solid var(--overlay-faint);
+  border-radius: 5px;
+  background: var(--surface-inverse);
+  box-shadow: var(--shadow-float);
+  color: var(--editor);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  pointer-events: none;
 }
 
 .tree-pending-dot {

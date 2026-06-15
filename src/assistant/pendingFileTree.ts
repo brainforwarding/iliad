@@ -1,5 +1,5 @@
 import { fileHasMutableReview } from "./assistantUtils";
-import type { AgentChangeProposal, AgentProposalFileStatus, FileTreeNode } from "../types/iliad";
+import type { AgentChangeProposal, AgentProposalFileStatus, FileKind, FileTreeNode } from "../types/iliad";
 
 export interface PendingFileTreeChange {
   proposalId: string;
@@ -71,6 +71,74 @@ export function pendingFileTreePath(relativePath: string) {
 
 export function pendingFileTreeDirectoryPath(relativePath: string) {
   return `iliad-review-dir://${normalizeRelativePath(relativePath)}`;
+}
+
+export function markdownStem(name: string) {
+  return name.replace(/\.(md|markdown|mdown|mkd)$/i, "");
+}
+
+export function displayNodePath(node: FileTreeDisplayNode) {
+  return node.source === "real" ? node.node.path : node.path;
+}
+
+export function displayNodeId(node: FileTreeDisplayNode) {
+  return displayNodePath(node);
+}
+
+export function displayNodeRelativePath(node: FileTreeDisplayNode) {
+  return node.source === "real" ? node.node.relativePath : node.relativePath;
+}
+
+export function displayNodeName(node: FileTreeDisplayNode) {
+  return node.source === "real" ? node.node.name : node.name;
+}
+
+export function displayNodeKind(node: FileTreeDisplayNode): FileKind {
+  if (node.source === "pending-dir") {
+    return "directory";
+  }
+
+  if (node.source === "pending-create") {
+    return "markdown";
+  }
+
+  return node.node.kind;
+}
+
+export function displayNodeChildren(node: FileTreeDisplayNode) {
+  if (node.source === "pending-create") {
+    return undefined;
+  }
+
+  return node.children;
+}
+
+export function displayTreeName(node: FileTreeDisplayNode) {
+  const name = displayNodeName(node);
+  return displayNodeKind(node) === "markdown" ? markdownStem(name) : name;
+}
+
+export function fileTreeRevealAncestorPaths(nodes: FileTreeDisplayNode[], targetPath: string): string[] | null {
+  const visit = (treeNodes: FileTreeDisplayNode[], ancestors: string[]): string[] | null => {
+    for (const node of treeNodes) {
+      const nodePath = displayNodePath(node);
+
+      if (nodePath === targetPath) {
+        return ancestors;
+      }
+
+      const children = displayNodeChildren(node);
+      const childResult = children ? visit(children, [...ancestors, nodePath]) : null;
+
+      if (childResult) {
+        return childResult;
+      }
+    }
+
+    return null;
+  };
+
+  return visit(nodes, []);
 }
 
 function proposalTimestamp(proposal: AgentChangeProposal) {
@@ -147,10 +215,6 @@ function realNodeRank(node: FileTreeNode) {
   return 3;
 }
 
-function displayNodeName(node: FileTreeDisplayNode) {
-  return node.source === "real" ? node.node.name : node.name;
-}
-
 function displayNodeRank(node: FileTreeDisplayNode) {
   if (node.source === "real") {
     return realNodeRank(node.node);
@@ -171,7 +235,7 @@ function sortDisplayNodes(nodes: FileTreeDisplayNode[]) {
   });
 
   for (const node of nodes) {
-    const children = node.source === "real" ? node.children : node.source === "pending-dir" ? node.children : undefined;
+    const children = displayNodeChildren(node);
 
     if (children) {
       sortDisplayNodes(children);

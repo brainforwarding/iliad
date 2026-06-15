@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFileTreeDisplayNodes } from "../../src/assistant/pendingFileTree";
-import { fileTreeRevealAncestorPaths } from "../../src/components/FileTree";
+import { buildFileTreeDisplayNodes, fileTreeRevealAncestorPaths } from "../../src/assistant/pendingFileTree";
 import type { FileTreeNode } from "../../src/types/iliad";
 
 function fileNode(relativePath: string, kind: FileTreeNode["kind"] = "markdown", children?: FileTreeNode[]): FileTreeNode {

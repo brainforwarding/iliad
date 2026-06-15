@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -39,6 +40,12 @@ import { useFileActions } from "./files/fileActions";
 import { findNodeByRelativePath } from "./files/fileTree";
 import { useAppLanguage } from "./i18n/appLanguage";
 import { useEditorPreferences } from "./preferences/editorPreferences";
+import {
+  clampSidebarWidth,
+  minimumSidebarWidth,
+  maximumPreferredSidebarWidth,
+  useSidebarWidth
+} from "./preferences/sidebarPreferences";
 import { useWritingAssistPreferences } from "./preferences/writingAssistPreferences";
 import type { EditorView } from "@codemirror/view";
 import type { FileTreeNode, WorkspaceInfo, WritingAssistStatus } from "./types/iliad";
@@ -62,6 +69,20 @@ function statusText(
 
 function markdownDisplayName(file: FileTreeNode | null, fallbackName: string) {
   return file?.name.replace(/\.(md|markdown|mdown|mkd)$/i, "") ?? fallbackName;
+}
+
+function assistantColumnWidth(viewportWidth: number) {
+  return Math.min(320, Math.max(280, viewportWidth * 0.24));
+}
+
+function effectiveSidebarMaximum(viewportWidth: number, assistantOpen: boolean) {
+  const editorFloor = 320;
+  const assistantWidth = assistantOpen ? assistantColumnWidth(viewportWidth) : 0;
+  const availableWidth = viewportWidth - assistantWidth - editorFloor;
+
+  return Math.round(
+    Math.max(minimumSidebarWidth, Math.min(maximumPreferredSidebarWidth, viewportWidth * 0.45, availableWidth))
+  );
 }
 
 export default function App() {
@@ -92,6 +113,7 @@ export default function App() {
     setEditorFontPreset,
     setEditorFontSize
   } = useEditorPreferences();
+  const { resetSidebarWidth, setSidebarWidth, sidebarWidth } = useSidebarWidth();
   const {
     correctorEnabled,
     autocompleteEnabled,
@@ -103,6 +125,10 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === "undefined" ? 1200 : window.innerWidth
+  );
+  const [sidebarResizing, setSidebarResizing] = useState(false);
   const [typographyOpen, setTypographyOpen] = useState(false);
   const [writingAssistsOpen, setWritingAssistsOpen] = useState(false);
   const [languageOpen, setLanguageOpen] = useState(false);
@@ -116,6 +142,8 @@ export default function App() {
   const writingAssistsMenuRef = useRef<HTMLDivElement | null>(null);
   const languageMenuRef = useRef<HTMLDivElement | null>(null);
   const treeContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const appShellRef = useRef<HTMLDivElement | null>(null);
+  const sidebarResizeHandleRef = useRef<HTMLDivElement | null>(null);
   const closeDocumentInFlightRef = useRef(false);
   const runningAssistantRunIdRef = useRef<string | null>(null);
   const editorNavigationDuringRunRef = useRef<{ runId: string | null; changed: boolean }>({
@@ -235,6 +263,14 @@ export default function App() {
   useEffect(() => {
     focusModeRef.current = focusMode;
   }, [focusMode]);
+
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+
+    window.addEventListener("resize", onResize);
+
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const handleSelectionCommentSaved = useCallback(() => {
     if (assistantOpenRef.current || focusModeRef.current || assistantPulsedWhileClosedRef.current) {
@@ -730,6 +766,94 @@ export default function App() {
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [writingAssistsOpen]);
 
+  const sidebarMaximumWidth = useMemo(
+    () => effectiveSidebarMaximum(viewportWidth, assistantOpen && !focusMode && viewportWidth > 760),
+    [assistantOpen, focusMode, viewportWidth]
+  );
+  const renderedSidebarWidth = clampSidebarWidth(sidebarWidth, sidebarMaximumWidth);
+  const shellStyle = useMemo(
+    () =>
+      ({
+        "--sidebar-width": `${renderedSidebarWidth}px`
+      }) as CSSProperties,
+    [renderedSidebarWidth]
+  );
+  const applySidebarWidthFromClientX = useCallback(
+    (clientX: number) => {
+      const shellLeft = appShellRef.current?.getBoundingClientRect().left ?? 0;
+      const nextWidth = clientX - shellLeft;
+
+      setSidebarWidth(nextWidth);
+    },
+    [setSidebarWidth]
+  );
+  const handleSidebarResizePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setSidebarResizing(true);
+      applySidebarWidthFromClientX(event.clientX);
+    },
+    [applySidebarWidthFromClientX]
+  );
+  const handleSidebarResizePointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!sidebarResizing) {
+        return;
+      }
+
+      event.preventDefault();
+      applySidebarWidthFromClientX(event.clientX);
+    },
+    [applySidebarWidthFromClientX, sidebarResizing]
+  );
+  const stopSidebarResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    setSidebarResizing(false);
+  }, []);
+  const handleSidebarResizeKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      const step = event.shiftKey ? 48 : 16;
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setSidebarWidth(renderedSidebarWidth - step);
+        return;
+      }
+
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setSidebarWidth(sidebarWidth > renderedSidebarWidth ? sidebarWidth + step : renderedSidebarWidth + step);
+        return;
+      }
+
+      if (event.key === "Home") {
+        event.preventDefault();
+        setSidebarWidth(minimumSidebarWidth);
+        return;
+      }
+
+      if (event.key === "End") {
+        event.preventDefault();
+        setSidebarWidth(maximumPreferredSidebarWidth);
+        return;
+      }
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        resetSidebarWidth();
+      }
+    },
+    [renderedSidebarWidth, resetSidebarWidth, setSidebarWidth, sidebarMaximumWidth, sidebarWidth]
+  );
+  const sidebarRegionId = "file-tree-sidebar";
   const shellClassName = useMemo(() => {
     const classes = ["app-shell"];
 
@@ -745,8 +869,12 @@ export default function App() {
       classes.push("assistant-is-open");
     }
 
+    if (sidebarResizing) {
+      classes.push("is-sidebar-resizing");
+    }
+
     return classes.join(" ");
-  }, [assistantOpen, focusMode, sidebarOpen]);
+  }, [assistantOpen, focusMode, sidebarOpen, sidebarResizing]);
   const visibleStatus = statusText(saveStatus, lastSavedAt, strings.topbar.saveStatus);
   const shouldShowStatus = saveStatus !== "saved";
   const editorFile = virtualReviewFile ?? activeFile;
@@ -931,7 +1059,7 @@ export default function App() {
   }
 
   return (
-    <div className={shellClassName}>
+    <div ref={appShellRef} className={shellClassName} style={shellStyle}>
       <header className="app-topbar">
         <div className="topbar-sidebar-zone" />
         <div className="topbar-editor-zone">
@@ -1064,45 +1192,68 @@ export default function App() {
 
       <div className="app-content">
         {sidebarOpen && !focusMode ? (
-          <FileTree
-            workspace={workspace}
-            recentWorkspaces={recentWorkspaces}
-            nodes={tree}
-            activePath={editorFile?.path}
-            selectedPath={selectedTreePath}
-            pendingChanges={pendingTreeChanges}
-            creatingFile={creatingFile}
-            creatingFolder={creatingFolder}
-            renamingPath={renamingPath}
-            revealPath={reviewRevealPath ?? revealFolderPath}
-            labels={strings.sidebar}
-            onOpenNode={(node) => {
-              markEditorNavigationDuringRun();
-              clearReviewForNormalNavigation(node);
-              return openNode(node);
-            }}
-            onOpenPendingChange={(target) =>
-              handleManualReviewTargetChange({ proposalId: target.proposalId, fileId: target.fileId })
-            }
-            onRevealComplete={(path) => {
-              if (reviewRevealPath === path) {
-                setReviewRevealPath(null);
+          <div id={sidebarRegionId} className="sidebar-frame">
+            <FileTree
+              workspace={workspace}
+              recentWorkspaces={recentWorkspaces}
+              nodes={tree}
+              activePath={editorFile?.path}
+              selectedPath={selectedTreePath}
+              pendingChanges={pendingTreeChanges}
+              creatingFile={creatingFile}
+              creatingFolder={creatingFolder}
+              renamingPath={renamingPath}
+              revealPath={reviewRevealPath ?? revealFolderPath}
+              labels={strings.sidebar}
+              onOpenNode={(node) => {
+                markEditorNavigationDuringRun();
+                clearReviewForNormalNavigation(node);
+                return openNode(node);
+              }}
+              onOpenPendingChange={(target) =>
+                handleManualReviewTargetChange({ proposalId: target.proposalId, fileId: target.fileId })
               }
+              onRevealComplete={(path) => {
+                if (reviewRevealPath === path) {
+                  setReviewRevealPath(null);
+                }
 
-              if (revealFolderPath === path) {
-                setRevealFolderPath(null);
-              }
-            }}
-            onCreateFile={createMarkdownFileWithNavigation}
-            onCreateFolder={createFolder}
-            onOpenFolder={openWorkspace}
-            onOpenRecent={openRecentWorkspace}
-            onRevealWorkspace={() => void window.iliad.revealInFinder(workspace.path, workspace.path)}
-            onSelectNode={(node) => setSelectedTreePath(node.path)}
-            onShowContextMenu={(node, position) => setTreeContextMenu({ node, ...position })}
-            onCancelRename={() => setRenamingPath(null)}
-            onCommitRename={renameNodeWithNavigation}
-          />
+                if (revealFolderPath === path) {
+                  setRevealFolderPath(null);
+                }
+              }}
+              onCreateFile={createMarkdownFileWithNavigation}
+              onCreateFolder={createFolder}
+              onOpenFolder={openWorkspace}
+              onOpenRecent={openRecentWorkspace}
+              onRevealWorkspace={() => void window.iliad.revealInFinder(workspace.path, workspace.path)}
+              onSelectNode={(node) => setSelectedTreePath(node.path)}
+              onShowContextMenu={(node, position) => setTreeContextMenu({ node, ...position })}
+              onCloseContextMenu={closeTreeContextMenu}
+              onCancelRename={() => setRenamingPath(null)}
+              onCommitRename={renameNodeWithNavigation}
+            />
+            <div
+              ref={sidebarResizeHandleRef}
+              className="sidebar-resize-handle"
+              role="separator"
+              tabIndex={0}
+              aria-controls={sidebarRegionId}
+              aria-label={strings.sidebar.resizeFileTree}
+              aria-orientation="vertical"
+              aria-valuemin={minimumSidebarWidth}
+              aria-valuemax={sidebarMaximumWidth}
+              aria-valuenow={renderedSidebarWidth}
+              aria-valuetext={strings.sidebar.fileTreeWidthValue(renderedSidebarWidth)}
+              data-tooltip={strings.sidebar.resizeFileTree}
+              onDoubleClick={resetSidebarWidth}
+              onKeyDown={handleSidebarResizeKeyDown}
+              onPointerCancel={stopSidebarResize}
+              onPointerDown={handleSidebarResizePointerDown}
+              onPointerMove={handleSidebarResizePointerMove}
+              onPointerUp={stopSidebarResize}
+            />
+          </div>
         ) : null}
 
         <EditorErrorBoundary labels={strings.editor} resetKey={editorFile?.path ?? "empty"}>

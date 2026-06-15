@@ -1,14 +1,18 @@
 import {
+  ChevronDown,
+  ChevronUp,
   ExternalLink,
   File,
   FilePlus,
   FileText,
   Folder,
   FolderOpen,
-  FolderPlus
+  FolderPlus,
+  Search,
+  X
 } from "lucide-react";
-import type { CSSProperties, FormEvent, KeyboardEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, FormEvent, KeyboardEvent, ReactNode, RefObject } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 import {
   contextFileDragMimeType,
@@ -17,9 +21,27 @@ import {
 } from "../assistant/contextAttachments";
 import {
   buildFileTreeDisplayNodes,
+  displayNodeChildren,
+  displayNodeId,
+  displayNodeKind,
+  displayNodeName,
+  displayNodePath,
+  displayNodeRelativePath,
+  displayTreeName,
+  fileTreeRevealAncestorPaths,
+  markdownStem,
   type FileTreeDisplayNode,
   type PendingFileTreeChange
 } from "../assistant/pendingFileTree";
+import {
+  clampFileTreeSearchActiveIndex,
+  filterFileTreeDisplayNodesForSearch,
+  moveFileTreeSearchActiveIndex,
+  searchFileTreeDisplayNodes,
+  type FileTreeSearchMode,
+  type FileTreeSearchNodeMeta,
+  type FileTreeSearchRange
+} from "../assistant/fileTreeSearch";
 import type { FileTreeNode, WorkspaceInfo } from "../types/iliad";
 
 interface FileTreeProps {
@@ -44,6 +66,7 @@ interface FileTreeProps {
   onRevealWorkspace: () => void | Promise<void>;
   onSelectNode: (node: FileTreeNode) => void;
   onShowContextMenu: (node: FileTreeNode, position: { x: number; y: number }) => void;
+  onCloseContextMenu?: () => void;
   onCancelRename: () => void;
   onCommitRename: (node: FileTreeNode, requestedName: string) => void;
 }
@@ -58,6 +81,25 @@ interface FileTreeLabels {
   pendingEdit: (path: string) => string;
   proposedNewDocument: (path: string) => string;
   rename: (name: string) => string;
+  findInFileTree: string;
+  fileTreeSearchPlaceholder: string;
+  clearFileTreeSearch: string;
+  closeFileTreeSearch: string;
+  fileTreeSearchDone: string;
+  previousFileTreeMatch: string;
+  nextFileTreeMatch: string;
+  toggleFileTreeFilter: string;
+  fileTreeFilterLabel: string;
+  fileTreeFilterOn: string;
+  fileTreeFilterOff: string;
+  toggleFileTreeFuzzy: string;
+  fileTreeFuzzyLabel: string;
+  fileTreeFuzzyOn: string;
+  fileTreeFuzzyOff: string;
+  fileTreeSearchNoResults: string;
+  fileTreeSearchCount: (current: number, total: number) => string;
+  fileTreeSearchMatchAria: (name: string, current: number, total: number) => string;
+  fileTreeDescendantMatches: (count: number) => string;
 }
 
 interface TreeRowProps {
@@ -69,8 +111,17 @@ interface TreeRowProps {
   renamingPath: string | null;
   expanded: Set<string>;
   labels: FileTreeLabels;
+  searchMeta?: FileTreeSearchNodeMeta;
+  searchMetaById: Map<string, FileTreeSearchNodeMeta>;
+  activeSearchMatchId?: string | null;
+  isSearchActiveMatch: boolean;
+  searchOpen: boolean;
   onToggle: (path: string) => void;
   registerRow: (path: string, element: HTMLDivElement | null) => void;
+  registerRowButton: (path: string, element: HTMLButtonElement | null) => void;
+  onShowPathPeek: (path: string, element: HTMLElement) => void;
+  onHidePathPeek: (path?: string) => void;
+  onSearchRowKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
   onOpenNode: (node: FileTreeNode) => void;
   onOpenPendingChange: (target: PendingFileTreeChange) => void | Promise<void>;
   onSelectNode: (node: FileTreeNode) => void;
@@ -79,63 +130,37 @@ interface TreeRowProps {
   onCommitRename: (node: FileTreeNode, requestedName: string) => void;
 }
 
+interface FileTreeSearchControlProps {
+  labels: FileTreeLabels;
+  inputId: string;
+  inputRef: RefObject<HTMLInputElement>;
+  treeListId: string;
+  statusId: string;
+  query: string;
+  mode: FileTreeSearchMode;
+  filter: boolean;
+  matchCount: number;
+  activeMatchIndex: number;
+  activeMatchPath: string | null;
+  onQueryChange: (query: string) => void;
+  onClose: () => void;
+  onClear: () => void;
+  onPrevious: () => void;
+  onNext: () => void;
+  onToggleMode: () => void;
+  onToggleFilter: () => void;
+  onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
+}
+
+interface TreePathPeek {
+  path: string;
+  top: number;
+  left: number;
+  maxWidth: number;
+}
+
 function isAssetNode(node: FileTreeNode) {
   return node.name === "assets" || node.relativePath.split(/[\\/]/).includes("assets");
-}
-
-function displayNodePath(node: FileTreeDisplayNode) {
-  return node.source === "real" ? node.node.path : node.path;
-}
-
-function displayNodeRelativePath(node: FileTreeDisplayNode) {
-  return node.source === "real" ? node.node.relativePath : node.relativePath;
-}
-
-function displayNodeName(node: FileTreeDisplayNode) {
-  return node.source === "real" ? node.node.name : node.name;
-}
-
-function displayNodeKind(node: FileTreeDisplayNode) {
-  if (node.source === "pending-dir") {
-    return "directory";
-  }
-
-  if (node.source === "pending-create") {
-    return "markdown";
-  }
-
-  return node.node.kind;
-}
-
-function displayNodeChildren(node: FileTreeDisplayNode) {
-  if (node.source === "pending-create") {
-    return undefined;
-  }
-
-  return node.children;
-}
-
-export function fileTreeRevealAncestorPaths(nodes: FileTreeDisplayNode[], targetPath: string): string[] | null {
-  const visit = (treeNodes: FileTreeDisplayNode[], ancestors: string[]): string[] | null => {
-    for (const node of treeNodes) {
-      const nodePath = displayNodePath(node);
-
-      if (nodePath === targetPath) {
-        return ancestors;
-      }
-
-      const children = displayNodeChildren(node);
-      const childResult = children ? visit(children, [...ancestors, nodePath]) : null;
-
-      if (childResult) {
-        return childResult;
-      }
-    }
-
-    return null;
-  };
-
-  return visit(nodes, []);
 }
 
 function pendingLabel(node: FileTreeDisplayNode, labels: FileTreeLabels) {
@@ -180,10 +205,6 @@ function RealFileIcon({ node, isExpanded }: { node: FileTreeNode; isExpanded: bo
   return <File size={16} strokeWidth={1.6} />;
 }
 
-function markdownStem(name: string) {
-  return name.replace(/\.(md|markdown|mdown|mkd)$/i, "");
-}
-
 function nodeFileNameFromInput(node: FileTreeNode, value: string) {
   const trimmedValue = value.trim();
 
@@ -196,11 +217,6 @@ function nodeFileNameFromInput(node: FileTreeNode, value: string) {
 
 function displayName(node: FileTreeNode) {
   return node.kind === "markdown" ? markdownStem(node.name) : node.name;
-}
-
-function displayTreeName(node: FileTreeDisplayNode) {
-  const name = displayNodeName(node);
-  return displayNodeKind(node) === "markdown" ? markdownStem(name) : name;
 }
 
 function RenameInput({
@@ -271,6 +287,164 @@ function RenameInput({
   );
 }
 
+function renderSearchHighlightedName(displayName: string, ranges: FileTreeSearchRange[]) {
+  if (ranges.length === 0) {
+    return displayName;
+  }
+
+  const parts: ReactNode[] = [];
+  let offset = 0;
+
+  ranges.forEach((range, index) => {
+    if (range.start > offset) {
+      parts.push(displayName.slice(offset, range.start));
+    }
+
+    parts.push(
+      <mark key={`${range.start}-${range.end}-${index}`} className="tree-search-mark">
+        {displayName.slice(range.start, range.end)}
+      </mark>
+    );
+    offset = range.end;
+  });
+
+  if (offset < displayName.length) {
+    parts.push(displayName.slice(offset));
+  }
+
+  return parts;
+}
+
+function FileTreeSearchControl({
+  labels,
+  inputId,
+  inputRef,
+  treeListId,
+  statusId,
+  query,
+  mode,
+  filter,
+  matchCount,
+  activeMatchIndex,
+  activeMatchPath,
+  onQueryChange,
+  onClose,
+  onClear,
+  onPrevious,
+  onNext,
+  onToggleMode,
+  onToggleFilter,
+  onKeyDown
+}: FileTreeSearchControlProps) {
+  const hasQuery = query.trim().length > 0;
+  const currentMatch = matchCount > 0 ? activeMatchIndex + 1 : 0;
+  const statusText =
+    matchCount > 0
+      ? labels.fileTreeSearchCount(currentMatch, matchCount)
+      : hasQuery
+        ? labels.fileTreeSearchNoResults
+        : "";
+  const liveText =
+    matchCount > 0 && activeMatchPath
+      ? labels.fileTreeSearchMatchAria(activeMatchPath, currentMatch, matchCount)
+      : statusText;
+
+  return (
+    <div className="file-tree-search" role="search" aria-label={labels.findInFileTree}>
+      <div className="file-tree-search-input-row">
+        <div className="file-tree-search-input-wrap">
+          <Search size={14} aria-hidden="true" />
+          <input
+            ref={inputRef}
+            id={inputId}
+            type="search"
+            aria-label={labels.findInFileTree}
+            value={query}
+            aria-controls={treeListId}
+            aria-describedby={statusId}
+            placeholder={labels.fileTreeSearchPlaceholder}
+            onChange={(event) => onQueryChange(event.target.value)}
+            onKeyDown={onKeyDown}
+          />
+          <button
+            type="button"
+            className="file-tree-search-clear"
+            data-tooltip={labels.clearFileTreeSearch}
+            aria-label={labels.clearFileTreeSearch}
+            disabled={!query}
+            onClick={onClear}
+          >
+            <X size={13} />
+          </button>
+        </div>
+      </div>
+
+      <div className="file-tree-search-controls">
+        <div className="file-tree-search-control-row file-tree-search-mode-row">
+          <span className="file-tree-search-count" aria-hidden="true">
+            {statusText}
+          </span>
+          <button
+            type="button"
+            className="file-tree-search-toggle"
+            data-tooltip={mode === "fuzzy" ? labels.fileTreeFuzzyOn : labels.fileTreeFuzzyOff}
+            aria-label={labels.toggleFileTreeFuzzy}
+            aria-pressed={mode === "fuzzy"}
+            onClick={onToggleMode}
+          >
+            {labels.fileTreeFuzzyLabel}
+          </button>
+          <button
+            type="button"
+            className="file-tree-search-toggle"
+            data-tooltip={filter ? labels.fileTreeFilterOn : labels.fileTreeFilterOff}
+            aria-label={labels.toggleFileTreeFilter}
+            aria-pressed={filter}
+            onClick={onToggleFilter}
+          >
+            {labels.fileTreeFilterLabel}
+          </button>
+        </div>
+        <div className="file-tree-search-control-row file-tree-search-nav-row">
+          <span className="file-tree-search-spacer" />
+          <button
+            type="button"
+            className="file-tree-search-icon-button"
+            data-tooltip={labels.previousFileTreeMatch}
+            aria-label={labels.previousFileTreeMatch}
+            disabled={matchCount === 0}
+            onClick={onPrevious}
+          >
+            <ChevronUp size={14} />
+          </button>
+          <button
+            type="button"
+            className="file-tree-search-icon-button"
+            data-tooltip={labels.nextFileTreeMatch}
+            aria-label={labels.nextFileTreeMatch}
+            disabled={matchCount === 0}
+            onClick={onNext}
+          >
+            <ChevronDown size={14} />
+          </button>
+          <button
+            type="button"
+            className="file-tree-search-done-button"
+            data-tooltip={labels.closeFileTreeSearch}
+            aria-label={labels.closeFileTreeSearch}
+            onClick={onClose}
+          >
+            {labels.fileTreeSearchDone}
+          </button>
+        </div>
+        <span id={statusId} className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          {liveText}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function TreeRow({
   node,
   depth,
@@ -280,8 +454,17 @@ function TreeRow({
   renamingPath,
   expanded,
   labels,
+  searchMeta,
+  searchMetaById,
+  activeSearchMatchId,
+  isSearchActiveMatch,
+  searchOpen,
   onToggle,
   registerRow,
+  registerRowButton,
+  onShowPathPeek,
+  onHidePathPeek,
+  onSearchRowKeyDown,
   onOpenNode,
   onOpenPendingChange,
   onSelectNode,
@@ -289,6 +472,7 @@ function TreeRow({
   onCancelRename,
   onCommitRename
 }: TreeRowProps) {
+  const pathDescriptionId = useId();
   const nodePath = displayNodePath(node);
   const nodeKind = displayNodeKind(node);
   const isDirectory = nodeKind === "directory";
@@ -298,6 +482,8 @@ function TreeRow({
   const isActive = activePath === nodePath;
   const isSelected = node.source === "real" && selectedPath === node.node.path && !isActive;
   const isRenaming = node.source === "real" && renamingPath === node.node.path;
+  const displayedName = displayTreeName(node);
+  const fullRelativePath = displayNodeRelativePath(node) || displayNodeName(node);
   const pendingTitle = pendingLabel(node, labels);
   const hasPendingIndicator =
     node.source === "pending-create" ||
@@ -306,6 +492,13 @@ function TreeRow({
   const pendingIndicatorClass =
     node.source === "pending-create" || node.source === "pending-dir" ? "is-create" : "is-edit";
   const canDragContextFile = node.source === "real" && nodeKind === "markdown";
+  const descendantMatchCount = searchMeta?.descendantMatchCount ?? 0;
+  const hasDescendantMatchDescription = searchOpen && descendantMatchCount > 0;
+  const showDescendantMatchCount =
+    searchOpen && descendantMatchCount > 0 && (!searchMeta?.selfMatch || !isExpanded);
+  const rowDescription = hasDescendantMatchDescription
+    ? `${fullRelativePath}. ${labels.fileTreeDescendantMatches(descendantMatchCount)}`
+    : fullRelativePath;
   const rowClassName = [
     "tree-item",
     `is-${displayNodeKind(node)}`,
@@ -315,6 +508,7 @@ function TreeRow({
     hasPendingIndicator ? "has-pending-indicator" : "",
     isActive ? "is-active" : "",
     isSelected ? "is-selected" : "",
+    isSearchActiveMatch ? "is-search-active-match" : "",
     isRenaming ? "is-renaming" : ""
   ]
     .filter(Boolean)
@@ -348,6 +542,8 @@ function TreeRow({
           onSelectNode(node.node);
           onShowContextMenu(node.node, { x: event.clientX, y: event.clientY });
         }}
+        onPointerEnter={(event) => onShowPathPeek(fullRelativePath, event.currentTarget)}
+        onPointerLeave={() => onHidePathPeek(fullRelativePath)}
       >
         {isRenaming && node.source === "real" ? (
           <RenameInput
@@ -360,10 +556,16 @@ function TreeRow({
         ) : (
           <>
             <button
+              ref={(element) => registerRowButton(nodePath, element)}
               className="tree-open-button"
               type="button"
-              title={pendingTitle ?? (displayNodeRelativePath(node) || displayNodeName(node))}
+              title={pendingTitle ?? fullRelativePath}
               aria-label={pendingTitle ?? undefined}
+              aria-describedby={pathDescriptionId}
+              aria-current={isSearchActiveMatch ? "true" : undefined}
+              onBlur={() => onHidePathPeek(fullRelativePath)}
+              onFocus={(event) => onShowPathPeek(fullRelativePath, event.currentTarget)}
+              onKeyDown={onSearchRowKeyDown}
               onClick={() => {
                 if (node.source === "pending-create") {
                   void onOpenPendingChange(node.pendingTarget);
@@ -395,7 +597,20 @@ function TreeRow({
               <span className="tree-icon">
                 <FileIcon node={node} isExpanded={isExpanded} />
               </span>
-              <span className="tree-name">{displayTreeName(node)}</span>
+              <span className="tree-name">
+                <span className="tree-name-text">
+                  {renderSearchHighlightedName(displayedName, searchMeta?.selfRanges ?? [])}
+                </span>
+                {showDescendantMatchCount ? (
+                  <span
+                    className="tree-search-descendant-count"
+                    title={labels.fileTreeDescendantMatches(descendantMatchCount)}
+                    aria-hidden="true"
+                  >
+                    {descendantMatchCount}
+                  </span>
+                ) : null}
+              </span>
               {opensExternally && !hasPendingIndicator ? (
                 <span className="tree-external-hint" aria-hidden="true">
                   <ExternalLink size={13} strokeWidth={1.7} />
@@ -404,6 +619,9 @@ function TreeRow({
               {hasPendingIndicator ? (
                 <span className={`tree-pending-dot ${pendingIndicatorClass}`} aria-hidden="true" />
               ) : null}
+              <span id={pathDescriptionId} className="sr-only">
+                {rowDescription}
+              </span>
             </button>
           </>
         )}
@@ -421,8 +639,17 @@ function TreeRow({
               renamingPath={renamingPath}
               expanded={expanded}
               labels={labels}
+              searchMeta={searchMetaById.get(displayNodeId(child))}
+              searchMetaById={searchMetaById}
+              activeSearchMatchId={activeSearchMatchId}
+              isSearchActiveMatch={activeSearchMatchId === displayNodeId(child)}
+              searchOpen={searchOpen}
               onToggle={onToggle}
               registerRow={registerRow}
+              registerRowButton={registerRowButton}
+              onShowPathPeek={onShowPathPeek}
+              onHidePathPeek={onHidePathPeek}
+              onSearchRowKeyDown={onSearchRowKeyDown}
               onOpenNode={onOpenNode}
               onOpenPendingChange={onOpenPendingChange}
               onSelectNode={onSelectNode}
@@ -434,6 +661,24 @@ function TreeRow({
         : null}
     </>
   );
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const tagName = target.tagName.toLowerCase();
+  return tagName === "input" || tagName === "textarea" || tagName === "select" || target.isContentEditable;
+}
+
+function isFileTreeSearchShortcut(event: KeyboardEvent<HTMLElement>) {
+  if (event.key.toLowerCase() !== "f") {
+    return false;
+  }
+
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  return isMac ? event.metaKey && event.altKey && !event.ctrlKey : event.ctrlKey && event.altKey && !event.metaKey;
 }
 
 export function FileTree({
@@ -458,12 +703,69 @@ export function FileTree({
   onRevealWorkspace,
   onSelectNode,
   onShowContextMenu,
+  onCloseContextMenu,
   onCancelRename,
   onCommitRename
 }: FileTreeProps) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [durableExpanded, setDurableExpanded] = useState<Set<string>>(new Set());
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchMode, setSearchMode] = useState<FileTreeSearchMode>("fuzzy");
+  const [searchFilter, setSearchFilter] = useState(false);
+  const [activeMatchIndex, setActiveMatchIndex] = useState(-1);
+  const [pathPeek, setPathPeek] = useState<TreePathPeek | null>(null);
+  const sidebarRef = useRef<HTMLElement | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const rowButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const searchButtonRef = useRef<HTMLButtonElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchReturnFocusRef = useRef<HTMLElement | null>(null);
+  const generatedId = useId();
+  const treeListId = `${generatedId}-file-tree`;
+  const searchInputId = `${generatedId}-file-tree-search-input`;
+  const searchStatusId = `${generatedId}-file-tree-search-status`;
   const displayNodes = useMemo(() => buildFileTreeDisplayNodes(nodes, pendingChanges), [nodes, pendingChanges]);
+  const searchResult = useMemo(
+    () => searchFileTreeDisplayNodes(displayNodes, searchQuery, searchMode),
+    [displayNodes, searchMode, searchQuery]
+  );
+  const hasSearchQuery = searchOpen && Boolean(searchResult.normalizedQuery);
+  const activeMatchIndexSafe = clampFileTreeSearchActiveIndex(activeMatchIndex, searchResult.matches.length);
+  const activeMatch = hasSearchQuery && activeMatchIndexSafe >= 0 ? searchResult.matches[activeMatchIndexSafe] : null;
+  const activeSearchMatchId = activeMatch?.id ?? null;
+  const renderedNodes = useMemo(
+    () =>
+      hasSearchQuery && searchFilter
+        ? filterFileTreeDisplayNodesForSearch(displayNodes, searchResult)
+        : displayNodes,
+    [displayNodes, hasSearchQuery, searchFilter, searchResult]
+  );
+  const searchForcedExpanded = useMemo(() => {
+    const forcedExpanded = new Set<string>();
+
+    if (hasSearchQuery && searchFilter) {
+      for (const path of searchResult.filterAncestorPaths) {
+        forcedExpanded.add(path);
+      }
+    }
+
+    if (hasSearchQuery) {
+      for (const path of activeMatch?.ancestorPaths ?? []) {
+        forcedExpanded.add(path);
+      }
+    }
+
+    return forcedExpanded;
+  }, [activeMatch, hasSearchQuery, searchFilter, searchResult.filterAncestorPaths]);
+  const effectiveExpanded = useMemo(() => {
+    const expanded = new Set(durableExpanded);
+
+    for (const path of searchForcedExpanded) {
+      expanded.add(path);
+    }
+
+    return expanded;
+  }, [durableExpanded, searchForcedExpanded]);
   const workspaceSessionId = useMemo(
     () => workspaceContextDragSessionId(workspace),
     [workspace.path, workspace.sessionId]
@@ -477,8 +779,54 @@ export function FileTree({
   );
 
   useEffect(() => {
-    setExpanded(new Set());
+    setDurableExpanded(new Set());
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchMode("fuzzy");
+    setSearchFilter(false);
+    setActiveMatchIndex(-1);
+    searchReturnFocusRef.current = null;
   }, [workspace.path]);
+
+  useEffect(() => {
+    if (!searchOpen) {
+      return;
+    }
+
+    setActiveMatchIndex((current) => clampFileTreeSearchActiveIndex(current, searchResult.matches.length));
+  }, [searchOpen, searchResult.matches.length]);
+
+  useEffect(() => {
+    if (!searchOpen) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [searchOpen]);
+
+  useEffect(() => {
+    if (!activeSearchMatchId) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      rowRefs.current.get(activeSearchMatchId)?.scrollIntoView({ block: "nearest" });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeSearchMatchId]);
+
+  useEffect(() => {
+    if (renamingPath && searchOpen) {
+      setSearchOpen(false);
+      setActiveMatchIndex(-1);
+    }
+  }, [renamingPath, searchOpen]);
 
   useEffect(() => {
     if (!revealPath) {
@@ -491,7 +839,7 @@ export function FileTree({
       return;
     }
 
-    setExpanded((current) => {
+    setDurableExpanded((current) => {
       const next = new Set(current);
       const targetNode = rowRefs.current.get(revealPath);
 
@@ -528,6 +876,40 @@ export function FileTree({
     }
   }, []);
 
+  const registerRowButton = useCallback((path: string, element: HTMLButtonElement | null) => {
+    if (element) {
+      rowButtonRefs.current.set(path, element);
+    } else {
+      rowButtonRefs.current.delete(path);
+    }
+  }, []);
+
+  const showPathPeek = useCallback((path: string, element: HTMLElement) => {
+    if (!path) {
+      return;
+    }
+
+    const rect = element.getBoundingClientRect();
+    const margin = 8;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const maxWidth = Math.max(1, Math.min(520, viewportWidth - margin * 2));
+    const left = Math.min(Math.max(margin, rect.left + 22), Math.max(margin, viewportWidth - margin - maxWidth));
+    const top = Math.min(Math.max(margin, rect.bottom + 5), Math.max(margin, viewportHeight - margin - 64));
+
+    setPathPeek({ path, top, left, maxWidth });
+  }, []);
+
+  const hidePathPeek = useCallback((path?: string) => {
+    setPathPeek((current) => {
+      if (!current || (path && current.path !== path)) {
+        return current;
+      }
+
+      return null;
+    });
+  }, []);
+
   useEffect(() => {
     if (!pendingChangesKey) {
       return;
@@ -551,7 +933,7 @@ export function FileTree({
       return;
     }
 
-    setExpanded((current) => {
+    setDurableExpanded((current) => {
       const next = new Set(current);
 
       for (const path of pendingAncestorPaths) {
@@ -562,8 +944,201 @@ export function FileTree({
     });
   }, [displayNodes, pendingChangesKey]);
 
+  const focusRowButton = useCallback((path: string) => {
+    const frame = window.requestAnimationFrame(() => {
+      rowButtonRefs.current.get(path)?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  const focusSearchInput = useCallback(() => {
+    const frame = window.requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  const openSearch = useCallback(
+    (returnFocusTarget: HTMLElement | null) => {
+      onCloseContextMenu?.();
+
+      if (!searchOpen) {
+        searchReturnFocusRef.current = returnFocusTarget;
+      }
+
+      setSearchOpen(true);
+      focusSearchInput();
+    },
+    [focusSearchInput, onCloseContextMenu, searchOpen]
+  );
+
+  const closeSearch = useCallback(
+    (restoreFocus = true) => {
+      setSearchOpen(false);
+      setActiveMatchIndex(-1);
+
+      if (!restoreFocus) {
+        return;
+      }
+
+      const frame = window.requestAnimationFrame(() => {
+        const target = searchReturnFocusRef.current;
+
+        if (target?.isConnected) {
+          target.focus();
+        } else {
+          searchButtonRef.current?.focus();
+        }
+
+        searchReturnFocusRef.current = null;
+      });
+
+      return () => window.cancelAnimationFrame(frame);
+    },
+    []
+  );
+
+  const focusMatchAtIndex = useCallback(
+    (index: number) => {
+      const match = searchResult.matches[index];
+
+      if (!match) {
+        return;
+      }
+
+      setActiveMatchIndex(index);
+      focusRowButton(match.id);
+    },
+    [focusRowButton, searchResult.matches]
+  );
+
+  const moveActiveMatch = useCallback(
+    (direction: 1 | -1, focusRow = false) => {
+      const nextIndex = moveFileTreeSearchActiveIndex(activeMatchIndexSafe, searchResult.matches.length, direction);
+
+      if (nextIndex < 0) {
+        return;
+      }
+
+      setActiveMatchIndex(nextIndex);
+
+      if (focusRow) {
+        focusRowButton(searchResult.matches[nextIndex]?.id ?? "");
+      }
+    },
+    [activeMatchIndexSafe, focusRowButton, searchResult.matches]
+  );
+
+  const handleSearchInputKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeSearch();
+        return;
+      }
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        moveActiveMatch(event.shiftKey ? -1 : 1);
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        focusMatchAtIndex(activeMatchIndexSafe >= 0 ? activeMatchIndexSafe : 0);
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        event.stopPropagation();
+        const previousIndex =
+          searchResult.matches.length === 0
+            ? -1
+            : activeMatchIndexSafe > 0
+              ? activeMatchIndexSafe - 1
+              : searchResult.matches.length - 1;
+        focusMatchAtIndex(previousIndex);
+      }
+    },
+    [activeMatchIndexSafe, closeSearch, focusMatchAtIndex, moveActiveMatch, searchResult.matches.length]
+  );
+
+  const handleSearchRowKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (!searchOpen) {
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        focusSearchInput();
+        return;
+      }
+
+      if (!hasSearchQuery) {
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        moveActiveMatch(1, true);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        event.stopPropagation();
+        moveActiveMatch(-1, true);
+      }
+    },
+    [focusSearchInput, hasSearchQuery, moveActiveMatch, searchOpen]
+  );
+
+  const handleSidebarKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLElement>) => {
+      if (!isFileTreeSearchShortcut(event) || isEditableTarget(event.target) || renamingPath) {
+        return;
+      }
+
+      if (sidebarRef.current && !sidebarRef.current.contains(document.activeElement)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      openSearch(document.activeElement instanceof HTMLElement ? document.activeElement : searchButtonRef.current);
+    },
+    [openSearch, renamingPath]
+  );
+
+  const updateSearchQuery = useCallback(
+    (query: string) => {
+      onCloseContextMenu?.();
+      setSearchQuery(query);
+      setActiveMatchIndex(-1);
+    },
+    [onCloseContextMenu]
+  );
+
+  const toggleSearchMode = useCallback(() => {
+    onCloseContextMenu?.();
+    setSearchMode((current) => (current === "fuzzy" ? "continuous" : "fuzzy"));
+    setActiveMatchIndex(-1);
+  }, [onCloseContextMenu]);
+
+  const toggleSearchFilter = useCallback(() => {
+    onCloseContextMenu?.();
+    setSearchFilter((current) => !current);
+  }, [onCloseContextMenu]);
+
   const toggle = (path: string) => {
-    setExpanded((current) => {
+    setDurableExpanded((current) => {
       const next = new Set(current);
 
       if (next.has(path)) {
@@ -577,7 +1152,7 @@ export function FileTree({
   };
 
   return (
-    <aside className="sidebar">
+    <aside ref={sidebarRef} className={`sidebar${searchOpen ? " has-file-tree-search" : ""}`} onKeyDown={handleSidebarKeyDown}>
       <div className="sidebar-header">
         <WorkspaceMenu
           workspace={workspace}
@@ -588,6 +1163,16 @@ export function FileTree({
           onRevealWorkspace={onRevealWorkspace}
         />
         <div className="sidebar-actions">
+          <button
+            ref={searchButtonRef}
+            type="button"
+            className="icon-button"
+            data-tooltip={labels.findInFileTree}
+            aria-label={labels.findInFileTree}
+            onClick={(event) => openSearch(event.currentTarget)}
+          >
+            <Search size={17} />
+          </button>
           <button
             type="button"
             className="icon-button"
@@ -611,9 +1196,33 @@ export function FileTree({
         </div>
       </div>
 
-      <div className="tree-scroll">
-        {displayNodes.length > 0 ? (
-          displayNodes.map((node) => (
+      {searchOpen ? (
+        <FileTreeSearchControl
+          labels={labels}
+          inputId={searchInputId}
+          inputRef={searchInputRef}
+          treeListId={treeListId}
+          statusId={searchStatusId}
+          query={searchQuery}
+          mode={searchMode}
+          filter={searchFilter}
+          matchCount={searchResult.matches.length}
+          activeMatchIndex={activeMatchIndexSafe}
+          activeMatchPath={activeMatch?.relativePath ?? null}
+          onQueryChange={updateSearchQuery}
+          onClose={() => closeSearch()}
+          onClear={() => updateSearchQuery("")}
+          onPrevious={() => moveActiveMatch(-1)}
+          onNext={() => moveActiveMatch(1)}
+          onToggleMode={toggleSearchMode}
+          onToggleFilter={toggleSearchFilter}
+          onKeyDown={handleSearchInputKeyDown}
+        />
+      ) : null}
+
+      <div id={treeListId} className="tree-scroll" onScroll={() => hidePathPeek()}>
+        {renderedNodes.length > 0 ? (
+          renderedNodes.map((node) => (
             <TreeRow
               key={displayNodePath(node)}
               node={node}
@@ -622,10 +1231,19 @@ export function FileTree({
               selectedPath={selectedPath}
               workspaceSessionId={workspaceSessionId}
               renamingPath={renamingPath}
-              expanded={expanded}
+              expanded={effectiveExpanded}
               labels={labels}
+              searchMeta={searchResult.metaById.get(displayNodeId(node))}
+              searchMetaById={searchResult.metaById}
+              activeSearchMatchId={activeSearchMatchId}
+              isSearchActiveMatch={activeSearchMatchId === displayNodeId(node)}
+              searchOpen={hasSearchQuery}
               onToggle={toggle}
               registerRow={registerRow}
+              registerRowButton={registerRowButton}
+              onShowPathPeek={showPathPeek}
+              onHidePathPeek={hidePathPeek}
+              onSearchRowKeyDown={handleSearchRowKeyDown}
               onOpenNode={onOpenNode}
               onOpenPendingChange={onOpenPendingChange}
               onSelectNode={onSelectNode}
@@ -635,9 +1253,25 @@ export function FileTree({
             />
           ))
         ) : (
-          <div className="empty-tree">{labels.noFiles}</div>
+          <div className="empty-tree">
+            {hasSearchQuery && searchFilter ? labels.fileTreeSearchNoResults : labels.noFiles}
+          </div>
         )}
       </div>
+      {pathPeek ? (
+        <div
+          className="tree-path-peek"
+          style={
+            {
+              top: pathPeek.top,
+              left: pathPeek.left,
+              maxWidth: pathPeek.maxWidth
+            } as CSSProperties
+          }
+        >
+          {pathPeek.path}
+        </div>
+      ) : null}
     </aside>
   );
 }

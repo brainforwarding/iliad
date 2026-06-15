@@ -1,4 +1,5 @@
 .app-shell {
+  --sidebar-width: 276px;
   display: grid;
   height: 100%;
   grid-template-rows: 44px minmax(0, 1fr);
@@ -8,7 +9,7 @@
 .app-topbar {
   display: grid;
   min-height: 44px;
-  grid-template-columns: 276px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   border-bottom: 1px solid var(--hairline);
   background: var(--editor);
   -webkit-app-region: drag;
@@ -309,7 +310,7 @@
   display: grid;
   height: calc(100vh - 44px);
   min-height: 0;
-  grid-template-columns: 276px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -318,9 +319,73 @@
 }
 
 .assistant-is-open .app-content {
-  grid-template-columns: 276px minmax(0, 1fr) clamp(280px, 24vw, 320px);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) clamp(280px, 24vw, 320px);
 }
 
 .assistant-is-open.sidebar-is-collapsed .app-content {
   grid-template-columns: minmax(0, 1fr) clamp(280px, 24vw, 320px);
+}
+
+.sidebar-frame {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  z-index: 35;
+  top: 0;
+  right: -6px;
+  bottom: 0;
+  width: 12px;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  -webkit-app-region: no-drag;
+}
+
+.sidebar-resize-handle::before {
+  position: absolute;
+  top: 8px;
+  right: 5px;
+  bottom: 8px;
+  width: 1px;
+  border-radius: 999px;
+  background: var(--muted-3);
+  content: "";
+  opacity: 0.22;
+  transition:
+    background 120ms ease,
+    opacity 120ms ease,
+    width 120ms ease;
+}
+
+.sidebar-resize-handle:hover::before,
+.sidebar-resize-handle:focus-visible::before,
+.app-shell.is-sidebar-resizing .sidebar-resize-handle::before {
+  width: 2px;
+  background: var(--accent);
+  opacity: 0.82;
+}
+
+.sidebar-resize-handle:focus-visible {
+  outline: none;
+}
+
+.app-shell.is-sidebar-resizing,
+.app-shell.is-sidebar-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+@media (max-width: 760px) {
+  .app-shell:not(.sidebar-is-collapsed):not(.is-focus-mode) .app-topbar {
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  }
+
+  .app-shell:not(.assistant-is-open):not(.sidebar-is-collapsed):not(.is-focus-mode) .app-content {
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  }
 }
