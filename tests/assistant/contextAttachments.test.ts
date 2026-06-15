@@ -6,6 +6,7 @@ import {
   findActiveMentionToken,
   rankMarkdownContextDocuments,
   readContextFileDragPayload,
+  relocateContextAttachmentChipsForMove,
   replaceMentionTokenWithPath
 } from "../../src/assistant/contextAttachments";
 import type { FileTreeNode } from "../../src/types/iliad";
@@ -150,5 +151,46 @@ describe("context attachment labels and drag payloads", () => {
         "workspace-session"
       )
     ).toBeNull();
+  });
+
+  it("relocates moved manual attachment chips and prunes unavailable paths", () => {
+    const relocated = relocateContextAttachmentChipsForMove(
+      [
+        { id: "a", relativePath: "drafts/notes.md", label: "notes.md", source: "file_tree_drop" },
+        { id: "b", relativePath: "drafts/missing.md", label: "missing.md", source: "file_tree_drop" },
+        { id: "c", relativePath: "drafts/current.md", label: "current.md", source: "file_tree_drop" },
+        { id: "d", relativePath: "outside.md", label: "outside.md", source: "mention_picker" }
+      ],
+      {
+        oldRelativeRoot: "drafts",
+        newRelativeRoot: "archive/drafts",
+        activeRelativePath: "archive/drafts/current.md",
+        nextTree: [
+          fileNode("archive", "directory", [
+            fileNode("archive/drafts", "directory", [
+              fileNode("archive/drafts/notes.md"),
+              fileNode("archive/drafts/current.md"),
+              fileNode("archive/drafts/image.png", "external")
+            ])
+          ]),
+          fileNode("outside.md")
+        ]
+      }
+    );
+
+    expect(relocated).toEqual([
+      {
+        id: "a",
+        relativePath: "archive/drafts/notes.md",
+        label: "notes.md",
+        source: "file_tree_drop"
+      },
+      {
+        id: "d",
+        relativePath: "outside.md",
+        label: "outside.md",
+        source: "mention_picker"
+      }
+    ]);
   });
 });

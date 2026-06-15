@@ -11,7 +11,7 @@ import {
   Search,
   X
 } from "lucide-react";
-import type { CSSProperties, FormEvent, KeyboardEvent, ReactNode, RefObject } from "react";
+import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, ReactNode, RefObject } from "react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 import { FileTreeContentResults } from "./FileTreeContentResults";
@@ -58,6 +58,14 @@ import {
   type FileTreeContentSearchProvider,
   type FileTreeSearchScope
 } from "../assistant/fileTreeContentSearch";
+import { findNode } from "../files/fileTree";
+import {
+  createFileTreeMoveDragPayload,
+  fileTreeMoveDragMimeType,
+  readFileTreeMoveDragPayload,
+  resolveFileTreeDropTarget,
+  type FileTreeMoveDropTarget
+} from "../files/fileTreeMove";
 import type { FileTreeNode, MarkdownContentSearchResponse, WorkspaceInfo } from "../types/iliad";
 
 interface FileTreeProps {
@@ -81,7 +89,10 @@ interface FileTreeProps {
   onOpenRecent: (workspace: WorkspaceInfo) => void | Promise<void>;
   onRevealWorkspace: () => void | Promise<void>;
   onSelectNode: (node: FileTreeNode) => void;
+  onSelectWorkspaceRoot: () => void;
+  onMoveNode: (node: FileTreeNode, targetDirectoryPath: string) => Promise<FileTreeNode | null>;
   onShowContextMenu: (node: FileTreeNode, position: { x: number; y: number }) => void;
+  contextMenuOpen?: boolean;
   onCloseContextMenu?: () => void;
   onCancelRename: () => void;
   onCommitRename: (node: FileTreeNode, requestedName: string) => void;
@@ -90,11 +101,21 @@ interface FileTreeProps {
 
 interface FileTreeLabels {
   newDocument: string;
+  newDocumentIn: (target: string) => string;
   newFolder: string;
+  newFolderIn: (target: string) => string;
   changeFolder: string;
   openFolder: string;
   recent: string;
   noFiles: string;
+  workspaceRoot: string;
+  selectWorkspaceRoot: string;
+  fileTreeMoveStarted: (path: string) => string;
+  fileTreeMoveTarget: (path: string) => string;
+  fileTreeMoveRootTarget: string;
+  fileTreeMoveCanceled: string;
+  fileTreeMoveCompleted: (path: string) => string;
+  fileTreeMoveFailed: string;
   pendingEdit: (path: string) => string;
   proposedNewDocument: (path: string) => string;
   rename: (name: string) => string;
@@ -155,6 +176,13 @@ interface TreeRowProps {
   registerRowButton: (path: string, element: HTMLButtonElement | null) => void;
   onShowPathPeek: (path: string, element: HTMLElement, options?: TreePathPeekOptions) => void;
   onHidePathPeek: (path?: string) => void;
+  draggingRelativePath: string | null;
+  dropTargetKey: string | null;
+  onMoveDragStart: (node: FileTreeNode, event: DragEvent<HTMLDivElement>) => void;
+  onMoveDragOver: (target: FileTreeMoveDropTarget, event: DragEvent<HTMLElement>, expandPath?: string) => void;
+  onMoveDragLeave: (targetKey: string, event: DragEvent<HTMLElement>) => void;
+  onMoveDrop: (target: FileTreeMoveDropTarget, event: DragEvent<HTMLElement>) => void;
+  onMoveDragEnd: () => void;
   onSearchRowKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
   onOpenNode: (node: FileTreeNode) => void;
   onOpenPendingChange: (target: PendingFileTreeChange) => void | Promise<void>;
@@ -266,6 +294,37 @@ function nodeFileNameFromInput(node: FileTreeNode, value: string) {
 
 function displayName(node: FileTreeNode) {
   return node.kind === "markdown" ? markdownStem(node.name) : node.name;
+}
+
+function moveDropTargetKey(target: FileTreeMoveDropTarget) {
+  return target.kind === "root" ? "root" : `folder:${target.relativePath}`;
+}
+
+function normalizeDisplayRelativePath(relativePath: string) {
+  return relativePath.replace(/\\/g, "/");
+}
+
+function parentPathFromAbsolutePath(filePath: string) {
+  const normalized = filePath.replace(/\\/g, "/");
+  const slashIndex = normalized.lastIndexOf("/");
+
+  return slashIndex > 0 ? normalized.slice(0, slashIndex) : normalized;
+}
+
+function collectBlockedMoveRelativePaths(nodes: FileTreeDisplayNode[], paths = new Set<string>()) {
+  for (const node of nodes) {
+    if (node.source === "real" && (node.pendingTarget || node.hasPendingDescendant)) {
+      paths.add(normalizeDisplayRelativePath(node.node.relativePath));
+    }
+
+    const children = displayNodeChildren(node);
+
+    if (children) {
+      collectBlockedMoveRelativePaths(children, paths);
+    }
+  }
+
+  return paths;
 }
 
 function RenameInput({
@@ -585,6 +644,13 @@ function TreeRow({
   registerRowButton,
   onShowPathPeek,
   onHidePathPeek,
+  draggingRelativePath,
+  dropTargetKey,
+  onMoveDragStart,
+  onMoveDragOver,
+  onMoveDragLeave,
+  onMoveDrop,
+  onMoveDragEnd,
   onSearchRowKeyDown,
   onOpenNode,
   onOpenPendingChange,
@@ -613,6 +679,13 @@ function TreeRow({
   const pendingIndicatorClass =
     node.source === "pending-create" || node.source === "pending-dir" ? "is-create" : "is-edit";
   const canDragContextFile = node.source === "real" && nodeKind === "markdown";
+  const canDragMove = node.source === "real" && !node.pendingTarget && !node.hasPendingDescendant;
+  const isDragging = node.source === "real" && draggingRelativePath === normalizeDisplayRelativePath(node.node.relativePath);
+  const rowDropTargetKey =
+    node.source === "real" && node.node.kind === "directory"
+      ? moveDropTargetKey({ kind: "folder", relativePath: node.node.relativePath })
+      : null;
+  const isDropTarget = Boolean(rowDropTargetKey && dropTargetKey === rowDropTargetKey);
   const descendantMatchCount = searchMeta?.descendantMatchCount ?? 0;
   const hasDescendantMatchDescription = searchOpen && descendantMatchCount > 0;
   const showDescendantMatchCount =
@@ -630,6 +703,8 @@ function TreeRow({
     isActive ? "is-active" : "",
     isSelected ? "is-selected" : "",
     isSearchActiveMatch ? "is-search-active-match" : "",
+    isDragging ? "is-dragging" : "",
+    isDropTarget ? "is-drop-target" : "",
     isRenaming ? "is-renaming" : ""
   ]
     .filter(Boolean)
@@ -640,19 +715,46 @@ function TreeRow({
       <div
         ref={(element) => registerRow(nodePath, element)}
         className={rowClassName}
-        draggable={canDragContextFile}
+        draggable={canDragContextFile || canDragMove}
         style={{ "--tree-depth": depth } as CSSProperties}
         onDragStart={(event) => {
-          if (!canDragContextFile || node.source !== "real") {
+          if (node.source !== "real" || (!canDragContextFile && !canDragMove)) {
             event.preventDefault();
             return;
           }
 
-          event.dataTransfer.effectAllowed = "copy";
-          event.dataTransfer.setData(
-            contextFileDragMimeType,
-            JSON.stringify(createContextFileDragPayload(workspaceSessionId, node.node.relativePath))
-          );
+          event.dataTransfer.effectAllowed = canDragContextFile && canDragMove ? "copyMove" : canDragMove ? "move" : "copy";
+
+          if (canDragContextFile) {
+            event.dataTransfer.setData(
+              contextFileDragMimeType,
+              JSON.stringify(createContextFileDragPayload(workspaceSessionId, node.node.relativePath))
+            );
+          }
+
+          if (canDragMove) {
+            onMoveDragStart(node.node, event);
+          }
+        }}
+        onDragOver={(event) => {
+          if (node.source === "real" && node.node.kind === "directory") {
+            onMoveDragOver({ kind: "folder", relativePath: node.node.relativePath }, event, nodePath);
+          }
+        }}
+        onDragLeave={(event) => {
+          if (rowDropTargetKey) {
+            onMoveDragLeave(rowDropTargetKey, event);
+          }
+        }}
+        onDrop={(event) => {
+          if (node.source === "real" && node.node.kind === "directory") {
+            onMoveDrop({ kind: "folder", relativePath: node.node.relativePath }, event);
+          }
+        }}
+        onDragEnd={() => {
+          if (canDragMove) {
+            onMoveDragEnd();
+          }
         }}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -768,6 +870,13 @@ function TreeRow({
               registerRowButton={registerRowButton}
               onShowPathPeek={onShowPathPeek}
               onHidePathPeek={onHidePathPeek}
+              draggingRelativePath={draggingRelativePath}
+              dropTargetKey={dropTargetKey}
+              onMoveDragStart={onMoveDragStart}
+              onMoveDragOver={onMoveDragOver}
+              onMoveDragLeave={onMoveDragLeave}
+              onMoveDrop={onMoveDrop}
+              onMoveDragEnd={onMoveDragEnd}
               onSearchRowKeyDown={onSearchRowKeyDown}
               onOpenNode={onOpenNode}
               onOpenPendingChange={onOpenPendingChange}
@@ -821,7 +930,10 @@ export function FileTree({
   onOpenRecent,
   onRevealWorkspace,
   onSelectNode,
+  onSelectWorkspaceRoot,
+  onMoveNode,
   onShowContextMenu,
+  contextMenuOpen = false,
   onCloseContextMenu,
   onCancelRename,
   onCommitRename,
@@ -846,7 +958,12 @@ export function FileTree({
   const [contentSearchUsesSavedFallback, setContentSearchUsesSavedFallback] = useState(false);
   const [contentExpandedIds, setContentExpandedIds] = useState<Set<string>>(() => new Set());
   const [pathPeek, setPathPeek] = useState<TreePathPeek | null>(null);
+  const [draggingMoveRelativePath, setDraggingMoveRelativePath] = useState<string | null>(null);
+  const [moveDropTargetKeyState, setMoveDropTargetKeyState] = useState<string | null>(null);
+  const [moveStatusText, setMoveStatusText] = useState("");
   const pathPeekTimerRef = useRef<number | null>(null);
+  const dragExpandTimerRef = useRef<number | null>(null);
+  const draggingMoveRelativePathRef = useRef<string | null>(null);
   const sidebarRef = useRef<HTMLElement | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const rowButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -860,6 +977,43 @@ export function FileTree({
   const searchInputId = `${generatedId}-file-tree-search-input`;
   const searchStatusId = `${generatedId}-file-tree-search-status`;
   const displayNodes = useMemo(() => buildFileTreeDisplayNodes(nodes, pendingChanges), [nodes, pendingChanges]);
+  const pendingCreateRelativePaths = useMemo(
+    () =>
+      new Set(
+        pendingChanges
+          .filter((change) => change.kind === "create_file")
+          .map((change) => normalizeDisplayRelativePath(change.normalizedRelativePath))
+      ),
+    [pendingChanges]
+  );
+  const blockedMoveRelativePaths = useMemo(() => collectBlockedMoveRelativePaths(displayNodes), [displayNodes]);
+  const selectedTreeNode = useMemo(
+    () => (selectedPath && selectedPath !== workspace.path ? findNode(nodes, selectedPath) : null),
+    [nodes, selectedPath, workspace.path]
+  );
+  const creationTargetLabel = useMemo(() => {
+    if (selectedPath === workspace.path) {
+      return labels.workspaceRoot;
+    }
+
+    if (selectedTreeNode?.kind === "directory") {
+      return selectedTreeNode.name;
+    }
+
+    if (selectedTreeNode) {
+      const parentNode = findNode(nodes, parentPathFromAbsolutePath(selectedTreeNode.path));
+      return parentNode?.name ?? labels.workspaceRoot;
+    }
+
+    if (activePath) {
+      const parentNode = findNode(nodes, parentPathFromAbsolutePath(activePath));
+      return parentNode?.name ?? labels.workspaceRoot;
+    }
+
+    return labels.workspaceRoot;
+  }, [activePath, labels.workspaceRoot, nodes, selectedPath, selectedTreeNode, workspace.path]);
+  const newDocumentLabel = creationTargetLabel ? labels.newDocumentIn(creationTargetLabel) : labels.newDocument;
+  const newFolderLabel = creationTargetLabel ? labels.newFolderIn(creationTargetLabel) : labels.newFolder;
   const searchResult = useMemo(
     () => searchFileTreeDisplayNodes(displayNodes, searchQuery, nameSearchMode),
     [displayNodes, nameSearchMode, searchQuery]
@@ -1277,6 +1431,15 @@ export function FileTree({
 
   useEffect(() => clearPathPeekTimer, [clearPathPeekTimer]);
 
+  const clearDragExpandTimer = useCallback(() => {
+    if (dragExpandTimerRef.current !== null) {
+      window.clearTimeout(dragExpandTimerRef.current);
+      dragExpandTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearDragExpandTimer, [clearDragExpandTimer]);
+
   const showPathPeek = useCallback((path: string, element: HTMLElement, options: TreePathPeekOptions = {}) => {
     clearPathPeekTimer();
 
@@ -1614,8 +1777,170 @@ export function FileTree({
     [focusSearchInput, moveActiveContentMatch]
   );
 
+  const resolveMoveDrop = useCallback(
+    (target: FileTreeMoveDropTarget, sourceRelativePath = draggingMoveRelativePathRef.current) =>
+      resolveFileTreeDropTarget({
+        nodes,
+        sourceRelativePath,
+        target,
+        blockedRelativePaths: blockedMoveRelativePaths,
+        pendingCreateRelativePaths
+      }),
+    [blockedMoveRelativePaths, nodes, pendingCreateRelativePaths]
+  );
+
+  const moveSourceFromDataTransfer = useCallback(
+    (dataTransfer: DataTransfer) => {
+      const payload = dataTransfer.getData(fileTreeMoveDragMimeType);
+
+      if (!payload) {
+        return draggingMoveRelativePathRef.current;
+      }
+
+      return readFileTreeMoveDragPayload(payload, workspaceSessionId)?.relativePath ?? null;
+    },
+    [workspaceSessionId]
+  );
+
+  const clearMoveDragState = useCallback(
+    (statusText = "") => {
+      clearDragExpandTimer();
+      draggingMoveRelativePathRef.current = null;
+      setDraggingMoveRelativePath(null);
+      setMoveDropTargetKeyState(null);
+      setMoveStatusText(statusText);
+    },
+    [clearDragExpandTimer]
+  );
+
+  const handleMoveDragStart = useCallback(
+    (node: FileTreeNode, event: DragEvent<HTMLDivElement>) => {
+      const relativePath = normalizeDisplayRelativePath(node.relativePath);
+      const payload = createFileTreeMoveDragPayload(workspaceSessionId, relativePath);
+
+      draggingMoveRelativePathRef.current = payload.relativePath;
+      setDraggingMoveRelativePath(payload.relativePath);
+      setMoveDropTargetKeyState(null);
+      setMoveStatusText(labels.fileTreeMoveStarted(payload.relativePath));
+      event.dataTransfer.setData(fileTreeMoveDragMimeType, JSON.stringify(payload));
+    },
+    [labels, workspaceSessionId]
+  );
+
+  const handleMoveDragOver = useCallback(
+    (target: FileTreeMoveDropTarget, event: DragEvent<HTMLElement>, expandPath?: string) => {
+      const sourceRelativePath = draggingMoveRelativePathRef.current;
+
+      if (!sourceRelativePath && !Array.from(event.dataTransfer.types).includes(fileTreeMoveDragMimeType)) {
+        return;
+      }
+
+      const result = resolveMoveDrop(target, sourceRelativePath);
+
+      if (!result.valid) {
+        event.dataTransfer.dropEffect = "none";
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "move";
+
+      const targetKey = moveDropTargetKey(target);
+      setMoveDropTargetKeyState(targetKey);
+      setMoveStatusText(
+        target.kind === "root"
+          ? labels.fileTreeMoveRootTarget
+          : labels.fileTreeMoveTarget(result.targetDirectoryRelativePath)
+      );
+
+      clearDragExpandTimer();
+
+      if (expandPath && target.kind === "folder" && !effectiveExpanded.has(expandPath)) {
+        dragExpandTimerRef.current = window.setTimeout(() => {
+          setDurableExpanded((current) => {
+            const next = new Set(current);
+            next.add(expandPath);
+            return next;
+          });
+          dragExpandTimerRef.current = null;
+        }, 500);
+      }
+    },
+    [clearDragExpandTimer, effectiveExpanded, labels, resolveMoveDrop]
+  );
+
+  const handleMoveDragLeave = useCallback((targetKey: string, event: DragEvent<HTMLElement>) => {
+    const relatedTarget = event.relatedTarget;
+
+    if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) {
+      return;
+    }
+
+    setMoveDropTargetKeyState((current) => (current === targetKey ? null : current));
+  }, []);
+
+  const handleMoveDrop = useCallback(
+    (target: FileTreeMoveDropTarget, event: DragEvent<HTMLElement>) => {
+      const sourceRelativePath = moveSourceFromDataTransfer(event.dataTransfer);
+      const result = resolveMoveDrop(target, sourceRelativePath);
+
+      if (!result.valid) {
+        clearMoveDragState(labels.fileTreeMoveFailed);
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      hidePathPeek();
+      clearDragExpandTimer();
+      draggingMoveRelativePathRef.current = null;
+      setDraggingMoveRelativePath(null);
+      setMoveDropTargetKeyState(null);
+
+      const targetDirectoryPath = result.targetDirectoryNode?.path ?? workspace.path;
+
+      void onMoveNode(result.sourceNode, targetDirectoryPath).then((movedNode) => {
+        clearMoveDragState(
+          movedNode ? labels.fileTreeMoveCompleted(movedNode.relativePath) : labels.fileTreeMoveFailed
+        );
+      });
+    },
+    [
+      clearDragExpandTimer,
+      clearMoveDragState,
+      hidePathPeek,
+      labels,
+      moveSourceFromDataTransfer,
+      onMoveNode,
+      resolveMoveDrop,
+      workspace.path
+    ]
+  );
+
+  const handleMoveDragEnd = useCallback(() => {
+    if (draggingMoveRelativePathRef.current) {
+      clearMoveDragState(labels.fileTreeMoveCanceled);
+    }
+  }, [clearMoveDragState, labels.fileTreeMoveCanceled]);
+
   const handleSidebarKeyDown = useCallback(
     (event: KeyboardEvent<HTMLElement>) => {
+      if (
+        event.key === "Escape" &&
+        !searchOpen &&
+        !renamingPath &&
+        !contextMenuOpen &&
+        !isEditableTarget(event.target)
+      ) {
+        if (sidebarRef.current && sidebarRef.current.contains(document.activeElement)) {
+          event.preventDefault();
+          event.stopPropagation();
+          onSelectWorkspaceRoot();
+        }
+        return;
+      }
+
       if (!isFileTreeSearchShortcut(event) || isEditableTarget(event.target) || renamingPath) {
         return;
       }
@@ -1628,7 +1953,7 @@ export function FileTree({
       event.stopPropagation();
       openSearch(document.activeElement instanceof HTMLElement ? document.activeElement : searchButtonRef.current);
     },
-    [openSearch, renamingPath]
+    [contextMenuOpen, onSelectWorkspaceRoot, openSearch, renamingPath, searchOpen]
   );
 
   const updateSearchQuery = useCallback(
@@ -1733,8 +2058,8 @@ export function FileTree({
           <button
             type="button"
             className="icon-button"
-            data-tooltip={labels.newDocument}
-            aria-label={labels.newDocument}
+            data-tooltip={newDocumentLabel}
+            aria-label={newDocumentLabel}
             disabled={creatingFile}
             onClick={onCreateFile}
           >
@@ -1743,8 +2068,8 @@ export function FileTree({
           <button
             type="button"
             className="icon-button"
-            data-tooltip={labels.newFolder}
-            aria-label={labels.newFolder}
+            data-tooltip={newFolderLabel}
+            aria-label={newFolderLabel}
             disabled={creatingFolder}
             onClick={onCreateFolder}
           >
@@ -1797,7 +2122,29 @@ export function FileTree({
         />
       ) : null}
 
-      <div id={treeListId} className="tree-scroll" onScroll={() => hidePathPeek()}>
+      <div
+        id={treeListId}
+        className="tree-scroll"
+        onClick={(event) => {
+          if (event.target === event.currentTarget) {
+            onSelectWorkspaceRoot();
+          }
+        }}
+        onDragOver={(event) => {
+          if (event.target === event.currentTarget) {
+            handleMoveDragOver({ kind: "root" }, event);
+          } else if (Array.from(event.dataTransfer.types).includes(fileTreeMoveDragMimeType)) {
+            clearDragExpandTimer();
+            setMoveDropTargetKeyState(null);
+          }
+        }}
+        onDrop={(event) => {
+          if (event.target === event.currentTarget) {
+            handleMoveDrop({ kind: "root" }, event);
+          }
+        }}
+        onScroll={() => hidePathPeek()}
+      >
         {showContentResults ? (
           <FileTreeContentResults
             nodes={contentResultTree}
@@ -1839,6 +2186,13 @@ export function FileTree({
               registerRowButton={registerRowButton}
               onShowPathPeek={showPathPeek}
               onHidePathPeek={hidePathPeek}
+              draggingRelativePath={draggingMoveRelativePath}
+              dropTargetKey={moveDropTargetKeyState}
+              onMoveDragStart={handleMoveDragStart}
+              onMoveDragOver={handleMoveDragOver}
+              onMoveDragLeave={handleMoveDragLeave}
+              onMoveDrop={handleMoveDrop}
+              onMoveDragEnd={handleMoveDragEnd}
               onSearchRowKeyDown={handleSearchRowKeyDown}
               onOpenNode={onOpenNode}
               onOpenPendingChange={onOpenPendingChange}
@@ -1853,7 +2207,36 @@ export function FileTree({
             {hasNameSearchQuery && searchFilter ? labels.fileTreeSearchNoResults : labels.noFiles}
           </div>
         )}
+        {!contentHasQuery ? (
+          <div
+            className={[
+              "tree-root-target",
+              selectedPath === workspace.path ? "is-selected" : "",
+              moveDropTargetKeyState === moveDropTargetKey({ kind: "root" }) ? "is-drop-target" : ""
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            role="button"
+            tabIndex={0}
+            aria-label={labels.selectWorkspaceRoot}
+            onClick={onSelectWorkspaceRoot}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onSelectWorkspaceRoot();
+              }
+            }}
+            onDragOver={(event) => handleMoveDragOver({ kind: "root" }, event)}
+            onDragLeave={(event) => handleMoveDragLeave(moveDropTargetKey({ kind: "root" }), event)}
+            onDrop={(event) => handleMoveDrop({ kind: "root" }, event)}
+          >
+            <span>{labels.workspaceRoot}</span>
+          </div>
+        ) : null}
       </div>
+      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {moveStatusText}
+      </span>
       {pathPeek ? (
         <div
           className="tree-path-peek"

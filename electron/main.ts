@@ -195,7 +195,9 @@ app.whenReady().then(async () => {
     getLaunchWorkspace: (webContentsId) => windowManager.getLaunchWorkspace(webContentsId),
     setWindowWorkspace: (webContentsId, workspace) => windowManager.setWindowWorkspace(webContentsId, workspace)
   });
-  registerFileIpc();
+  registerFileIpc({
+    getWindowWorkspace: (webContentsId) => windowManager.getWindowWorkspace(webContentsId)
+  });
   registerSearchIpc();
   registerShellIpc();
   registerAssetIpc();

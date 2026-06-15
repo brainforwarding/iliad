@@ -880,6 +880,7 @@ export interface IliadApi {
   createMarkdown: (workspaceRoot: string, directoryPath: string, requestedName: string) => Promise<FileTreeNode>;
   createFolder: (workspaceRoot: string, directoryPath: string, requestedName: string) => Promise<FileTreeNode>;
   renamePath: (workspaceRoot: string, filePath: string, requestedName: string) => Promise<FileTreeNode>;
+  movePath: (workspaceRoot: string, sourcePath: string, targetDirectoryPath: string) => Promise<FileTreeNode>;
   duplicatePath: (workspaceRoot: string, filePath: string) => Promise<FileTreeNode>;
   moveToTrash: (workspaceRoot: string, filePath: string) => Promise<void>;
   searchMarkdownContent: (request: MarkdownContentSearchRequest) => Promise<MarkdownContentSearchResponse>;

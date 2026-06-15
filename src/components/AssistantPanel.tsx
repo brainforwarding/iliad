@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { contextFileDragMimeType } from "../assistant/contextAttachments";
 import { fileBasename } from "../assistant/assistantUtils";
 import {
@@ -7,7 +7,11 @@ import {
   sortSelectionCommentsForDisplay
 } from "../assistant/selectionComments";
 import { isAnchoredSelectionComment } from "../app/selectionCommentsAnchor";
-import { useAssistantRun, type AssistantRunSelectionComments } from "../assistant/useAssistantRun";
+import {
+  useAssistantRun,
+  type AssistantRunSelectionComments,
+  type ContextAttachmentMoveHandler
+} from "../assistant/useAssistantRun";
 import { useMarkdownContextDocuments } from "../assistant/useMarkdownContextDocuments";
 import type { ReviewTarget } from "../app/useAgentProposals";
 import { AssistantComposer, type AssistantComposerSelectionComments } from "./assistant/AssistantComposer";
@@ -48,6 +52,7 @@ interface AssistantPanelProps {
   editorNavigationChangedDuringRun?: (runId: string) => boolean;
   onRunningRunChange?: (runId: string | null) => void;
   onOpenDocumentRequest?: (relativePath: string) => void;
+  onContextAttachmentMoveHandlerChange?: (handler: ContextAttachmentMoveHandler | null) => void;
   editorSelection?: { from: number; to: number } | null;
   getEditorSelection?: () => { from: number; to: number } | null;
 }
@@ -68,6 +73,7 @@ export function AssistantPanel({
   editorNavigationChangedDuringRun,
   onRunningRunChange,
   onOpenDocumentRequest,
+  onContextAttachmentMoveHandlerChange,
   editorSelection,
   getEditorSelection
 }: AssistantPanelProps) {
@@ -126,6 +132,7 @@ export function AssistantPanel({
     saveApiKey,
     removeContextAttachment,
     removeLastContextAttachment,
+    relocateContextAttachmentsForMove,
     setApiKeyDraft,
     setMode,
     setModelDraft,
@@ -150,6 +157,12 @@ export function AssistantPanel({
     editorSelection,
     getEditorSelection
   });
+
+  useEffect(() => {
+    onContextAttachmentMoveHandlerChange?.(relocateContextAttachmentsForMove);
+
+    return () => onContextAttachmentMoveHandlerChange?.(null);
+  }, [onContextAttachmentMoveHandlerChange, relocateContextAttachmentsForMove]);
 
   const [historyOpen, setHistoryOpen] = useState(false);
   const overlayOpen = historyOpen || settingsOpen;

@@ -40,6 +40,7 @@ import {
   markLatestContentSearchRequestId,
   type FileTreeContentSearchProvider
 } from "./assistant/fileTreeContentSearch";
+import type { ContextAttachmentMoveHandler } from "./assistant/useAssistantRun";
 import type { ContentSearchRevealTarget } from "./editor/contentSearchReveal";
 import { useFileActions } from "./files/fileActions";
 import { findNode, findNodeByRelativePath } from "./files/fileTree";
@@ -170,6 +171,7 @@ export default function App() {
   const latestContentSearchRequestIdRef = useRef(0);
   const contentSearchRevealRequestIdRef = useRef(0);
   const runningAssistantRunIdRef = useRef<string | null>(null);
+  const contextAttachmentMoveHandlerRef = useRef<ContextAttachmentMoveHandler | null>(null);
   const editorNavigationDuringRunRef = useRef<{ runId: string | null; changed: boolean }>({
     runId: null,
     changed: false
@@ -200,6 +202,7 @@ export default function App() {
     completeHistoryNavigation,
     forwardTarget,
     getNavigationTarget,
+    relocateHistoryPaths,
     recordNormalNavigation
   } = useDocumentHistory(tree);
   const {
@@ -210,6 +213,7 @@ export default function App() {
     creatingFolder,
     duplicateNode,
     insertImage,
+    moveNode,
     moveNodeToTrash,
     openDocumentLink,
     openNode,
@@ -223,6 +227,15 @@ export default function App() {
     flushSave,
     loadDocument,
     onMarkdownNavigation: recordNormalNavigation,
+    onTreeNodeMoved: ({ oldNode, newNode, nextTree, activeFileAfterMove }) => {
+      relocateHistoryPaths(oldNode.path, newNode.path);
+      contextAttachmentMoveHandlerRef.current?.({
+        oldRelativeRoot: oldNode.relativePath,
+        newRelativeRoot: newNode.relativePath,
+        nextTree,
+        activeRelativePath: activeFileAfterMove?.relativePath ?? null
+      });
+    },
     refreshTree,
     renamingPath,
     selectedTreePath,
@@ -413,6 +426,13 @@ export default function App() {
       return moveNodeToTrash(node);
     },
     [markEditorNavigationDuringRun, moveNodeToTrash]
+  );
+  const moveNodeWithNavigation = useCallback(
+    (node: Parameters<typeof moveNode>[0], targetDirectoryPath: Parameters<typeof moveNode>[1]) => {
+      markEditorNavigationDuringRun();
+      return moveNode(node, targetDirectoryPath);
+    },
+    [markEditorNavigationDuringRun, moveNode]
   );
   const renameNodeWithNavigation = useCallback(
     (node: Parameters<typeof renameNode>[0], requestedName: Parameters<typeof renameNode>[1]) => {
@@ -1364,7 +1384,13 @@ export default function App() {
               onOpenRecent={openRecentWorkspace}
               onRevealWorkspace={() => void window.iliad.revealInFinder(workspace.path, workspace.path)}
               onSelectNode={(node) => setSelectedTreePath(node.path)}
+              onSelectWorkspaceRoot={() => {
+                setSelectedTreePath(workspace.path);
+                setNotice(strings.sidebar.workspaceRootSelected);
+              }}
+              onMoveNode={moveNodeWithNavigation}
               onShowContextMenu={(node, position) => setTreeContextMenu({ node, ...position })}
+              contextMenuOpen={Boolean(treeContextMenu)}
               onCloseContextMenu={closeTreeContextMenu}
               onCancelRename={() => setRenamingPath(null)}
               onCommitRename={renameNodeWithNavigation}
@@ -1434,6 +1460,9 @@ export default function App() {
             editorNavigationChangedDuringRun={editorNavigationChangedDuringRun}
             onRunningRunChange={handleRunningAssistantRunChange}
             onOpenDocumentRequest={handleAgentOpenDocument}
+            onContextAttachmentMoveHandlerChange={(handler) => {
+              contextAttachmentMoveHandlerRef.current = handler;
+            }}
             editorSelection={chipEditorSelection}
             getEditorSelection={getEditorSelection}
           />
@@ -1447,6 +1476,20 @@ export default function App() {
         onCopyPath={copyNodePath}
         onDuplicate={duplicateNodeWithNavigation}
         onMoveToTrash={moveNodeToTrashWithNavigation}
+        onMoveToRoot={(node) => moveNodeWithNavigation(node, workspace.path)}
+        canMoveToRoot={(node) => {
+          if (!node.relativePath.includes("/")) {
+            return false;
+          }
+
+          const nodePath = node.relativePath.replace(/\\/g, "/").toLowerCase();
+
+          return !pendingTreeChanges.some((change) => {
+            const pendingPath = change.normalizedRelativePath.toLowerCase();
+
+            return pendingPath === nodePath || pendingPath.startsWith(`${nodePath}/`);
+          });
+        }}
         onRename={startRenameFromContextMenu}
         onRevealInFinder={revealNodeInFinder}
       />

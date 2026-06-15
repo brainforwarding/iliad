@@ -2,7 +2,8 @@ import { useCallback, useMemo, useRef, useState, type Dispatch, type MutableRefO
 import { resolveMarkdownAssetPath } from "../editor/paths";
 import type { FileTreeNode, WorkspaceInfo } from "../types/iliad";
 import { findNode } from "./fileTree";
-import { parentDirectoryPath, pathIsSameOrInside, relocatePath } from "./pathUtils";
+import { resolveCreationDirectoryPath } from "./fileTreeMove";
+import { pathIsSameOrInside, relocatePath } from "./pathUtils";
 
 interface DocumentStateRef {
   activeFile: FileTreeNode | null;
@@ -19,6 +20,12 @@ interface UseFileActionsOptions {
   loadDocument: (text: string) => void;
   messages: FileActionMessages;
   onMarkdownNavigation: (previousPath: string, nextPath: string) => void;
+  onTreeNodeMoved?: (move: {
+    oldNode: FileTreeNode;
+    newNode: FileTreeNode;
+    nextTree: FileTreeNode[];
+    activeFileAfterMove: FileTreeNode | null;
+  }) => void;
   refreshTree: (workspacePath: string) => Promise<FileTreeNode[]>;
   renamingPath: string | null;
   selectedTreePath: string | null;
@@ -41,6 +48,7 @@ interface FileActionMessages {
   createFolderFallback: string;
   renameItemFallback: string;
   duplicateItemFallback: string;
+  moveItemFallback: string;
   moveToTrashFallback: string;
   copyPathFallback: string;
   copiedPath: string;
@@ -50,6 +58,8 @@ interface FileActionMessages {
   createdFolderMissing: string;
   renamedFileMissing: string;
   duplicatedFileMissing: string;
+  movedFileMissing: string;
+  movedItem: (relativePath: string) => string;
   openMarkdownBeforeImages: string;
   savedImage: (relativePath: string) => string;
   headingLinksUnsupported: string;
@@ -106,6 +116,7 @@ export function useFileActions({
   loadDocument,
   messages,
   onMarkdownNavigation,
+  onTreeNodeMoved,
   refreshTree,
   renamingPath,
   selectedTreePath,
@@ -127,25 +138,18 @@ export function useFileActions({
     () => (selectedTreePath ? findNode(tree, selectedTreePath) : null),
     [selectedTreePath, tree]
   );
-  const creationDirectoryPath = useMemo(() => {
-    if (!workspace) {
-      return "";
-    }
-
-    if (selectedTreeNode?.kind === "directory") {
-      return selectedTreeNode.path;
-    }
-
-    if (selectedTreeNode) {
-      return parentDirectoryPath(selectedTreeNode.path);
-    }
-
-    if (activeFile) {
-      return parentDirectoryPath(activeFile.path);
-    }
-
-    return workspace.path;
-  }, [activeFile, selectedTreeNode, workspace]);
+  const creationDirectoryPath = useMemo(
+    () =>
+      workspace
+        ? resolveCreationDirectoryPath({
+            workspacePath: workspace.path,
+            selectedTreePath,
+            selectedTreeNode,
+            activeFile
+          })
+        : "",
+    [activeFile, selectedTreeNode, selectedTreePath, workspace]
+  );
 
   const openNode = useCallback(
     async (node: FileTreeNode, options: OpenNodeOptions = {}): Promise<OpenNodeResult> => {
@@ -389,6 +393,72 @@ export function useFileActions({
     }
   }, [closeTreeContextMenu, flushSave, messages, openNode, refreshTree, setError, setSelectedTreePath, workspace]);
 
+  const moveNode = useCallback(async (node: FileTreeNode, targetDirectoryPath: string) => {
+    if (!workspace) {
+      return null;
+    }
+
+    closeTreeContextMenu();
+
+    try {
+      await flushSave();
+      const movedNode = await window.iliad.movePath(workspace.path, node.path, targetDirectoryPath);
+      const nextTree = await refreshTree(workspace.path);
+      const hydratedNode = findNode(nextTree, movedNode.path);
+
+      if (!hydratedNode) {
+        throw new Error(messages.movedFileMissing);
+      }
+
+      const currentActiveFile = stateRef.current.activeFile;
+      let activeFileAfterMove = currentActiveFile;
+
+      if (currentActiveFile && pathIsSameOrInside(node.path, currentActiveFile.path)) {
+        const relocatedActivePath = relocatePath(node.path, hydratedNode.path, currentActiveFile.path);
+        const relocatedActiveNode = findNode(nextTree, relocatedActivePath);
+
+        if (relocatedActiveNode?.kind === "markdown") {
+          setActiveFile(relocatedActiveNode);
+          activeFileAfterMove = relocatedActiveNode;
+        } else {
+          setActiveFile(null);
+          clearDocument();
+          activeFileAfterMove = null;
+        }
+      }
+
+      if (renamingPath && pathIsSameOrInside(node.path, renamingPath)) {
+        setRenamingPath(relocatePath(node.path, hydratedNode.path, renamingPath));
+      }
+
+      setSelectedTreePath(hydratedNode.path);
+      setRevealFolderPath(hydratedNode.path);
+      onTreeNodeMoved?.({ oldNode: node, newNode: hydratedNode, nextTree, activeFileAfterMove });
+      setNotice(messages.movedItem(hydratedNode.relativePath));
+      setError(null);
+      return hydratedNode;
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : messages.moveItemFallback);
+      return null;
+    }
+  }, [
+    clearDocument,
+    closeTreeContextMenu,
+    flushSave,
+    messages,
+    onTreeNodeMoved,
+    refreshTree,
+    renamingPath,
+    setActiveFile,
+    setError,
+    setNotice,
+    setRenamingPath,
+    setRevealFolderPath,
+    setSelectedTreePath,
+    stateRef,
+    workspace
+  ]);
+
   const startRenameFromContextMenu = useCallback((node: FileTreeNode) => {
     closeTreeContextMenu();
     setSelectedTreePath(node.path);
@@ -559,6 +629,7 @@ export function useFileActions({
     creatingFolder,
     duplicateNode,
     insertImage,
+    moveNode,
     moveNodeToTrash,
     openDocumentLink,
     openNode,

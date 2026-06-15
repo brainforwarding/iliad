@@ -22,10 +22,12 @@ import {
   manualContextAttachmentLimit,
   normalizeRelativePath,
   readContextFileDragPayload,
+  relocateContextAttachmentChipsForMove,
   workspaceContextApiSessionId,
   workspaceContextDragSessionId,
   type AssistantContextAttachmentChip,
-  type AssistantContextAttachmentSource
+  type AssistantContextAttachmentSource,
+  type RelocateContextAttachmentsForMoveInput
 } from "./contextAttachments";
 import { buildRunOutcomeEntry, type AssistantEntry } from "./runEntries";
 import { lineRangeOf, selectionRangesEqual, type EditorSelectionRange } from "./selectionContext";
@@ -112,6 +114,8 @@ export interface AssistantRunSelectionComments {
   onMarkSent: (ids: string[]) => void;
   onRevert: (ids: string[]) => void;
 }
+
+export type ContextAttachmentMoveHandler = (move: RelocateContextAttachmentsForMoveInput) => void;
 
 interface UseAssistantRunOptions {
   activeFile: FileTreeNode | null;
@@ -1310,6 +1314,10 @@ export function useAssistantRun({
     [addContextAttachment, rejectContextDrop, workspaceApiSessionId, workspaceDragSessionId]
   );
 
+  const relocateContextAttachmentsForMove = useCallback<ContextAttachmentMoveHandler>((move) => {
+    setContextAttachments((current) => relocateContextAttachmentChipsForMove(current, move));
+  }, []);
+
   const ask = useCallback(async () => {
     const trimmedPrompt = prompt.trim();
     const pendingCommentCount = selectionComments?.pendingCount ?? 0;
@@ -1738,6 +1746,7 @@ export function useAssistantRun({
     saveApiKey,
     removeContextAttachment,
     removeLastContextAttachment,
+    relocateContextAttachmentsForMove,
     setApiKeyDraft,
     setMode: changeAgentMode,
     setModelDraft: changeAgentModel,

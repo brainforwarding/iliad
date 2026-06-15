@@ -11,14 +11,17 @@ interface TreeContextMenuProps {
   labels: {
     duplicate: string;
     rename: string;
+    moveToWorkspaceRoot: string;
     copyPath: string;
     revealInFinder: string;
     moveToTrash: string;
   };
   menu: TreeContextMenuState | null;
   menuRef: RefObject<HTMLDivElement>;
+  canMoveToRoot?: (node: FileTreeNode) => boolean;
   onCopyPath: (node: FileTreeNode) => void | Promise<void>;
   onDuplicate: (node: FileTreeNode) => void | Promise<void>;
+  onMoveToRoot?: (node: FileTreeNode) => void | Promise<unknown>;
   onMoveToTrash: (node: FileTreeNode) => void | Promise<void>;
   onRename: (node: FileTreeNode) => void;
   onRevealInFinder: (node: FileTreeNode) => void | Promise<void>;
@@ -26,7 +29,7 @@ interface TreeContextMenuProps {
 
 function contextMenuPosition(menu: TreeContextMenuState) {
   const width = 178;
-  const height = menu.node.kind === "directory" ? 164 : 200;
+  const height = menu.node.kind === "directory" ? 194 : 230;
 
   return {
     left: Math.min(menu.x, Math.max(8, window.innerWidth - width - 8)),
@@ -38,8 +41,10 @@ export function TreeContextMenu({
   labels,
   menu,
   menuRef,
+  canMoveToRoot,
   onCopyPath,
   onDuplicate,
+  onMoveToRoot,
   onMoveToTrash,
   onRename,
   onRevealInFinder
@@ -47,6 +52,8 @@ export function TreeContextMenu({
   if (!menu) {
     return null;
   }
+
+  const showMoveToRoot = Boolean(onMoveToRoot && canMoveToRoot?.(menu.node));
 
   return (
     <div
@@ -67,6 +74,11 @@ export function TreeContextMenu({
       <button type="button" role="menuitem" onClick={() => onRename(menu.node)}>
         {labels.rename}
       </button>
+      {showMoveToRoot ? (
+        <button type="button" role="menuitem" onClick={() => void onMoveToRoot?.(menu.node)}>
+          {labels.moveToWorkspaceRoot}
+        </button>
+      ) : null}
       <button type="button" role="menuitem" onClick={() => void onCopyPath(menu.node)}>
         {labels.copyPath}
       </button>

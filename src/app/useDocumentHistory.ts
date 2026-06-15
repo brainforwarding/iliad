@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { findNode } from "../files/fileTree";
+import { pathIsSameOrInside, relocatePath } from "../files/pathUtils";
 import type { FileTreeNode } from "../types/iliad";
 
 const maxHistoryEntries = 50;
@@ -66,6 +67,12 @@ function publicTarget(target: ResolvedHistoryTarget | null): DocumentHistoryTarg
 function removeNavigatedTarget(stack: string[], targetPath: string) {
   const targetIndex = stack.lastIndexOf(targetPath);
   return targetIndex === -1 ? null : stack.slice(0, targetIndex);
+}
+
+export function relocateHistoryStackPaths(stack: string[], oldRoot: string, newRoot: string) {
+  return stack.map((candidatePath) =>
+    pathIsSameOrInside(oldRoot, candidatePath) ? relocatePath(oldRoot, newRoot, candidatePath) : candidatePath
+  );
 }
 
 export function useDocumentHistory(tree: FileTreeNode[]) {
@@ -141,6 +148,13 @@ export function useDocumentHistory(tree: FileTreeNode[]) {
     []
   );
 
+  const relocateHistoryPaths = useCallback((oldRoot: string, newRoot: string) => {
+    setHistory((currentHistory) => ({
+      backStack: relocateHistoryStackPaths(currentHistory.backStack, oldRoot, newRoot),
+      forwardStack: relocateHistoryStackPaths(currentHistory.forwardStack, oldRoot, newRoot)
+    }));
+  }, []);
+
   return {
     backStack,
     forwardStack,
@@ -151,6 +165,7 @@ export function useDocumentHistory(tree: FileTreeNode[]) {
     clearHistory,
     completeHistoryNavigation,
     getNavigationTarget,
+    relocateHistoryPaths,
     recordNormalNavigation
   };
 }

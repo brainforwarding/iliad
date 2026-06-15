@@ -22,6 +22,8 @@ const api = {
     ipcRenderer.invoke("folder:create", workspaceRoot, directoryPath, requestedName),
   renamePath: (workspaceRoot: string, filePath: string, requestedName: string) =>
     ipcRenderer.invoke("file:rename", workspaceRoot, filePath, requestedName),
+  movePath: (workspaceRoot: string, sourcePath: string, targetDirectoryPath: string) =>
+    ipcRenderer.invoke("file:move", workspaceRoot, sourcePath, targetDirectoryPath),
   duplicatePath: (workspaceRoot: string, filePath: string) =>
     ipcRenderer.invoke("file:duplicate", workspaceRoot, filePath),
   moveToTrash: (workspaceRoot: string, filePath: string) =>

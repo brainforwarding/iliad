@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   ensureInsideWorkspace,
@@ -142,6 +142,41 @@ async function assertPathAvailable(filePath: string) {
   throw new Error("A file with that name already exists.");
 }
 
+function pathIsSameOrInside(parentPath: string, candidatePath: string) {
+  const parent = path.resolve(parentPath);
+  const candidate = path.resolve(candidatePath);
+  const relative = path.relative(parent, candidate);
+
+  return !relative || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+async function assertVisiblePathHasNoSymlinkAncestor(workspaceRoot: string, filePath: string) {
+  ensureVisibleWorkspacePath(workspaceRoot, filePath);
+
+  const root = path.resolve(workspaceRoot);
+  const target = path.resolve(filePath);
+  const relative = path.relative(root, target);
+
+  if (!relative) {
+    return;
+  }
+
+  let currentPath = root;
+
+  for (const segment of relative.split(path.sep)) {
+    if (!segment) {
+      continue;
+    }
+
+    currentPath = path.join(currentPath, segment);
+    const stats = await lstat(currentPath);
+
+    if (stats.isSymbolicLink()) {
+      throw new Error("Symlinked paths cannot be moved.");
+    }
+  }
+}
+
 export async function createMarkdownFile(workspaceRoot: string, directoryPath: string, requestedName: string) {
   ensureVisibleWorkspacePath(workspaceRoot, directoryPath);
   const fileName = normalizeMarkdownName(requestedName);
@@ -182,6 +217,45 @@ export async function renamePath(workspaceRoot: string, filePath: string, reques
   await rename(filePath, newPath);
 
   return fileTreeNode(workspaceRoot, newPath, fileStats.isDirectory());
+}
+
+export async function movePath(workspaceRoot: string, sourcePath: string, targetDirectoryPath: string) {
+  ensureVisibleWorkspacePath(workspaceRoot, sourcePath);
+  ensureVisibleWorkspacePath(workspaceRoot, targetDirectoryPath);
+
+  if (path.resolve(sourcePath) === path.resolve(workspaceRoot)) {
+    throw new Error("The workspace root cannot be moved.");
+  }
+
+  await assertVisiblePathHasNoSymlinkAncestor(workspaceRoot, sourcePath);
+  await assertVisiblePathHasNoSymlinkAncestor(workspaceRoot, targetDirectoryPath);
+
+  const sourceStats = await lstat(sourcePath);
+  const targetDirectoryStats = await lstat(targetDirectoryPath);
+
+  if (sourceStats.isSymbolicLink() || targetDirectoryStats.isSymbolicLink()) {
+    throw new Error("Symlinked paths cannot be moved.");
+  }
+
+  if (!targetDirectoryStats.isDirectory()) {
+    throw new Error("Move target must be a folder.");
+  }
+
+  if (sourceStats.isDirectory() && pathIsSameOrInside(sourcePath, targetDirectoryPath)) {
+    throw new Error("A folder cannot be moved into itself.");
+  }
+
+  const targetPath = path.join(targetDirectoryPath, path.basename(sourcePath));
+  ensureVisibleWorkspacePath(workspaceRoot, targetPath);
+
+  if (path.resolve(targetPath) === path.resolve(sourcePath)) {
+    return fileTreeNode(workspaceRoot, sourcePath, sourceStats.isDirectory());
+  }
+
+  await assertPathAvailable(targetPath);
+  await rename(sourcePath, targetPath);
+
+  return fileTreeNode(workspaceRoot, targetPath, sourceStats.isDirectory());
 }
 
 export async function duplicatePath(workspaceRoot: string, filePath: string) {

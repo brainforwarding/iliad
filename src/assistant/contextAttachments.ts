@@ -37,6 +37,13 @@ export interface ContextFileDragPayload {
   relativePath: string;
 }
 
+export interface RelocateContextAttachmentsForMoveInput {
+  oldRelativeRoot: string;
+  newRelativeRoot: string;
+  nextTree: FileTreeNode[];
+  activeRelativePath?: string | null;
+}
+
 const markdownExtensionPattern = /\.(md|markdown|mdown|mkd)$/i;
 const ignoredPathSegments = new Set([".git", ".hg", ".svn", "node_modules"]);
 const workspaceSessionIds = new Map<string, string>();
@@ -284,6 +291,69 @@ export function contextAttachmentDisplayLabels(paths: string[]) {
   }
 
   return labels;
+}
+
+function contextPathIsSameOrInside(parentPath: string, candidatePath: string) {
+  const parent = normalizeRelativePath(parentPath);
+  const candidate = normalizeRelativePath(candidatePath);
+
+  return Boolean(parent && (candidate === parent || candidate.startsWith(`${parent}/`)));
+}
+
+function relocateContextPath(oldRoot: string, newRoot: string, candidatePath: string) {
+  const normalizedOldRoot = normalizeRelativePath(oldRoot);
+  const normalizedNewRoot = normalizeRelativePath(newRoot);
+  const normalizedCandidate = normalizeRelativePath(candidatePath);
+
+  if (normalizedCandidate === normalizedOldRoot) {
+    return normalizedNewRoot;
+  }
+
+  if (!normalizedCandidate.startsWith(`${normalizedOldRoot}/`)) {
+    return normalizedCandidate;
+  }
+
+  return `${normalizedNewRoot}/${normalizedCandidate.slice(normalizedOldRoot.length + 1)}`;
+}
+
+export function relocateContextAttachmentChipsForMove(
+  attachments: AssistantContextAttachmentChip[],
+  { oldRelativeRoot, newRelativeRoot, nextTree, activeRelativePath = null }: RelocateContextAttachmentsForMoveInput
+) {
+  const normalizedOldRoot = normalizeRelativePath(oldRelativeRoot);
+  const normalizedNewRoot = normalizeRelativePath(newRelativeRoot);
+
+  if (!normalizedOldRoot || !normalizedNewRoot) {
+    return attachments;
+  }
+
+  const visibleMarkdownPaths = new Set(
+    collectMarkdownContextDocuments(nextTree).map((document) => normalizeRelativePath(document.relativePath).toLowerCase())
+  );
+  const activeKey = activeRelativePath ? normalizeRelativePath(activeRelativePath).toLowerCase() : null;
+  const seen = new Set<string>();
+  const relocatedAttachments: AssistantContextAttachmentChip[] = [];
+
+  for (const attachment of attachments) {
+    const currentPath = normalizeRelativePath(attachment.relativePath);
+    const nextPath = contextPathIsSameOrInside(normalizedOldRoot, currentPath)
+      ? relocateContextPath(normalizedOldRoot, normalizedNewRoot, currentPath)
+      : currentPath;
+    const nextKey = nextPath.toLowerCase();
+
+    if (!isVisibleMarkdownContextPath(nextPath) || !visibleMarkdownPaths.has(nextKey) || activeKey === nextKey || seen.has(nextKey)) {
+      continue;
+    }
+
+    seen.add(nextKey);
+    relocatedAttachments.push({
+      ...attachment,
+      relativePath: nextPath,
+      label: contextFileBasename(nextPath)
+    });
+  }
+
+  return relocatedAttachments;
 }
 
 function createWorkspaceSessionNonce() {
