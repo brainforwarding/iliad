@@ -23,6 +23,10 @@ import { visualMarkdown } from "../editor/visualMarkdown";
 import { proseEnterExtension } from "../editor/proseEnter";
 import { writingCorrectorExtension } from "../editor/writingCorrector/extension";
 import { type WritingIssue, writingIssueFingerprint, writingIssueKey } from "../editor/writingCorrector/issues";
+import {
+  resolveContentSearchReveal,
+  type ContentSearchRevealTarget
+} from "../editor/contentSearchReveal";
 import type { TightenInlineReview } from "../editor/tightenSafeRange";
 import type { EditorFontPreset } from "../preferences/editorPreferences";
 import type {
@@ -138,6 +142,8 @@ interface EditorPaneProps {
   onOpenLink: (href: string) => void | Promise<void>;
   onCreateDocument?: () => void;
   onEditorViewChange?: (view: EditorView) => void;
+  contentSearchRevealTarget?: ContentSearchRevealTarget | null;
+  onContentSearchRevealHandled?: (requestId: number) => void;
 }
 
 const fontStacks: Record<EditorFontPreset, string> = {
@@ -224,7 +230,9 @@ export function EditorPane({
   onInsertImage,
   onOpenLink,
   onCreateDocument,
-  onEditorViewChange
+  onEditorViewChange,
+  contentSearchRevealTarget,
+  onContentSearchRevealHandled
 }: EditorPaneProps) {
   const editorTheme = useMemo(
     () => createEditorTheme(editorFontSize, editorFontPreset),
@@ -255,6 +263,7 @@ export function EditorPane({
   const editorSurfaceRef = useRef<HTMLDivElement | null>(null);
   const writingIssuePopoverRef = useRef<HTMLDivElement | null>(null);
   const overlayApiRef = useRef<SelectionCommentsOverlayApi | null>(null);
+  const handledContentRevealRequestIdRef = useRef<number | null>(null);
   const selectionCommentRanges = useMemo<SelectionCommentWashRange[]>(() => {
     if (!selectionComments) {
       return [];
@@ -382,6 +391,28 @@ export function EditorPane({
   useEffect(() => {
     setActiveWritingIssue(null);
   }, [value]);
+
+  useEffect(() => {
+    const target = contentSearchRevealTarget;
+
+    if (
+      !target ||
+      !editorView ||
+      file?.path !== target.filePath ||
+      handledContentRevealRequestIdRef.current === target.requestId
+    ) {
+      return;
+    }
+
+    const plan = resolveContentSearchReveal(editorView.state, target);
+    handledContentRevealRequestIdRef.current = target.requestId;
+    editorView.dispatch({
+      selection: plan.kind === "exact" ? { anchor: plan.from, head: plan.to } : { anchor: plan.from },
+      effects: EditorView.scrollIntoView(plan.kind === "exact" ? plan.to : plan.from, { y: "center" })
+    });
+    editorView.focus();
+    onContentSearchRevealHandled?.(target.requestId);
+  }, [contentSearchRevealTarget, editorView, file?.path, onContentSearchRevealHandled, value]);
 
   useEffect(() => {
     if (!activeWritingIssue) {

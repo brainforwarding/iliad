@@ -70,7 +70,30 @@ export const appStrings = {
       fileTreeSearchCount: (current: number, total: number) => `${current}/${total}`,
       fileTreeSearchMatchAria: (name: string, current: number, total: number) =>
         `${name}, match ${current} of ${total}`,
-      fileTreeDescendantMatches: (count: number) => (count === 1 ? "1 descendant match" : `${count} descendant matches`)
+      fileTreeDescendantMatches: (count: number) => (count === 1 ? "1 descendant match" : `${count} descendant matches`),
+      searchScope: "Search scope",
+      searchNames: "Names",
+      searchText: "Text",
+      fileTreeContentSearchPlaceholder: "Search document text",
+      matchCase: "Match case",
+      matchWholeWord: "Match whole word",
+      useRegularExpression: "Use regular expression",
+      contentSearchSearching: "Searching...",
+      contentSearchNoMatches: "No document matches",
+      contentSearchCount: (matches: number, files: number) => {
+        const matchText = matches === 1 ? "1 match" : `${matches} matches`;
+        const fileText = files === 1 ? "1 file" : `${files} files`;
+        return `${matchText} in ${fileText}`;
+      },
+      contentSearchInvalidRegex: "Invalid regex",
+      contentSearchFailed: "Search failed",
+      contentSearchUsesSavedText: "Search uses last saved text",
+      contentSearchTruncated: (shown: number) => `Showing first ${shown} matches`,
+      contentSearchMoreInFile: (count: number) => (count === 1 ? "1 more" : `${count} more`),
+      contentSearchMatchAria: (path: string, line: number, current: number, total: number) =>
+        `${path}, line ${line}, match ${current} of ${total}`,
+      contentSearchSkippedOversized: (count: number) =>
+        count === 1 ? "1 oversized Markdown file skipped" : `${count} oversized Markdown files skipped`
     },
     treeContextMenu: {
       duplicate: "Duplicate",
@@ -544,7 +567,30 @@ export const appStrings = {
       fileTreeSearchMatchAria: (name: string, current: number, total: number) =>
         `${name}, resultado ${current} de ${total}`,
       fileTreeDescendantMatches: (count: number) =>
-        count === 1 ? "1 coincidencia descendiente" : `${count} coincidencias descendientes`
+        count === 1 ? "1 coincidencia descendiente" : `${count} coincidencias descendientes`,
+      searchScope: "Alcance de búsqueda",
+      searchNames: "Nombres",
+      searchText: "Texto",
+      fileTreeContentSearchPlaceholder: "Buscar texto en documentos",
+      matchCase: "Distinguir mayúsculas",
+      matchWholeWord: "Palabra completa",
+      useRegularExpression: "Usar expresión regular",
+      contentSearchSearching: "Buscando...",
+      contentSearchNoMatches: "Sin coincidencias en documentos",
+      contentSearchCount: (matches: number, files: number) => {
+        const matchText = matches === 1 ? "1 coincidencia" : `${matches} coincidencias`;
+        const fileText = files === 1 ? "1 archivo" : `${files} archivos`;
+        return `${matchText} en ${fileText}`;
+      },
+      contentSearchInvalidRegex: "Regex no válida",
+      contentSearchFailed: "No se pudo buscar",
+      contentSearchUsesSavedText: "La búsqueda usa el último texto guardado",
+      contentSearchTruncated: (shown: number) => `Mostrando las primeras ${shown} coincidencias`,
+      contentSearchMoreInFile: (count: number) => (count === 1 ? "1 más" : `${count} más`),
+      contentSearchMatchAria: (path: string, line: number, current: number, total: number) =>
+        `${path}, línea ${line}, coincidencia ${current} de ${total}`,
+      contentSearchSkippedOversized: (count: number) =>
+        count === 1 ? "1 archivo Markdown demasiado grande omitido" : `${count} archivos Markdown demasiado grandes omitidos`
     },
     treeContextMenu: {
       duplicate: "Duplicar",

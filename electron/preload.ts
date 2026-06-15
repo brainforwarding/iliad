@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { IpcRendererEvent } from "electron";
+import type { MarkdownContentSearchRequest } from "./fs/contentSearch.js";
 
 let workspaceReadRequestId = 0;
 
@@ -25,6 +26,8 @@ const api = {
     ipcRenderer.invoke("file:duplicate", workspaceRoot, filePath),
   moveToTrash: (workspaceRoot: string, filePath: string) =>
     ipcRenderer.invoke("file:trash", workspaceRoot, filePath),
+  searchMarkdownContent: (request: MarkdownContentSearchRequest) =>
+    ipcRenderer.invoke("file:search-markdown-content", request),
   openUrl: (url: string) => ipcRenderer.invoke("shell:open-url", url),
   openExternalFile: (workspaceRoot: string, filePath: string) =>
     ipcRenderer.invoke("file:open-external", workspaceRoot, filePath),

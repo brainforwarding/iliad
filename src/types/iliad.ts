@@ -31,6 +31,70 @@ export interface SavedImageAsset {
   markdown: string;
 }
 
+export interface MarkdownContentSearchRequest {
+  workspaceRoot: string;
+  query: string;
+  matchCase: boolean;
+  wholeWord: boolean;
+  regex: boolean;
+  maxReturnedFiles?: number;
+  maxReturnedMatches?: number;
+  maxMatchesPerFile?: number;
+  maxFileBytes?: number;
+  maxScannedMarkdownFiles?: number;
+  maxVisitedEntries?: number;
+  maxDirectoryDepth?: number;
+  maxQueryLength?: number;
+}
+
+export type MarkdownContentSearchTruncationReason =
+  | "files"
+  | "matches"
+  | "scanned_files"
+  | "visited_entries"
+  | "directory_depth"
+  | "query_length";
+
+export interface MarkdownContentSearchRange {
+  startColumn: number;
+  endColumn: number;
+}
+
+export interface MarkdownContentSearchMatch {
+  id: string;
+  lineNumber: number;
+  lineText: string;
+  matchedText: string;
+  startOffset: number;
+  endOffset: number;
+  startColumn: number;
+  endColumn: number;
+  ranges: MarkdownContentSearchRange[];
+}
+
+export interface MarkdownContentSearchFileResult {
+  filePath: string;
+  relativePath: string;
+  name: string;
+  returnedMatchCount: number;
+  matches: MarkdownContentSearchMatch[];
+}
+
+export interface MarkdownContentSearchResponse {
+  status: "ok" | "invalid_regex";
+  query: string;
+  files: MarkdownContentSearchFileResult[];
+  returnedFiles: number;
+  returnedMatches: number;
+  scannedMarkdownFiles: number;
+  visitedEntries: number;
+  skippedOversizedFiles: number;
+  skippedUnreadableFiles: number;
+  truncated: boolean;
+  truncatedReasons: MarkdownContentSearchTruncationReason[];
+  invalidRegexMessage?: string;
+}
+
 export type AgentMode = "fast" | "balanced" | "deep";
 export type AgentRunProfile = "desktop" | "remote_read_only";
 export type AgentModelId =
@@ -818,6 +882,7 @@ export interface IliadApi {
   renamePath: (workspaceRoot: string, filePath: string, requestedName: string) => Promise<FileTreeNode>;
   duplicatePath: (workspaceRoot: string, filePath: string) => Promise<FileTreeNode>;
   moveToTrash: (workspaceRoot: string, filePath: string) => Promise<void>;
+  searchMarkdownContent: (request: MarkdownContentSearchRequest) => Promise<MarkdownContentSearchResponse>;
   openUrl: (url: string) => Promise<void>;
   openExternalFile: (workspaceRoot: string, filePath: string) => Promise<string>;
   revealInFinder: (workspaceRoot: string, filePath: string) => Promise<void>;

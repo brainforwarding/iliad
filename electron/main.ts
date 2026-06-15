@@ -5,6 +5,7 @@ import { registerAutocompleteIpc } from "./ipc/autocomplete.js";
 import { registerAssetIpc, registerAssetProtocol } from "./ipc/assets.js";
 import { registerFileIpc } from "./ipc/files.js";
 import { registerRemoteIpc } from "./ipc/remote.js";
+import { registerSearchIpc } from "./ipc/search.js";
 import { registerSelectionCommentsIpc } from "./ipc/selectionComments.js";
 import { registerShellIpc } from "./ipc/shell.js";
 import { registerTightenIpc } from "./ipc/tighten.js";
@@ -195,6 +196,7 @@ app.whenReady().then(async () => {
     setWindowWorkspace: (webContentsId, workspace) => windowManager.setWindowWorkspace(webContentsId, workspace)
   });
   registerFileIpc();
+  registerSearchIpc();
   registerShellIpc();
   registerAssetIpc();
   const userDataPath = app.getPath("userData");

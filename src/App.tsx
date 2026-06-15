@@ -36,8 +36,13 @@ import { TreeContextMenu, type TreeContextMenuState } from "./components/TreeCon
 import { TypographyMenu } from "./components/TypographyMenu";
 import { WritingAssistsMenu } from "./components/WritingAssistsMenu";
 import { scrollEditorToPosition } from "./editor/selectionComments/scroll";
+import {
+  markLatestContentSearchRequestId,
+  type FileTreeContentSearchProvider
+} from "./assistant/fileTreeContentSearch";
+import type { ContentSearchRevealTarget } from "./editor/contentSearchReveal";
 import { useFileActions } from "./files/fileActions";
-import { findNodeByRelativePath } from "./files/fileTree";
+import { findNode, findNodeByRelativePath } from "./files/fileTree";
 import { useAppLanguage } from "./i18n/appLanguage";
 import { useEditorPreferences } from "./preferences/editorPreferences";
 import {
@@ -48,7 +53,7 @@ import {
 } from "./preferences/sidebarPreferences";
 import { useWritingAssistPreferences } from "./preferences/writingAssistPreferences";
 import type { EditorView } from "@codemirror/view";
-import type { FileTreeNode, WorkspaceInfo, WritingAssistStatus } from "./types/iliad";
+import type { FileTreeNode, MarkdownContentSearchResponse, WorkspaceInfo, WritingAssistStatus } from "./types/iliad";
 
 function statusText(
   saveStatus: SaveStatus,
@@ -83,6 +88,22 @@ function effectiveSidebarMaximum(viewportWidth: number, assistantOpen: boolean) 
   return Math.round(
     Math.max(minimumSidebarWidth, Math.min(maximumPreferredSidebarWidth, viewportWidth * 0.45, availableWidth))
   );
+}
+
+function emptyContentSearchResponse(query: string): MarkdownContentSearchResponse {
+  return {
+    status: "ok",
+    query,
+    files: [],
+    returnedFiles: 0,
+    returnedMatches: 0,
+    scannedMarkdownFiles: 0,
+    visitedEntries: 0,
+    skippedOversizedFiles: 0,
+    skippedUnreadableFiles: 0,
+    truncated: false,
+    truncatedReasons: []
+  };
 }
 
 export default function App() {
@@ -136,6 +157,7 @@ export default function App() {
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);
   const [revealFolderPath, setRevealFolderPath] = useState<string | null>(null);
   const [reviewRevealPath, setReviewRevealPath] = useState<string | null>(null);
+  const [contentSearchRevealTarget, setContentSearchRevealTarget] = useState<ContentSearchRevealTarget | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [treeContextMenu, setTreeContextMenu] = useState<TreeContextMenuState | null>(null);
   const typographyMenuRef = useRef<HTMLDivElement | null>(null);
@@ -145,6 +167,8 @@ export default function App() {
   const appShellRef = useRef<HTMLDivElement | null>(null);
   const sidebarResizeHandleRef = useRef<HTMLDivElement | null>(null);
   const closeDocumentInFlightRef = useRef(false);
+  const latestContentSearchRequestIdRef = useRef(0);
+  const contentSearchRevealRequestIdRef = useRef(0);
   const runningAssistantRunIdRef = useRef<string | null>(null);
   const editorNavigationDuringRunRef = useRef<{ runId: string | null; changed: boolean }>({
     runId: null,
@@ -417,6 +441,7 @@ export default function App() {
     setSelectedTreePath(null);
     setRevealFolderPath(null);
     setReviewRevealPath(null);
+    setContentSearchRevealTarget(null);
     setRenamingPath(null);
     closeTreeContextMenu();
     markEditorNavigationDuringRun();
@@ -541,11 +566,122 @@ export default function App() {
     [openNode, refreshTree, tree, workspace]
   );
 
+  const searchMarkdownContentForFileTree = useCallback<FileTreeContentSearchProvider["search"]>(
+    async (requestId, request) => {
+      latestContentSearchRequestIdRef.current = markLatestContentSearchRequestId(
+        latestContentSearchRequestIdRef.current,
+        requestId
+      );
+      let usedSavedTextFallback = false;
+      const current = stateRef.current;
+
+      if (!workspace) {
+        return { response: emptyContentSearchResponse(request.query), usedSavedTextFallback };
+      }
+
+      if (current.activeFile?.kind === "markdown" && current.documentText !== current.savedText) {
+        try {
+          await flushSave();
+        } catch {
+          usedSavedTextFallback = true;
+        }
+      }
+
+      if (latestContentSearchRequestIdRef.current !== requestId) {
+        return { response: emptyContentSearchResponse(request.query), usedSavedTextFallback };
+      }
+
+      const response = await window.iliad.searchMarkdownContent({
+        ...request,
+        workspaceRoot: workspace.path
+      });
+
+      if (latestContentSearchRequestIdRef.current !== requestId) {
+        return { response: emptyContentSearchResponse(request.query), usedSavedTextFallback };
+      }
+
+      return { response, usedSavedTextFallback };
+    },
+    [flushSave, stateRef, workspace]
+  );
+
+  const markLatestFileTreeContentSearchRequest = useCallback<FileTreeContentSearchProvider["markLatestRequest"]>(
+    (requestId) => {
+      latestContentSearchRequestIdRef.current = markLatestContentSearchRequestId(
+        latestContentSearchRequestIdRef.current,
+        requestId
+      );
+    },
+    []
+  );
+
+  const openContentSearchMatch = useCallback<FileTreeContentSearchProvider["onOpenMatch"]>(
+    async (match) => {
+      if (!workspace) {
+        return;
+      }
+
+      markEditorNavigationDuringRun();
+      let node = findNode(tree, match.filePath) ?? findNodeByRelativePath(tree, match.relativePath);
+
+      if (!node) {
+        const refreshed = await refreshTree(workspace.path);
+        node = findNode(refreshed, match.filePath) ?? findNodeByRelativePath(refreshed, match.relativePath);
+      }
+
+      if (!node || node.kind !== "markdown") {
+        console.warn("content search open match: node not found in tree", match.relativePath);
+        return;
+      }
+
+      clearReviewForNormalNavigation(node);
+
+      if (activeFile?.path !== node.path) {
+        const result = await openNode(node);
+
+        if (result.kind !== "markdown") {
+          return;
+        }
+      } else {
+        setSelectedTreePath(node.path);
+      }
+
+      contentSearchRevealRequestIdRef.current += 1;
+      setContentSearchRevealTarget({
+        filePath: node.path,
+        startOffset: match.startOffset,
+        endOffset: match.endOffset,
+        lineNumber: match.lineNumber,
+        matchedText: match.matchedText,
+        requestId: contentSearchRevealRequestIdRef.current
+      });
+    },
+    [
+      activeFile?.path,
+      clearReviewForNormalNavigation,
+      markEditorNavigationDuringRun,
+      openNode,
+      refreshTree,
+      tree,
+      workspace
+    ]
+  );
+
+  const fileTreeContentSearchProvider = useMemo<FileTreeContentSearchProvider>(
+    () => ({
+      markLatestRequest: markLatestFileTreeContentSearchRequest,
+      search: searchMarkdownContentForFileTree,
+      onOpenMatch: openContentSearchMatch
+    }),
+    [markLatestFileTreeContentSearchRequest, openContentSearchMatch, searchMarkdownContentForFileTree]
+  );
+
   const resetForWorkspaceSwitch = useCallback(() => {
     setActiveFile(null);
     setSelectedTreePath(null);
     setRevealFolderPath(null);
     setReviewRevealPath(null);
+    setContentSearchRevealTarget(null);
     setRenamingPath(null);
     closeTreeContextMenu();
     setAgentProposals([]);
@@ -1232,6 +1368,7 @@ export default function App() {
               onCloseContextMenu={closeTreeContextMenu}
               onCancelRename={() => setRenamingPath(null)}
               onCommitRename={renameNodeWithNavigation}
+              contentSearchProvider={fileTreeContentSearchProvider}
             />
             <div
               ref={sidebarResizeHandleRef}
@@ -1273,6 +1410,10 @@ export default function App() {
             onOpenLink={openDocumentLinkWithNavigation}
             onCreateDocument={createMarkdownFileWithNavigation}
             onEditorViewChange={handleEditorViewChange}
+            contentSearchRevealTarget={contentSearchRevealTarget}
+            onContentSearchRevealHandled={(requestId) => {
+              setContentSearchRevealTarget((current) => (current?.requestId === requestId ? null : current));
+            }}
           />
         </EditorErrorBoundary>
 

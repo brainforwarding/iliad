@@ -14,6 +14,7 @@ import {
 import type { CSSProperties, FormEvent, KeyboardEvent, ReactNode, RefObject } from "react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { WorkspaceMenu } from "./WorkspaceMenu";
+import { FileTreeContentResults } from "./FileTreeContentResults";
 import {
   contextFileDragMimeType,
   createContextFileDragPayload,
@@ -42,7 +43,22 @@ import {
   type FileTreeSearchNodeMeta,
   type FileTreeSearchRange
 } from "../assistant/fileTreeSearch";
-import type { FileTreeNode, WorkspaceInfo } from "../types/iliad";
+import {
+  buildFileTreeContentResultTree,
+  clampContentSearchActiveIndex,
+  contentSearchRequestKey,
+  contentSearchResponseMatchesCurrent,
+  expandedContentSearchIds,
+  flattenContentSearchPreviewRows,
+  isLatestContentSearchRequest,
+  moveContentSearchActiveIndex,
+  validateContentSearchRegex,
+  type FileTreeContentFlatMatch,
+  type FileTreeContentMatchTarget,
+  type FileTreeContentSearchProvider,
+  type FileTreeSearchScope
+} from "../assistant/fileTreeContentSearch";
+import type { FileTreeNode, MarkdownContentSearchResponse, WorkspaceInfo } from "../types/iliad";
 
 interface FileTreeProps {
   workspace: WorkspaceInfo;
@@ -69,6 +85,7 @@ interface FileTreeProps {
   onCloseContextMenu?: () => void;
   onCancelRename: () => void;
   onCommitRename: (node: FileTreeNode, requestedName: string) => void;
+  contentSearchProvider?: FileTreeContentSearchProvider;
 }
 
 interface FileTreeLabels {
@@ -100,6 +117,23 @@ interface FileTreeLabels {
   fileTreeSearchCount: (current: number, total: number) => string;
   fileTreeSearchMatchAria: (name: string, current: number, total: number) => string;
   fileTreeDescendantMatches: (count: number) => string;
+  searchScope: string;
+  searchNames: string;
+  searchText: string;
+  fileTreeContentSearchPlaceholder: string;
+  matchCase: string;
+  matchWholeWord: string;
+  useRegularExpression: string;
+  contentSearchSearching: string;
+  contentSearchNoMatches: string;
+  contentSearchCount: (matches: number, files: number) => string;
+  contentSearchInvalidRegex: string;
+  contentSearchFailed: string;
+  contentSearchUsesSavedText: string;
+  contentSearchTruncated: (shown: number) => string;
+  contentSearchMoreInFile: (count: number) => string;
+  contentSearchMatchAria: (path: string, line: number, current: number, total: number) => string;
+  contentSearchSkippedOversized: (count: number) => string;
 }
 
 interface TreeRowProps {
@@ -137,18 +171,29 @@ interface FileTreeSearchControlProps {
   treeListId: string;
   statusId: string;
   query: string;
-  mode: FileTreeSearchMode;
+  searchScope: FileTreeSearchScope;
+  nameSearchMode: FileTreeSearchMode;
   filter: boolean;
-  matchCount: number;
-  activeMatchIndex: number;
-  activeMatchPath: string | null;
+  nameMatchCount: number;
+  nameActiveMatchIndex: number;
+  nameActiveMatchPath: string | null;
+  textMatchCount: number;
+  textStatusText: string;
+  textLiveText: string;
+  matchCase: boolean;
+  wholeWord: boolean;
+  regex: boolean;
   onQueryChange: (query: string) => void;
   onClose: () => void;
   onClear: () => void;
   onPrevious: () => void;
   onNext: () => void;
+  onSearchScopeChange: (scope: FileTreeSearchScope) => void;
   onToggleMode: () => void;
   onToggleFilter: () => void;
+  onToggleMatchCase: () => void;
+  onToggleWholeWord: () => void;
+  onToggleRegex: () => void;
   onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
 }
 
@@ -322,32 +367,50 @@ function FileTreeSearchControl({
   treeListId,
   statusId,
   query,
-  mode,
+  searchScope,
+  nameSearchMode,
   filter,
-  matchCount,
-  activeMatchIndex,
-  activeMatchPath,
+  nameMatchCount,
+  nameActiveMatchIndex,
+  nameActiveMatchPath,
+  textMatchCount,
+  textStatusText,
+  textLiveText,
+  matchCase,
+  wholeWord,
+  regex,
   onQueryChange,
   onClose,
   onClear,
   onPrevious,
   onNext,
+  onSearchScopeChange,
   onToggleMode,
   onToggleFilter,
+  onToggleMatchCase,
+  onToggleWholeWord,
+  onToggleRegex,
   onKeyDown
 }: FileTreeSearchControlProps) {
   const hasQuery = query.trim().length > 0;
-  const currentMatch = matchCount > 0 ? activeMatchIndex + 1 : 0;
+  const nameCurrentMatch = nameMatchCount > 0 ? nameActiveMatchIndex + 1 : 0;
   const statusText =
-    matchCount > 0
-      ? labels.fileTreeSearchCount(currentMatch, matchCount)
-      : hasQuery
-        ? labels.fileTreeSearchNoResults
-        : "";
+    searchScope === "names"
+      ? nameMatchCount > 0
+        ? labels.fileTreeSearchCount(nameCurrentMatch, nameMatchCount)
+        : hasQuery
+          ? labels.fileTreeSearchNoResults
+          : ""
+      : textStatusText;
   const liveText =
-    matchCount > 0 && activeMatchPath
-      ? labels.fileTreeSearchMatchAria(activeMatchPath, currentMatch, matchCount)
-      : statusText;
+    searchScope === "names"
+      ? nameMatchCount > 0 && nameActiveMatchPath
+        ? labels.fileTreeSearchMatchAria(nameActiveMatchPath, nameCurrentMatch, nameMatchCount)
+        : statusText
+      : textLiveText;
+  const activeNavigationCount = searchScope === "names" ? nameMatchCount : textMatchCount;
+  const placeholder =
+    searchScope === "names" ? labels.fileTreeSearchPlaceholder : labels.fileTreeContentSearchPlaceholder;
 
   return (
     <div className="file-tree-search" role="search" aria-label={labels.findInFileTree}>
@@ -362,7 +425,7 @@ function FileTreeSearchControl({
             value={query}
             aria-controls={treeListId}
             aria-describedby={statusId}
-            placeholder={labels.fileTreeSearchPlaceholder}
+            placeholder={placeholder}
             onChange={(event) => onQueryChange(event.target.value)}
             onKeyDown={onKeyDown}
           />
@@ -380,39 +443,93 @@ function FileTreeSearchControl({
       </div>
 
       <div className="file-tree-search-controls">
-        <div className="file-tree-search-control-row file-tree-search-mode-row">
+        <div className="file-tree-search-control-row file-tree-search-scope-row">
+          <div className="file-tree-search-scope" role="group" aria-label={labels.searchScope}>
+            <button
+              type="button"
+              className="file-tree-search-scope-button"
+              aria-pressed={searchScope === "names"}
+              onClick={() => onSearchScopeChange("names")}
+            >
+              {labels.searchNames}
+            </button>
+            <button
+              type="button"
+              className="file-tree-search-scope-button"
+              aria-pressed={searchScope === "text"}
+              onClick={() => onSearchScopeChange("text")}
+            >
+              {labels.searchText}
+            </button>
+          </div>
           <span className="file-tree-search-count" aria-hidden="true">
             {statusText}
           </span>
-          <button
-            type="button"
-            className="file-tree-search-toggle"
-            data-tooltip={mode === "fuzzy" ? labels.fileTreeFuzzyOn : labels.fileTreeFuzzyOff}
-            aria-label={labels.toggleFileTreeFuzzy}
-            aria-pressed={mode === "fuzzy"}
-            onClick={onToggleMode}
-          >
-            {labels.fileTreeFuzzyLabel}
-          </button>
-          <button
-            type="button"
-            className="file-tree-search-toggle"
-            data-tooltip={filter ? labels.fileTreeFilterOn : labels.fileTreeFilterOff}
-            aria-label={labels.toggleFileTreeFilter}
-            aria-pressed={filter}
-            onClick={onToggleFilter}
-          >
-            {labels.fileTreeFilterLabel}
-          </button>
         </div>
         <div className="file-tree-search-control-row file-tree-search-nav-row">
-          <span className="file-tree-search-spacer" />
+          {searchScope === "names" ? (
+            <>
+              <button
+                type="button"
+                className="file-tree-search-toggle"
+                data-tooltip={nameSearchMode === "fuzzy" ? labels.fileTreeFuzzyOn : labels.fileTreeFuzzyOff}
+                aria-label={labels.toggleFileTreeFuzzy}
+                aria-pressed={nameSearchMode === "fuzzy"}
+                onClick={onToggleMode}
+              >
+                {labels.fileTreeFuzzyLabel}
+              </button>
+              <button
+                type="button"
+                className="file-tree-search-toggle"
+                data-tooltip={filter ? labels.fileTreeFilterOn : labels.fileTreeFilterOff}
+                aria-label={labels.toggleFileTreeFilter}
+                aria-pressed={filter}
+                onClick={onToggleFilter}
+              >
+                {labels.fileTreeFilterLabel}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="file-tree-search-toggle is-text-option"
+                data-tooltip={labels.matchCase}
+                aria-label={labels.matchCase}
+                aria-pressed={matchCase}
+                onClick={onToggleMatchCase}
+              >
+                Aa
+              </button>
+              <button
+                type="button"
+                className="file-tree-search-toggle is-text-option"
+                data-tooltip={labels.matchWholeWord}
+                aria-label={labels.matchWholeWord}
+                aria-pressed={wholeWord}
+                onClick={onToggleWholeWord}
+              >
+                ab
+              </button>
+              <button
+                type="button"
+                className="file-tree-search-toggle is-text-option"
+                data-tooltip={labels.useRegularExpression}
+                aria-label={labels.useRegularExpression}
+                aria-pressed={regex}
+                onClick={onToggleRegex}
+              >
+                .*
+              </button>
+            </>
+          )}
           <button
             type="button"
             className="file-tree-search-icon-button"
             data-tooltip={labels.previousFileTreeMatch}
             aria-label={labels.previousFileTreeMatch}
-            disabled={matchCount === 0}
+            disabled={activeNavigationCount === 0}
             onClick={onPrevious}
           >
             <ChevronUp size={14} />
@@ -422,7 +539,7 @@ function FileTreeSearchControl({
             className="file-tree-search-icon-button"
             data-tooltip={labels.nextFileTreeMatch}
             aria-label={labels.nextFileTreeMatch}
-            disabled={matchCount === 0}
+            disabled={activeNavigationCount === 0}
             onClick={onNext}
           >
             <ChevronDown size={14} />
@@ -705,18 +822,33 @@ export function FileTree({
   onShowContextMenu,
   onCloseContextMenu,
   onCancelRename,
-  onCommitRename
+  onCommitRename,
+  contentSearchProvider
 }: FileTreeProps) {
   const [durableExpanded, setDurableExpanded] = useState<Set<string>>(new Set());
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchScope, setSearchScope] = useState<FileTreeSearchScope>("names");
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchMode, setSearchMode] = useState<FileTreeSearchMode>("fuzzy");
+  const [nameSearchMode, setNameSearchMode] = useState<FileTreeSearchMode>("fuzzy");
   const [searchFilter, setSearchFilter] = useState(false);
   const [activeMatchIndex, setActiveMatchIndex] = useState(-1);
+  const [activeContentMatchIndex, setActiveContentMatchIndex] = useState(-1);
+  const [contentMatchCase, setContentMatchCase] = useState(false);
+  const [contentWholeWord, setContentWholeWord] = useState(false);
+  const [contentRegex, setContentRegex] = useState(false);
+  const [contentSearchStatus, setContentSearchStatus] = useState<
+    "idle" | "searching" | "ready" | "invalid_regex" | "error"
+  >("idle");
+  const [contentSearchResponse, setContentSearchResponse] = useState<MarkdownContentSearchResponse | null>(null);
+  const [contentSearchResponseKey, setContentSearchResponseKey] = useState<string | null>(null);
+  const [contentSearchUsesSavedFallback, setContentSearchUsesSavedFallback] = useState(false);
+  const [contentExpandedIds, setContentExpandedIds] = useState<Set<string>>(() => new Set());
   const [pathPeek, setPathPeek] = useState<TreePathPeek | null>(null);
   const sidebarRef = useRef<HTMLElement | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const rowButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const contentPreviewRowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const contentSearchRequestIdRef = useRef(0);
   const searchButtonRef = useRef<HTMLButtonElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -726,37 +858,154 @@ export function FileTree({
   const searchStatusId = `${generatedId}-file-tree-search-status`;
   const displayNodes = useMemo(() => buildFileTreeDisplayNodes(nodes, pendingChanges), [nodes, pendingChanges]);
   const searchResult = useMemo(
-    () => searchFileTreeDisplayNodes(displayNodes, searchQuery, searchMode),
-    [displayNodes, searchMode, searchQuery]
+    () => searchFileTreeDisplayNodes(displayNodes, searchQuery, nameSearchMode),
+    [displayNodes, nameSearchMode, searchQuery]
   );
-  const hasSearchQuery = searchOpen && Boolean(searchResult.normalizedQuery);
+  const hasNameSearchQuery = searchOpen && searchScope === "names" && Boolean(searchResult.normalizedQuery);
+  const contentHasQuery = searchOpen && searchScope === "text" && searchQuery.trim().length > 0;
+  const contentRegexValidation = useMemo(
+    () => validateContentSearchRegex(searchQuery, contentRegex, contentWholeWord),
+    [contentRegex, contentWholeWord, searchQuery]
+  );
+  const currentContentSearchKey = useMemo(
+    () =>
+      contentSearchRequestKey({
+        query: searchQuery,
+        matchCase: contentMatchCase,
+        wholeWord: contentWholeWord,
+        regex: contentRegex
+      }),
+    [contentMatchCase, contentRegex, contentWholeWord, searchQuery]
+  );
+  const visibleContentSearchResponse = contentSearchResponseMatchesCurrent(
+    contentSearchResponseKey,
+    currentContentSearchKey
+  )
+    ? contentSearchResponse
+    : null;
   const activeMatchIndexSafe = clampFileTreeSearchActiveIndex(activeMatchIndex, searchResult.matches.length);
-  const activeMatch = hasSearchQuery && activeMatchIndexSafe >= 0 ? searchResult.matches[activeMatchIndexSafe] : null;
+  const activeMatch = hasNameSearchQuery && activeMatchIndexSafe >= 0 ? searchResult.matches[activeMatchIndexSafe] : null;
   const activeSearchMatchId = activeMatch?.id ?? null;
   const renderedNodes = useMemo(
     () =>
-      hasSearchQuery && searchFilter
+      hasNameSearchQuery && searchFilter
         ? filterFileTreeDisplayNodesForSearch(displayNodes, searchResult)
         : displayNodes,
-    [displayNodes, hasSearchQuery, searchFilter, searchResult]
+    [displayNodes, hasNameSearchQuery, searchFilter, searchResult]
+  );
+  const contentResultTree = useMemo(
+    () => (visibleContentSearchResponse ? buildFileTreeContentResultTree(visibleContentSearchResponse.files) : []),
+    [visibleContentSearchResponse]
+  );
+  const contentFlatMatches = useMemo(
+    () => flattenContentSearchPreviewRows(contentResultTree, contentExpandedIds),
+    [contentExpandedIds, contentResultTree]
+  );
+  const activeContentMatchIndexSafe = clampContentSearchActiveIndex(activeContentMatchIndex, contentFlatMatches.length);
+  const activeContentMatch =
+    contentHasQuery && activeContentMatchIndexSafe >= 0 ? contentFlatMatches[activeContentMatchIndexSafe] : null;
+  const activeContentRowId = activeContentMatch?.rowId ?? null;
+  const showContentResults =
+    contentHasQuery &&
+    visibleContentSearchResponse !== null &&
+    visibleContentSearchResponse.files.length > 0;
+  const showContentNoMatches =
+    contentHasQuery &&
+    contentSearchStatus === "ready" &&
+    visibleContentSearchResponse !== null &&
+    visibleContentSearchResponse.files.length === 0 &&
+    contentRegexValidation.valid;
+  const contentEmptyStateText =
+    contentSearchStatus === "searching"
+      ? labels.contentSearchSearching
+      : contentSearchStatus === "error"
+        ? labels.contentSearchFailed
+        : !contentRegexValidation.valid || contentSearchStatus === "invalid_regex"
+          ? labels.contentSearchInvalidRegex
+          : "";
+  const contentStatusText = useMemo(() => {
+    if (!contentHasQuery) {
+      return "";
+    }
+
+    if (!contentRegexValidation.valid || contentSearchStatus === "invalid_regex") {
+      return labels.contentSearchInvalidRegex;
+    }
+
+    if (contentSearchStatus === "searching") {
+      return labels.contentSearchSearching;
+    }
+
+    if (contentSearchStatus === "error") {
+      return labels.contentSearchFailed;
+    }
+
+    if (contentSearchUsesSavedFallback) {
+      return labels.contentSearchUsesSavedText;
+    }
+
+    if (!visibleContentSearchResponse) {
+      return "";
+    }
+
+    if (visibleContentSearchResponse.truncated && visibleContentSearchResponse.returnedMatches > 0) {
+      return labels.contentSearchTruncated(visibleContentSearchResponse.returnedMatches);
+    }
+
+    if (visibleContentSearchResponse.returnedMatches === 0) {
+      return labels.contentSearchNoMatches;
+    }
+
+    return labels.contentSearchCount(
+      visibleContentSearchResponse.returnedMatches,
+      visibleContentSearchResponse.returnedFiles
+    );
+  }, [
+    contentHasQuery,
+    contentRegexValidation.valid,
+    contentSearchStatus,
+    contentSearchUsesSavedFallback,
+    labels,
+    visibleContentSearchResponse
+  ]);
+  const contentLiveText = useMemo(() => {
+    const details = [contentStatusText].filter(Boolean);
+
+    if (contentSearchUsesSavedFallback && contentStatusText !== labels.contentSearchUsesSavedText) {
+      details.push(labels.contentSearchUsesSavedText);
+    }
+
+    if (visibleContentSearchResponse?.truncated) {
+      details.push(labels.contentSearchTruncated(visibleContentSearchResponse.returnedMatches));
+    }
+
+    if (visibleContentSearchResponse && visibleContentSearchResponse.skippedOversizedFiles > 0) {
+      details.push(labels.contentSearchSkippedOversized(visibleContentSearchResponse.skippedOversizedFiles));
+    }
+
+    return details.join(". ");
+  }, [contentSearchUsesSavedFallback, contentStatusText, labels, visibleContentSearchResponse]);
+  const contentRowIndexById = useMemo(
+    () => new Map(contentFlatMatches.map((match, index) => [match.rowId, index])),
+    [contentFlatMatches]
   );
   const searchForcedExpanded = useMemo(() => {
     const forcedExpanded = new Set<string>();
 
-    if (hasSearchQuery && searchFilter) {
+    if (hasNameSearchQuery && searchFilter) {
       for (const path of searchResult.filterAncestorPaths) {
         forcedExpanded.add(path);
       }
     }
 
-    if (hasSearchQuery) {
+    if (hasNameSearchQuery) {
       for (const path of activeMatch?.ancestorPaths ?? []) {
         forcedExpanded.add(path);
       }
     }
 
     return forcedExpanded;
-  }, [activeMatch, hasSearchQuery, searchFilter, searchResult.filterAncestorPaths]);
+  }, [activeMatch, hasNameSearchQuery, searchFilter, searchResult.filterAncestorPaths]);
   const effectiveExpanded = useMemo(() => {
     const expanded = new Set(durableExpanded);
 
@@ -781,10 +1030,17 @@ export function FileTree({
   useEffect(() => {
     setDurableExpanded(new Set());
     setSearchOpen(false);
+    setSearchScope("names");
     setSearchQuery("");
-    setSearchMode("fuzzy");
+    setNameSearchMode("fuzzy");
     setSearchFilter(false);
     setActiveMatchIndex(-1);
+    setActiveContentMatchIndex(-1);
+    setContentSearchStatus("idle");
+    setContentSearchResponse(null);
+    setContentSearchResponseKey(null);
+    setContentSearchUsesSavedFallback(false);
+    setContentExpandedIds(new Set());
     searchReturnFocusRef.current = null;
   }, [workspace.path]);
 
@@ -795,6 +1051,110 @@ export function FileTree({
 
     setActiveMatchIndex((current) => clampFileTreeSearchActiveIndex(current, searchResult.matches.length));
   }, [searchOpen, searchResult.matches.length]);
+
+  useEffect(() => {
+    if (!searchOpen) {
+      return;
+    }
+
+    setActiveContentMatchIndex((current) => clampContentSearchActiveIndex(current, contentFlatMatches.length));
+  }, [contentFlatMatches.length, searchOpen]);
+
+  useEffect(() => {
+    setContentExpandedIds(expandedContentSearchIds(contentResultTree));
+    setActiveContentMatchIndex(-1);
+  }, [contentResultTree]);
+
+  useEffect(() => {
+    const requestId = contentSearchRequestIdRef.current + 1;
+    contentSearchRequestIdRef.current = requestId;
+    contentSearchProvider?.markLatestRequest(requestId);
+
+    if (!contentHasQuery) {
+      setContentSearchStatus("idle");
+      setContentSearchUsesSavedFallback(false);
+      setActiveContentMatchIndex(-1);
+      return;
+    }
+
+    if (!contentRegexValidation.valid) {
+      setContentSearchStatus("invalid_regex");
+      setContentSearchUsesSavedFallback(false);
+      setActiveContentMatchIndex(-1);
+      return;
+    }
+
+    if (!contentSearchProvider) {
+      setContentSearchStatus("error");
+      setContentSearchUsesSavedFallback(false);
+      return;
+    }
+
+    setContentSearchStatus("idle");
+    setContentSearchUsesSavedFallback(false);
+    setActiveContentMatchIndex(-1);
+
+    const searchingTimer = window.setTimeout(() => {
+      if (isLatestContentSearchRequest(requestId, contentSearchRequestIdRef.current)) {
+        setContentSearchStatus("searching");
+      }
+    }, 120);
+
+    const debounceTimer = window.setTimeout(() => {
+      if (!isLatestContentSearchRequest(requestId, contentSearchRequestIdRef.current)) {
+        return;
+      }
+
+      setContentSearchStatus("searching");
+
+      void contentSearchProvider
+        .search(requestId, {
+          query: searchQuery,
+          matchCase: contentMatchCase,
+          wholeWord: contentWholeWord,
+          regex: contentRegex
+        })
+        .then(({ response, usedSavedTextFallback }) => {
+          if (!isLatestContentSearchRequest(requestId, contentSearchRequestIdRef.current)) {
+            return;
+          }
+
+          if (response.status === "invalid_regex") {
+            setContentSearchStatus("invalid_regex");
+            setContentSearchUsesSavedFallback(false);
+            return;
+          }
+
+          setContentSearchResponse(response);
+          setContentSearchResponseKey(currentContentSearchKey);
+          setContentSearchUsesSavedFallback(usedSavedTextFallback);
+          setContentSearchStatus("ready");
+          setActiveContentMatchIndex(response.returnedMatches > 0 ? 0 : -1);
+        })
+        .catch(() => {
+          if (!isLatestContentSearchRequest(requestId, contentSearchRequestIdRef.current)) {
+            return;
+          }
+
+          setContentSearchStatus("error");
+          setContentSearchUsesSavedFallback(false);
+        });
+    }, 200);
+
+    return () => {
+      window.clearTimeout(searchingTimer);
+      window.clearTimeout(debounceTimer);
+    };
+  }, [
+    contentHasQuery,
+    contentMatchCase,
+    contentRegex,
+    contentRegexValidation.valid,
+    contentSearchProvider,
+    contentWholeWord,
+    currentContentSearchKey,
+    searchQuery
+  ]);
 
   useEffect(() => {
     if (!searchOpen) {
@@ -822,9 +1182,22 @@ export function FileTree({
   }, [activeSearchMatchId]);
 
   useEffect(() => {
+    if (!activeContentRowId) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      contentPreviewRowRefs.current.get(activeContentRowId)?.scrollIntoView({ block: "nearest" });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeContentRowId]);
+
+  useEffect(() => {
     if (renamingPath && searchOpen) {
       setSearchOpen(false);
       setActiveMatchIndex(-1);
+      setActiveContentMatchIndex(-1);
     }
   }, [renamingPath, searchOpen]);
 
@@ -881,6 +1254,14 @@ export function FileTree({
       rowButtonRefs.current.set(path, element);
     } else {
       rowButtonRefs.current.delete(path);
+    }
+  }, []);
+
+  const registerContentPreviewRow = useCallback((rowId: string, element: HTMLButtonElement | null) => {
+    if (element) {
+      contentPreviewRowRefs.current.set(rowId, element);
+    } else {
+      contentPreviewRowRefs.current.delete(rowId);
     }
   }, []);
 
@@ -967,6 +1348,8 @@ export function FileTree({
 
       if (!searchOpen) {
         searchReturnFocusRef.current = returnFocusTarget;
+        setSearchScope("names");
+        setActiveContentMatchIndex(-1);
       }
 
       setSearchOpen(true);
@@ -979,6 +1362,7 @@ export function FileTree({
     (restoreFocus = true) => {
       setSearchOpen(false);
       setActiveMatchIndex(-1);
+      setActiveContentMatchIndex(-1);
 
       if (!restoreFocus) {
         return;
@@ -1015,6 +1399,24 @@ export function FileTree({
     [focusRowButton, searchResult.matches]
   );
 
+  const focusContentMatchAtIndex = useCallback(
+    (index: number) => {
+      const match = contentFlatMatches[index];
+
+      if (!match) {
+        return;
+      }
+
+      setActiveContentMatchIndex(index);
+      const frame = window.requestAnimationFrame(() => {
+        contentPreviewRowRefs.current.get(match.rowId)?.focus();
+      });
+
+      return () => window.cancelAnimationFrame(frame);
+    },
+    [contentFlatMatches]
+  );
+
   const moveActiveMatch = useCallback(
     (direction: 1 | -1, focusRow = false) => {
       const nextIndex = moveFileTreeSearchActiveIndex(activeMatchIndexSafe, searchResult.matches.length, direction);
@@ -1032,6 +1434,35 @@ export function FileTree({
     [activeMatchIndexSafe, focusRowButton, searchResult.matches]
   );
 
+  const moveActiveContentMatch = useCallback(
+    (direction: 1 | -1, focusRow = false) => {
+      const nextIndex = moveContentSearchActiveIndex(
+        activeContentMatchIndexSafe,
+        contentFlatMatches.length,
+        direction
+      );
+
+      if (nextIndex < 0) {
+        return;
+      }
+
+      setActiveContentMatchIndex(nextIndex);
+
+      if (focusRow) {
+        const nextRowId = contentFlatMatches[nextIndex]?.rowId;
+
+        if (nextRowId) {
+          const frame = window.requestAnimationFrame(() => {
+            contentPreviewRowRefs.current.get(nextRowId)?.focus();
+          });
+
+          return () => window.cancelAnimationFrame(frame);
+        }
+      }
+    },
+    [activeContentMatchIndexSafe, contentFlatMatches]
+  );
+
   const handleSearchInputKeyDown = useCallback(
     (event: KeyboardEvent<HTMLInputElement>) => {
       if (event.key === "Escape") {
@@ -1044,30 +1475,59 @@ export function FileTree({
       if (event.key === "Enter") {
         event.preventDefault();
         event.stopPropagation();
-        moveActiveMatch(event.shiftKey ? -1 : 1);
+        if (searchScope === "text") {
+          moveActiveContentMatch(event.shiftKey ? -1 : 1);
+        } else {
+          moveActiveMatch(event.shiftKey ? -1 : 1);
+        }
         return;
       }
 
       if (event.key === "ArrowDown") {
         event.preventDefault();
         event.stopPropagation();
-        focusMatchAtIndex(activeMatchIndexSafe >= 0 ? activeMatchIndexSafe : 0);
+        if (searchScope === "text") {
+          focusContentMatchAtIndex(activeContentMatchIndexSafe >= 0 ? activeContentMatchIndexSafe : 0);
+        } else {
+          focusMatchAtIndex(activeMatchIndexSafe >= 0 ? activeMatchIndexSafe : 0);
+        }
         return;
       }
 
       if (event.key === "ArrowUp") {
         event.preventDefault();
         event.stopPropagation();
-        const previousIndex =
-          searchResult.matches.length === 0
-            ? -1
-            : activeMatchIndexSafe > 0
-              ? activeMatchIndexSafe - 1
-              : searchResult.matches.length - 1;
-        focusMatchAtIndex(previousIndex);
+        if (searchScope === "text") {
+          const previousContentIndex =
+            contentFlatMatches.length === 0
+              ? -1
+              : activeContentMatchIndexSafe > 0
+                ? activeContentMatchIndexSafe - 1
+                : contentFlatMatches.length - 1;
+          focusContentMatchAtIndex(previousContentIndex);
+        } else {
+          const previousIndex =
+            searchResult.matches.length === 0
+              ? -1
+              : activeMatchIndexSafe > 0
+                ? activeMatchIndexSafe - 1
+                : searchResult.matches.length - 1;
+          focusMatchAtIndex(previousIndex);
+        }
       }
     },
-    [activeMatchIndexSafe, closeSearch, focusMatchAtIndex, moveActiveMatch, searchResult.matches.length]
+    [
+      activeContentMatchIndexSafe,
+      activeMatchIndexSafe,
+      closeSearch,
+      contentFlatMatches.length,
+      focusContentMatchAtIndex,
+      focusMatchAtIndex,
+      moveActiveContentMatch,
+      moveActiveMatch,
+      searchResult.matches.length,
+      searchScope
+    ]
   );
 
   const handleSearchRowKeyDown = useCallback(
@@ -1083,7 +1543,7 @@ export function FileTree({
         return;
       }
 
-      if (!hasSearchQuery) {
+      if (searchScope !== "names" || !hasNameSearchQuery) {
         return;
       }
 
@@ -1097,7 +1557,29 @@ export function FileTree({
         moveActiveMatch(-1, true);
       }
     },
-    [focusSearchInput, hasSearchQuery, moveActiveMatch, searchOpen]
+    [focusSearchInput, hasNameSearchQuery, moveActiveMatch, searchOpen, searchScope]
+  );
+
+  const handleContentPreviewKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        focusSearchInput();
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        moveActiveContentMatch(1, true);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        event.stopPropagation();
+        moveActiveContentMatch(-1, true);
+      }
+    },
+    [focusSearchInput, moveActiveContentMatch]
   );
 
   const handleSidebarKeyDown = useCallback(
@@ -1122,13 +1604,24 @@ export function FileTree({
       onCloseContextMenu?.();
       setSearchQuery(query);
       setActiveMatchIndex(-1);
+      setActiveContentMatchIndex(-1);
+    },
+    [onCloseContextMenu]
+  );
+
+  const updateSearchScope = useCallback(
+    (scope: FileTreeSearchScope) => {
+      onCloseContextMenu?.();
+      setSearchScope(scope);
+      setActiveMatchIndex(-1);
+      setActiveContentMatchIndex(-1);
     },
     [onCloseContextMenu]
   );
 
   const toggleSearchMode = useCallback(() => {
     onCloseContextMenu?.();
-    setSearchMode((current) => (current === "fuzzy" ? "continuous" : "fuzzy"));
+    setNameSearchMode((current) => (current === "fuzzy" ? "continuous" : "fuzzy"));
     setActiveMatchIndex(-1);
   }, [onCloseContextMenu]);
 
@@ -1136,6 +1629,38 @@ export function FileTree({
     onCloseContextMenu?.();
     setSearchFilter((current) => !current);
   }, [onCloseContextMenu]);
+
+  const toggleContentExpanded = useCallback((id: string) => {
+    setContentExpandedIds((current) => {
+      const next = new Set(current);
+
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+
+      return next;
+    });
+  }, []);
+
+  const openContentMatch = useCallback(
+    (match: FileTreeContentMatchTarget) => {
+      void contentSearchProvider?.onOpenMatch(match);
+    },
+    [contentSearchProvider]
+  );
+
+  const setContentActiveByRowId = useCallback(
+    (rowId: string) => {
+      const index = contentRowIndexById.get(rowId);
+
+      if (index !== undefined) {
+        setActiveContentMatchIndex(index);
+      }
+    },
+    [contentRowIndexById]
+  );
 
   const toggle = (path: string) => {
     setDurableExpanded((current) => {
@@ -1204,24 +1729,63 @@ export function FileTree({
           treeListId={treeListId}
           statusId={searchStatusId}
           query={searchQuery}
-          mode={searchMode}
+          searchScope={searchScope}
+          nameSearchMode={nameSearchMode}
           filter={searchFilter}
-          matchCount={searchResult.matches.length}
-          activeMatchIndex={activeMatchIndexSafe}
-          activeMatchPath={activeMatch?.relativePath ?? null}
+          nameMatchCount={searchResult.matches.length}
+          nameActiveMatchIndex={activeMatchIndexSafe}
+          nameActiveMatchPath={activeMatch?.relativePath ?? null}
+          textMatchCount={contentFlatMatches.length}
+          textStatusText={contentStatusText}
+          textLiveText={contentLiveText}
+          matchCase={contentMatchCase}
+          wholeWord={contentWholeWord}
+          regex={contentRegex}
           onQueryChange={updateSearchQuery}
           onClose={() => closeSearch()}
           onClear={() => updateSearchQuery("")}
-          onPrevious={() => moveActiveMatch(-1)}
-          onNext={() => moveActiveMatch(1)}
+          onPrevious={() => (searchScope === "text" ? moveActiveContentMatch(-1) : moveActiveMatch(-1))}
+          onNext={() => (searchScope === "text" ? moveActiveContentMatch(1) : moveActiveMatch(1))}
+          onSearchScopeChange={updateSearchScope}
           onToggleMode={toggleSearchMode}
           onToggleFilter={toggleSearchFilter}
+          onToggleMatchCase={() => {
+            setContentMatchCase((current) => !current);
+            setActiveContentMatchIndex(-1);
+          }}
+          onToggleWholeWord={() => {
+            setContentWholeWord((current) => !current);
+            setActiveContentMatchIndex(-1);
+          }}
+          onToggleRegex={() => {
+            setContentRegex((current) => !current);
+            setActiveContentMatchIndex(-1);
+          }}
           onKeyDown={handleSearchInputKeyDown}
         />
       ) : null}
 
       <div id={treeListId} className="tree-scroll" onScroll={() => hidePathPeek()}>
-        {renderedNodes.length > 0 ? (
+        {showContentResults ? (
+          <FileTreeContentResults
+            nodes={contentResultTree}
+            labels={labels}
+            activeRowId={activeContentRowId}
+            expandedIds={contentExpandedIds}
+            flatMatches={contentFlatMatches}
+            onToggleExpanded={toggleContentExpanded}
+            onOpenMatch={openContentMatch}
+            onPreviewFocus={setContentActiveByRowId}
+            onPreviewKeyDown={handleContentPreviewKeyDown}
+            registerPreviewRow={registerContentPreviewRow}
+            onShowPathPeek={showPathPeek}
+            onHidePathPeek={hidePathPeek}
+          />
+        ) : showContentNoMatches ? (
+          <div className="empty-tree">{labels.contentSearchNoMatches}</div>
+        ) : contentHasQuery ? (
+          <div className="empty-tree">{contentEmptyStateText}</div>
+        ) : renderedNodes.length > 0 ? (
           renderedNodes.map((node) => (
             <TreeRow
               key={displayNodePath(node)}
@@ -1237,7 +1801,7 @@ export function FileTree({
               searchMetaById={searchResult.metaById}
               activeSearchMatchId={activeSearchMatchId}
               isSearchActiveMatch={activeSearchMatchId === displayNodeId(node)}
-              searchOpen={hasSearchQuery}
+              searchOpen={hasNameSearchQuery}
               onToggle={toggle}
               registerRow={registerRow}
               registerRowButton={registerRowButton}
@@ -1254,7 +1818,7 @@ export function FileTree({
           ))
         ) : (
           <div className="empty-tree">
-            {hasSearchQuery && searchFilter ? labels.fileTreeSearchNoResults : labels.noFiles}
+            {hasNameSearchQuery && searchFilter ? labels.fileTreeSearchNoResults : labels.noFiles}
           </div>
         )}
       </div>
