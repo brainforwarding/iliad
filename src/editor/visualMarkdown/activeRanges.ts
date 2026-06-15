@@ -6,12 +6,12 @@ export interface BlockedRange {
   to: number;
 }
 
-export function isActiveLine(state: EditorState, lineNumber: number, editorFocused = true) {
-  if (!editorFocused) {
-    return false;
-  }
-
+export function isActiveLine(state: EditorState, lineNumber: number, editorFocused = true, editorInteracted = editorFocused) {
   return state.selection.ranges.some((range) => {
+    if (range.empty && !editorFocused && !editorInteracted) {
+      return false;
+    }
+
     const fromLine = state.doc.lineAt(range.from).number;
     const toLine = state.doc.lineAt(range.to).number;
 
@@ -19,14 +19,16 @@ export function isActiveLine(state: EditorState, lineNumber: number, editorFocus
   });
 }
 
-export function selectionIntersectsRange(state: EditorState, from: number, to: number, editorFocused = true) {
-  if (!editorFocused) {
-    return false;
-  }
-
+export function selectionIntersectsRange(
+  state: EditorState,
+  from: number,
+  to: number,
+  editorFocused = true,
+  editorInteracted = editorFocused
+) {
   return state.selection.ranges.some((range) => {
     if (range.empty) {
-      return range.from >= from && range.from < to;
+      return (editorFocused || editorInteracted) && range.from >= from && range.from < to;
     }
 
     return range.from < to && range.to > from;

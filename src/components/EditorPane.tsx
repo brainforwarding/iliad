@@ -1,7 +1,9 @@
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
+import { tags } from "@lezer/highlight";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { aiReviewExtension } from "../editor/aiReview/extension";
 import { reviewHunksForDisplay, type DisplayReviewHunk } from "../editor/aiReview/diff";
@@ -151,6 +153,15 @@ const fontStacks: Record<EditorFontPreset, string> = {
   sans: "'Avenir Next', Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
   mono: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace"
 };
+
+const markdownEscapeHighlight = syntaxHighlighting(
+  HighlightStyle.define([
+    {
+      tag: tags.escape,
+      color: "var(--ink-1)"
+    }
+  ])
+);
 
 function lineNumberAt(text: string, offset: number) {
   let line = 1;
@@ -658,19 +669,20 @@ export function EditorPane({
   const extensions = useMemo(
     () => {
       const nextExtensions = [
-      markdown(),
-      proseEnterExtension(),
-      EditorView.lineWrapping,
-      editorTheme,
-      EditorView.updateListener.of(reportActiveSelection),
-      visualMarkdown({
-        documentPath: file?.path ?? "",
-        blockedLineRanges,
-        initialEditorFocused: editorView?.hasFocus ?? false,
-        labels: labels.visualMarkdown,
-        onOpenLink
-      })
-    ];
+        markdown(),
+        markdownEscapeHighlight,
+        proseEnterExtension(),
+        EditorView.lineWrapping,
+        editorTheme,
+        EditorView.updateListener.of(reportActiveSelection),
+        visualMarkdown({
+          documentPath: file?.path ?? "",
+          blockedLineRanges,
+          initialEditorFocused: editorView?.hasFocus ?? false,
+          labels: labels.visualMarkdown,
+          onOpenLink
+        })
+      ];
 
       if (file && selectionComments) {
         nextExtensions.push(

@@ -49,6 +49,12 @@ function displayMathDecorations(state: EditorState) {
   );
 }
 
+function hasHiddenHeadingMarker(state: EditorState) {
+  return collectDecorations(state).some(
+    (entry) => entry.from === 0 && entry.to === 2 && Boolean((entry.value.spec as { widget?: unknown }).widget)
+  );
+}
+
 describe("visual markdown display math", () => {
   it("keeps opening heading syntax hidden until the editor is focused", () => {
     const decorations = collectDecorations(createState("# TeachView Legal", 0, undefined, false));
@@ -66,6 +72,42 @@ describe("visual markdown display math", () => {
         })
       ])
     );
+  });
+
+  it("keeps selected heading source visible when focus moves to overlay chrome", () => {
+    const doc = "# TeachView Legal";
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: 0, head: doc.length },
+      extensions: [
+        visualMarkdown({
+          documentPath: "doc.md",
+          initialEditorFocused: false,
+          labels,
+          onOpenLink: () => {}
+        })
+      ]
+    });
+
+    expect(hasHiddenHeadingMarker(state)).toBe(false);
+  });
+
+  it("keeps empty-caret heading source visible after prior editor interaction", () => {
+    const state = EditorState.create({
+      doc: "# TeachView Legal",
+      selection: { anchor: 0 },
+      extensions: [
+        visualMarkdown({
+          documentPath: "doc.md",
+          initialEditorFocused: false,
+          initialEditorInteracted: true,
+          labels,
+          onOpenLink: () => {}
+        })
+      ]
+    });
+
+    expect(hasHiddenHeadingMarker(state)).toBe(false);
   });
 
   it("renders an inactive fenced block as a block widget (the legal, state-derived source)", () => {

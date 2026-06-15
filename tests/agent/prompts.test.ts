@@ -113,6 +113,20 @@ describe("document-tool policy", () => {
   });
 });
 
+describe("Markdown format guidance", () => {
+  const spreadsheetFormulaInstruction =
+    "When writing Markdown that contains spreadsheet formulas such as Excel or Google Sheets formulas";
+
+  it("tells all provider profiles to write spreadsheet formulas as code, not escaped math-like text", () => {
+    expect(instructions(providerRequest())).toContain(spreadsheetFormulaInstruction);
+    expect(instructions(providerRequest({ runProfile: "remote_read_only" }))).toContain(spreadsheetFormulaInstruction);
+    expect(codexDeveloperInstructions(providerRequest(), true)).toContain(spreadsheetFormulaInstruction);
+    expect(codexDeveloperInstructions(providerRequest({ runProfile: "remote_read_only" }), true)).toContain(
+      spreadsheetFormulaInstruction
+    );
+  });
+});
+
 describe("anchored edit instructions", () => {
   it("teaches the local OpenAI path the SEARCH/REPLACE contract without a diff block", () => {
     const local = instructions(providerRequest());

@@ -1,5 +1,5 @@
 import { EditorState, Text } from "@codemirror/state";
-import { EditorView, type DecorationSet } from "@codemirror/view";
+import { EditorView, type Decoration, type DecorationSet } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
 import { collectInlineMarkdownRanges } from "../../src/editor/visualMarkdown/inline";
 import { visualMarkdown } from "../../src/editor/visualMarkdown";
@@ -19,6 +19,22 @@ function collectDecorationSpecs(state: EditorState) {
   }
 
   return specs;
+}
+
+function collectDecorations(state: EditorState) {
+  const decorations: Array<{ from: number; to: number; value: Decoration }> = [];
+
+  for (const decorationSet of state.facet(EditorView.decorations)) {
+    if (typeof decorationSet === "function") {
+      continue;
+    }
+
+    (decorationSet as DecorationSet).between(0, state.doc.length, (from, to, value) => {
+      decorations.push({ from, to, value });
+    });
+  }
+
+  return decorations;
 }
 
 describe("visual Markdown inline ranges", () => {
@@ -89,6 +105,51 @@ describe("visual Markdown inline ranges", () => {
       toLine: 4,
       tex: "x^2 + y^2"
     });
+  });
+
+  it("treats backslash-escaped Markdown punctuation as literal text", () => {
+    const ranges = collectInlineMarkdownRanges("\\*not emphasis\\* and 2\\. section and \\=PROMEDIO(B1:E1)");
+
+    expect(ranges.strong).toEqual([]);
+    expect(ranges.emphasis).toEqual([]);
+    expect(ranges.escapes).toEqual([
+      { from: 0, to: 2, markerFrom: 0, markerTo: 1, contentFrom: 1, contentTo: 2 },
+      { from: 14, to: 16, markerFrom: 14, markerTo: 15, contentFrom: 15, contentTo: 16 },
+      { from: 22, to: 24, markerFrom: 22, markerTo: 23, contentFrom: 23, contentTo: 24 },
+      { from: 37, to: 39, markerFrom: 37, markerTo: 38, contentFrom: 38, contentTo: 39 }
+    ]);
+  });
+
+  it("hides Markdown escape backslashes on inactive lines", () => {
+    const doc = "Intro\n\\=PROMEDIO(B1:E1)\n2\\. Funciones";
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: 0 },
+      extensions: [
+        visualMarkdown({
+          documentPath: "/ws/doc.md",
+          initialEditorFocused: true,
+          labels: {
+            markdownImage: "image",
+            youtubeVideo: "video",
+            markTaskIncomplete: "incomplete",
+            markTaskComplete: "complete"
+          },
+          onOpenLink: () => undefined
+        })
+      ]
+    });
+
+    const formulaBackslash = doc.indexOf("\\=PROMEDIO");
+    const sectionBackslash = doc.indexOf("\\. Funciones");
+    const hiddenBackslashes = collectDecorations(state).filter(
+      (entry) =>
+        Boolean((entry.value.spec as { widget?: unknown }).widget) &&
+        ((entry.from === formulaBackslash && entry.to === formulaBackslash + 1) ||
+          (entry.from === sectionBackslash && entry.to === sectionBackslash + 1))
+    );
+
+    expect(hiddenBackslashes).toHaveLength(2);
   });
 
   it("keeps Markdown source visible on the active line when initialized focused", () => {

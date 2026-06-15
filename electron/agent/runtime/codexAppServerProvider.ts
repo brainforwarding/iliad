@@ -77,6 +77,8 @@ const activeWorkspaceRuns = new Set<string>();
 const activeCodexTurnKeys = new Set<string>();
 const SECRET_VALUE_PATTERN = /\b(?:sk-[A-Za-z0-9_-]{8,}|gh[opsu]_[A-Za-z0-9_]{8,}|Bearer\s+[A-Za-z0-9._-]{8,})\b/i;
 const ABSOLUTE_PATH_PATTERN = /(?:\/Users\/|\/private\/|\/var\/folders\/|\/tmp\/|[A-Za-z]:\\)[^\s"'`<>)]*/;
+const SPREADSHEET_FORMULA_MARKDOWN_INSTRUCTION =
+  "When writing Markdown that contains spreadsheet formulas such as Excel or Google Sheets formulas, wrap each formula in inline code or a fenced code block; do not write spreadsheet formulas as LaTeX math and do not backslash-escape formula punctuation.";
 
 export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
   readonly metadata = CODEX_APP_SERVER_PROVIDER_METADATA;
@@ -1177,6 +1179,7 @@ export function codexDeveloperInstructions(request: AgentProviderRunRequest, has
       "Do not edit files, create files, delete files, rename files, run commands, or propose document changes.",
       "Answer questions using only supplied context and safe Iliad Markdown document tools.",
       "Include the relative Markdown source paths you used in the answer text.",
+      SPREADSHEET_FORMULA_MARKDOWN_INSTRUCTION,
       ...documentToolPolicy,
       `Respond in ${request.language === "es" ? "Spanish" : "English"}.`
     ].join("\n");
@@ -1201,6 +1204,7 @@ export function codexDeveloperInstructions(request: AgentProviderRunRequest, has
     "Prefer targeted Markdown edits over broad rewrites.",
     "Only create or edit visible Markdown files in the workspace.",
     "Do not delete or rename files in this version.",
+    SPREADSHEET_FORMULA_MARKDOWN_INSTRUCTION,
     ...documentToolPolicy,
     `Respond in ${request.language === "es" ? "Spanish" : "English"}.`
   ].join("\n");

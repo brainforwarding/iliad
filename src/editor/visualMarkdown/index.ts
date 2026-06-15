@@ -12,6 +12,7 @@ import {
 } from "./blocks";
 import {
   addEmphasisDecorations,
+  addEscapeDecorations,
   addImageDecorations,
   addInlineMathDecorations,
   addInlineCodeDecorations,
@@ -26,6 +27,7 @@ export interface VisualMarkdownOptions {
   documentPath: string;
   blockedLineRanges?: Array<{ from: number; to: number }>;
   initialEditorFocused?: boolean;
+  initialEditorInteracted?: boolean;
   labels: {
     markdownImage: string;
     youtubeVideo: string;
@@ -50,12 +52,35 @@ const editorFocusedField = StateField.define<boolean>({
     return value;
   }
 });
+const editorInteractedField = StateField.define<boolean>({
+  create() {
+    return false;
+  },
+  update(value, transaction) {
+    if (value) {
+      return true;
+    }
+
+    for (const effect of transaction.effects) {
+      if (effect.is(editorFocusedEffect) && effect.value) {
+        return true;
+      }
+    }
+
+    return value;
+  }
+});
 
 function lineIsBlocked(lineNumber: number, ranges: Array<{ from: number; to: number }> | undefined) {
   return ranges?.some((range) => lineNumber >= range.from && lineNumber <= range.to) ?? false;
 }
 
-function buildDecorations(state: EditorState, options: VisualMarkdownOptions, editorFocused: boolean): DecorationSet {
+function buildDecorations(
+  state: EditorState,
+  options: VisualMarkdownOptions,
+  editorFocused: boolean,
+  editorInteracted: boolean
+): DecorationSet {
   const ranges: Range<Decoration>[] = [];
   const document = state.doc;
 
@@ -93,7 +118,7 @@ function buildDecorations(state: EditorState, options: VisualMarkdownOptions, ed
       continue;
     }
 
-    const active = isActiveLine(state, lineNumber, editorFocused);
+    const active = isActiveLine(state, lineNumber, editorFocused, editorInteracted);
     const reviewBlocked = lineIsBlocked(lineNumber, options.blockedLineRanges);
     const displayMathBlock = displayMathBlocks.get(lineNumber);
     const insideDisplayMathBlock = displayMathLineBlocks.get(lineNumber);
@@ -101,7 +126,9 @@ function buildDecorations(state: EditorState, options: VisualMarkdownOptions, ed
     const blockedRanges: BlockedRange[] = [];
     const setextHeadingLevel = setextHeadings.contentLineLevels.get(lineNumber);
     const setextMarkerLevel = setextHeadings.markerLineLevels.get(lineNumber);
-    const setextContentActive = Boolean(setextMarkerLevel && isActiveLine(state, lineNumber - 1, editorFocused));
+    const setextContentActive = Boolean(
+      setextMarkerLevel && isActiveLine(state, lineNumber - 1, editorFocused, editorInteracted)
+    );
 
     const headingMatch = addBlockLineDecorations(ranges, line.from, text);
 
@@ -113,7 +140,11 @@ function buildDecorations(state: EditorState, options: VisualMarkdownOptions, ed
       const displayMathBlocked = Array.from(
         { length: displayMathBlock.toLine - displayMathBlock.fromLine + 1 },
         (_, index) => displayMathBlock.fromLine + index
-      ).some((mathLineNumber) => isActiveLine(state, mathLineNumber, editorFocused) || lineIsBlocked(mathLineNumber, options.blockedLineRanges));
+      ).some(
+        (mathLineNumber) =>
+          isActiveLine(state, mathLineNumber, editorFocused, editorInteracted) ||
+          lineIsBlocked(mathLineNumber, options.blockedLineRanges)
+      );
 
       if (!displayMathBlocked) {
         ranges.push(Decoration.line({ class: "cm-md-display-math-line" }).range(line.from));
@@ -163,18 +194,24 @@ function buildDecorations(state: EditorState, options: VisualMarkdownOptions, ed
       addStrongDecorations(ranges, line.from, text, blockedRanges);
       addEmphasisDecorations(ranges, line.from, text, blockedRanges);
       addInlineCodeDecorations(ranges, line.from, text, blockedRanges);
-      addInlineMathDecorations(ranges, state, line.from, text, blockedRanges, editorFocused);
+      addInlineMathDecorations(ranges, state, line.from, text, blockedRanges, editorFocused, editorInteracted);
+      addEscapeDecorations(ranges, line.from, text, blockedRanges);
     }
 
-    addLinkDecorations(ranges, state, line.from, text, blockedRanges, options.onOpenLink, editorFocused);
+    addLinkDecorations(ranges, state, line.from, text, blockedRanges, options.onOpenLink, editorFocused, editorInteracted);
   }
 
   return Decoration.set(ranges, true);
 }
 
-function safeBuildDecorations(state: EditorState, options: VisualMarkdownOptions, editorFocused: boolean): DecorationSet {
+function safeBuildDecorations(
+  state: EditorState,
+  options: VisualMarkdownOptions,
+  editorFocused: boolean,
+  editorInteracted: boolean
+): DecorationSet {
   try {
-    return buildDecorations(state, options, editorFocused);
+    return buildDecorations(state, options, editorFocused, editorInteracted);
   } catch (error) {
     console.warn("Visual Markdown decorations disabled for this update.", error);
     return Decoration.none;
@@ -185,12 +222,15 @@ export function visualMarkdown(options: VisualMarkdownOptions) {
   // State-derived decoration source (not a ViewPlugin): this is the only legal
   // place to emit block decorations such as the display-math widget. Recomputes
   // on document and selection changes.
-  const focusField = options.initialEditorFocused
-    ? editorFocusedField.init(() => true)
-    : editorFocusedField;
+  const focusField = options.initialEditorFocused ? editorFocusedField.init(() => true) : editorFocusedField;
+  const interactedField =
+    options.initialEditorFocused || options.initialEditorInteracted
+      ? editorInteractedField.init(() => true)
+      : editorInteractedField;
 
-  const decorations = EditorView.decorations.compute(["doc", "selection", editorFocusedField], (state) =>
-    safeBuildDecorations(state, options, state.field(editorFocusedField))
+  const decorations = EditorView.decorations.compute(
+    ["doc", "selection", editorFocusedField, editorInteractedField],
+    (state) => safeBuildDecorations(state, options, state.field(editorFocusedField), state.field(editorInteractedField))
   );
 
   const linkHandler = EditorView.domEventHandlers({
@@ -222,6 +262,7 @@ export function visualMarkdown(options: VisualMarkdownOptions) {
 
   return [
     focusField,
+    interactedField,
     EditorView.focusChangeEffect.of((_state, focusing) => editorFocusedEffect.of(focusing)),
     decorations,
     linkHandler

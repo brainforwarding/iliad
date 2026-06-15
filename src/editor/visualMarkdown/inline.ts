@@ -33,12 +33,22 @@ export interface InlineLinkRange {
 
 export interface InlineStyleRange extends InlineCodeRange {}
 
+export interface InlineEscapeRange {
+  from: number;
+  to: number;
+  markerFrom: number;
+  markerTo: number;
+  contentFrom: number;
+  contentTo: number;
+}
+
 export interface InlineMarkdownRanges {
   code: InlineCodeRange[];
   math: InlineMathRange[];
   links: InlineLinkRange[];
   strong: InlineStyleRange[];
   emphasis: InlineStyleRange[];
+  escapes: InlineEscapeRange[];
 }
 
 function assetUrlFor(documentPath: string, markdownPath: string) {
@@ -53,6 +63,48 @@ function assetUrlFor(documentPath: string, markdownPath: string) {
 
 function overlapsRange(ranges: Array<{ from: number; to: number }>, from: number, to: number) {
   return ranges.some((range) => from < range.to && to > range.from);
+}
+
+function backslashIsUnescaped(text: string, index: number) {
+  let count = 0;
+  let cursor = index - 1;
+
+  while (cursor >= 0 && text[cursor] === "\\") {
+    count += 1;
+    cursor -= 1;
+  }
+
+  return count % 2 === 0;
+}
+
+function isEscapableMarkdownPunctuation(character: string | undefined) {
+  return Boolean(character && /^[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]$/.test(character));
+}
+
+function collectEscapedPunctuationRanges(text: string, protectedRanges: Array<{ from: number; to: number }> = []) {
+  const ranges: InlineEscapeRange[] = [];
+
+  for (let index = 0; index < text.length - 1; index += 1) {
+    if (
+      text[index] !== "\\" ||
+      !backslashIsUnescaped(text, index) ||
+      !isEscapableMarkdownPunctuation(text[index + 1]) ||
+      overlapsRange(protectedRanges, index, index + 2)
+    ) {
+      continue;
+    }
+
+    ranges.push({
+      from: index,
+      to: index + 2,
+      markerFrom: index,
+      markerTo: index + 1,
+      contentFrom: index + 1,
+      contentTo: index + 2
+    });
+  }
+
+  return ranges;
 }
 
 function collectInlineCodeRanges(text: string): InlineCodeRange[] {
@@ -234,6 +286,7 @@ function collectEmphasisRanges(
 
 export function collectInlineMarkdownRanges(text: string): InlineMarkdownRanges {
   const code = collectInlineCodeRanges(text);
+  const escapes = collectEscapedPunctuationRanges(text, code);
   const dollarMath = collectInlineMathRanges(text, code);
   const latexMath: InlineMathRange[] = findLatexInlineMath(text, [...code, ...dollarMath]).map((range) => ({
     from: range.from,
@@ -243,7 +296,7 @@ export function collectInlineMarkdownRanges(text: string): InlineMarkdownRanges 
     tex: range.tex
   }));
   const math = [...dollarMath, ...latexMath].sort((a, b) => a.from - b.from);
-  const hardBlockers = [...code, ...math];
+  const hardBlockers = [...code, ...math, ...escapes];
   const links = collectLinkRanges(text, hardBlockers);
   const strong = collectStrongRanges(text, hardBlockers);
   const emphasis = collectEmphasisRanges(text, hardBlockers, strong);
@@ -253,8 +306,27 @@ export function collectInlineMarkdownRanges(text: string): InlineMarkdownRanges 
     math,
     links,
     strong,
-    emphasis
+    emphasis,
+    escapes
   };
+}
+
+export function addEscapeDecorations(
+  ranges: Range<Decoration>[],
+  lineFrom: number,
+  text: string,
+  blockedRanges: BlockedRange[]
+) {
+  for (const escapeRange of collectInlineMarkdownRanges(text).escapes) {
+    const markerFrom = lineFrom + escapeRange.markerFrom;
+    const markerTo = lineFrom + escapeRange.markerTo;
+
+    if (rangeOverlapsBlocked(blockedRanges, markerFrom, markerTo)) {
+      continue;
+    }
+
+    ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(markerFrom, markerTo));
+  }
 }
 
 export function addImageDecorations(
@@ -357,13 +429,17 @@ export function addInlineMathDecorations(
   lineFrom: number,
   text: string,
   blockedRanges: BlockedRange[],
-  editorFocused = true
+  editorFocused = true,
+  editorInteracted = editorFocused
 ) {
   for (const mathRange of collectInlineMarkdownRanges(text).math) {
     const from = lineFrom + mathRange.from;
     const to = lineFrom + mathRange.to;
 
-    if (rangeOverlapsBlocked(blockedRanges, from, to) || selectionIntersectsRange(state, from, to, editorFocused)) {
+    if (
+      rangeOverlapsBlocked(blockedRanges, from, to) ||
+      selectionIntersectsRange(state, from, to, editorFocused, editorInteracted)
+    ) {
       continue;
     }
 
@@ -383,7 +459,8 @@ export function addLinkDecorations(
   text: string,
   blockedRanges: BlockedRange[],
   _onOpenLink: (href: string) => void | Promise<void>,
-  editorFocused = true
+  editorFocused = true,
+  editorInteracted = editorFocused
 ) {
   for (const linkRange of collectInlineMarkdownRanges(text).links) {
     const from = lineFrom + linkRange.from;
@@ -401,7 +478,7 @@ export function addLinkDecorations(
       }
     }
 
-    if (selectionIntersectsRange(state, from, to, editorFocused)) {
+    if (selectionIntersectsRange(state, from, to, editorFocused, editorInteracted)) {
       continue;
     }
 
