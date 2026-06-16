@@ -463,6 +463,14 @@
   min-height: 0;
   overflow: auto;
   padding: 4px 8px 18px;
+  border-radius: var(--radius-control);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px transparent;
+}
+
+.tree-scroll.is-root-drop-target {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-wash);
 }
 
 .tree-item {
@@ -685,38 +693,6 @@
 .tree-rename-input:focus {
   border-color: var(--accent-wash);
   background: var(--editor);
-}
-
-.tree-root-target {
-  display: flex;
-  min-height: 38px;
-  align-items: center;
-  margin-top: 4px;
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--muted-3);
-  cursor: pointer;
-  font-size: var(--text-sm);
-}
-
-.tree-root-target:hover,
-.tree-root-target:focus-visible {
-  background: var(--paper);
-  outline: none;
-}
-
-.tree-root-target.is-selected {
-  border-color: var(--row-wash);
-  background: var(--hover-wash);
-  color: var(--ink-3);
-}
-
-.tree-root-target.is-drop-target {
-  border-color: var(--accent-wash);
-  background: var(--accent-soft);
-  color: var(--ink-3);
 }
 
 .empty-tree {

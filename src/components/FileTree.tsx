@@ -11,7 +11,7 @@ import {
   Search,
   X
 } from "lucide-react";
-import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, ReactNode, RefObject } from "react";
+import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode, RefObject } from "react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 import { FileTreeContentResults } from "./FileTreeContentResults";
@@ -110,7 +110,6 @@ interface FileTreeLabels {
   recent: string;
   noFiles: string;
   workspaceRoot: string;
-  selectWorkspaceRoot: string;
   fileTreeMoveStarted: (path: string) => string;
   fileTreeMoveTarget: (path: string) => string;
   fileTreeMoveRootTarget: string;
@@ -913,6 +912,37 @@ function isEditableTarget(target: EventTarget | null) {
 
   const tagName = target.tagName.toLowerCase();
   return tagName === "input" || tagName === "textarea" || tagName === "select" || target.isContentEditable;
+}
+
+function isTreeBackgroundTarget(target: EventTarget | null, currentTarget: HTMLElement) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (target === currentTarget) {
+    return true;
+  }
+
+  if (!currentTarget.contains(target)) {
+    return false;
+  }
+
+  return !target.closest(
+    [
+      ".tree-item",
+      ".content-search-row",
+      ".content-search-preview-row",
+      ".content-search-more-row",
+      ".tree-rename-form",
+      "button",
+      "input",
+      "textarea",
+      "select",
+      "[role='button']",
+      "[role='menu']",
+      "[role='menuitem']"
+    ].join(",")
+  );
 }
 
 function isFileTreeSearchShortcut(event: KeyboardEvent<HTMLElement>) {
@@ -2047,6 +2077,51 @@ export function FileTree({
       return next;
     });
   };
+  const rootDropTargetKey = moveDropTargetKey({ kind: "root" });
+  const treeScrollClassName = [
+    "tree-scroll",
+    moveDropTargetKeyState === rootDropTargetKey ? "is-root-drop-target" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const handleTreeBackgroundClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (searchOpen || !isTreeBackgroundTarget(event.target, event.currentTarget)) {
+      return;
+    }
+
+    onSelectWorkspaceRoot();
+  };
+
+  const handleTreeBackgroundDragOver = (event: DragEvent<HTMLDivElement>) => {
+    const isMoveDrag = Array.from(event.dataTransfer.types).includes(fileTreeMoveDragMimeType);
+
+    if (searchOpen) {
+      if (isMoveDrag) {
+        clearDragExpandTimer();
+        setMoveDropTargetKeyState(null);
+      }
+      return;
+    }
+
+    if (isTreeBackgroundTarget(event.target, event.currentTarget)) {
+      handleMoveDragOver({ kind: "root" }, event);
+      return;
+    }
+
+    if (isMoveDrag) {
+      clearDragExpandTimer();
+      setMoveDropTargetKeyState(null);
+    }
+  };
+
+  const handleTreeBackgroundDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (searchOpen || !isTreeBackgroundTarget(event.target, event.currentTarget)) {
+      return;
+    }
+
+    handleMoveDrop({ kind: "root" }, event);
+  };
 
   return (
     <aside ref={sidebarRef} className={`sidebar${searchOpen ? " has-file-tree-search" : ""}`} onKeyDown={handleSidebarKeyDown}>
@@ -2139,25 +2214,11 @@ export function FileTree({
 
       <div
         id={treeListId}
-        className="tree-scroll"
-        onClick={(event) => {
-          if (event.target === event.currentTarget) {
-            onSelectWorkspaceRoot();
-          }
-        }}
-        onDragOver={(event) => {
-          if (event.target === event.currentTarget) {
-            handleMoveDragOver({ kind: "root" }, event);
-          } else if (Array.from(event.dataTransfer.types).includes(fileTreeMoveDragMimeType)) {
-            clearDragExpandTimer();
-            setMoveDropTargetKeyState(null);
-          }
-        }}
-        onDrop={(event) => {
-          if (event.target === event.currentTarget) {
-            handleMoveDrop({ kind: "root" }, event);
-          }
-        }}
+        className={treeScrollClassName}
+        onClick={handleTreeBackgroundClick}
+        onDragOver={handleTreeBackgroundDragOver}
+        onDragLeave={(event) => handleMoveDragLeave(rootDropTargetKey, event)}
+        onDrop={handleTreeBackgroundDrop}
         onScroll={() => hidePathPeek()}
       >
         {showContentResults ? (
@@ -2222,32 +2283,6 @@ export function FileTree({
             {hasNameSearchQuery && searchFilter ? labels.fileTreeSearchNoResults : labels.noFiles}
           </div>
         )}
-        {!contentHasQuery ? (
-          <div
-            className={[
-              "tree-root-target",
-              selectedPath === workspace.path ? "is-selected" : "",
-              moveDropTargetKeyState === moveDropTargetKey({ kind: "root" }) ? "is-drop-target" : ""
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            role="button"
-            tabIndex={0}
-            aria-label={labels.selectWorkspaceRoot}
-            onClick={onSelectWorkspaceRoot}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                onSelectWorkspaceRoot();
-              }
-            }}
-            onDragOver={(event) => handleMoveDragOver({ kind: "root" }, event)}
-            onDragLeave={(event) => handleMoveDragLeave(moveDropTargetKey({ kind: "root" }), event)}
-            onDrop={(event) => handleMoveDrop({ kind: "root" }, event)}
-          >
-            <span>{labels.workspaceRoot}</span>
-          </div>
-        ) : null}
       </div>
       <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {moveStatusText}

@@ -1269,9 +1269,7 @@ export default function App() {
               </button>
             </div>
           ) : (
-            <div className="topbar-brand" aria-label={strings.appName}>
-              {strings.appName}
-            </div>
+            <div className="topbar-document-slot" aria-hidden="true" />
           )}
 
           <div className="topbar-actions">
@@ -1387,7 +1385,6 @@ export default function App() {
               onSelectNode={(node) => setSelectedTreePath(node.path)}
               onSelectWorkspaceRoot={() => {
                 setSelectedTreePath(workspace.path);
-                setNotice(strings.sidebar.workspaceRootSelected);
               }}
               onMoveNode={moveNodeWithNavigation}
               onShowContextMenu={(node, position) => setTreeContextMenu({ node, ...position })}

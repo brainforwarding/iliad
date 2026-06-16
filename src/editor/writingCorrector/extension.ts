@@ -1,8 +1,7 @@
 import { Prec } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
-import { detectLocalWritingIssues, type WritingIssue } from "./issues";
+import type { WritingIssue } from "./issues";
 import { rangeIntersectsAny, wordRangeAt } from "../writingAssistContext";
-import type { BlockedLineRange } from "../writingAssistContext";
 
 export interface WritingCorrectorLabels {
   openActions: string;
@@ -10,10 +9,7 @@ export interface WritingCorrectorLabels {
 
 export interface WritingCorrectorExtensionOptions {
   enabled: boolean;
-  language: "en" | "es";
-  blockedLineRanges?: readonly BlockedLineRange[];
-  ignoredIssueKeys?: ReadonlySet<string>;
-  customWords?: ReadonlySet<string>;
+  issues?: readonly WritingIssue[];
   onOpenIssue?: (issue: WritingIssue, view: EditorView) => void;
 }
 
@@ -51,7 +47,7 @@ export function writingCorrectorExtension(options: WritingCorrectorExtensionOpti
       private composing = false;
 
       constructor(private readonly view: EditorView) {
-        this.issues = this.collectIssues(view);
+        this.issues = this.visibleIssues();
         this.decorations = buildDecorations(this.issues, this.currentWordRange(view));
       }
 
@@ -60,9 +56,7 @@ export function writingCorrectorExtension(options: WritingCorrectorExtensionOpti
           this.composing = true;
         }
 
-        if (update.docChanged) {
-          this.issues = this.collectIssues(update.view);
-        }
+        this.issues = update.docChanged ? [] : this.visibleIssues();
 
         if (update.docChanged || update.selectionSet) {
           this.decorations = buildDecorations(this.issues, this.currentWordRange(update.view));
@@ -75,7 +69,7 @@ export function writingCorrectorExtension(options: WritingCorrectorExtensionOpti
         }
 
         this.composing = composing;
-        this.issues = this.collectIssues(this.view);
+        this.issues = this.visibleIssues();
         this.decorations = buildDecorations(this.issues, this.currentWordRange(this.view));
         this.view.dispatch({});
       }
@@ -102,18 +96,12 @@ export function writingCorrectorExtension(options: WritingCorrectorExtensionOpti
         return this.issues.find((issue) => position >= issue.from && position <= issue.to) ?? null;
       }
 
-      private collectIssues(view: EditorView) {
+      private visibleIssues() {
         if (!options.enabled || this.composing) {
           return [];
         }
 
-        return detectLocalWritingIssues(view.state.doc.toString(), {
-          language: options.language,
-          cursor: null,
-          blockedLineRanges: options.blockedLineRanges,
-          ignoredIssueKeys: options.ignoredIssueKeys,
-          customWords: options.customWords
-        });
+        return [...(options.issues ?? [])];
       }
 
       private currentWordRange(view: EditorView) {

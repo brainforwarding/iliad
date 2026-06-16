@@ -48,19 +48,9 @@
   gap: 4px;
 }
 
-.topbar-brand {
-  align-self: center;
-  overflow: hidden;
-  max-width: min(240px, 32vw);
-  padding: 0 10px;
-  color: var(--ink-2);
-  font-family: var(--font-serif);
-  font-size: 1rem;
-  font-style: italic;
-  font-weight: 600;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.topbar-document-slot {
+  align-self: stretch;
+  min-width: 0;
 }
 
 .document-tab {

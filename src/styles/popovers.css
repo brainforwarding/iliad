@@ -308,14 +308,6 @@
   text-transform: uppercase;
 }
 
-/* Build identity footer: quiet metadata, not a control. */
-.workspace-version {
-  padding: 4px 8px 5px;
-  color: var(--muted-3);
-  font-size: var(--text-xs);
-  user-select: text;
-}
-
 .workspace-recent {
   display: grid;
   gap: 1px;

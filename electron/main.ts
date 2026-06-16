@@ -57,11 +57,24 @@ protocol.registerSchemesAsPrivileged([
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
+function configureAboutPanel() {
+  if (process.platform !== "darwin") {
+    return;
+  }
+
+  app.setAboutPanelOptions({
+    applicationName: app.name,
+    applicationVersion: app.getVersion()
+  });
+}
+
 function installApplicationMenu() {
   if (process.platform !== "darwin") {
     Menu.setApplicationMenu(null);
     return;
   }
+
+  configureAboutPanel();
 
   const template: MenuItemConstructorOptions[] = [
     {

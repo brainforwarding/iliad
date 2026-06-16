@@ -24,6 +24,7 @@ import {
 import { visualMarkdown } from "../editor/visualMarkdown";
 import { proseEnterExtension } from "../editor/proseEnter";
 import { writingCorrectorExtension } from "../editor/writingCorrector/extension";
+import { detectWritingIssues } from "../editor/writingCorrector/harper";
 import { type WritingIssue, writingIssueFingerprint, writingIssueKey } from "../editor/writingCorrector/issues";
 import {
   resolveContentSearchReveal,
@@ -271,6 +272,7 @@ export function EditorPane({
   } | null>(null);
   const [autocompleteStatus, setAutocompleteStatus] = useState<IdeaAutocompleteStatus>({ state: "idle" });
   const [autocompleteStatusAnchor, setAutocompleteStatusAnchor] = useState<{ left: number; top: number } | null>(null);
+  const [writingIssues, setWritingIssues] = useState<WritingIssue[]>([]);
   const [ignoredWritingIssueKeys, setIgnoredWritingIssueKeys] = useState<Set<string>>(() => new Set());
   const [customCorrectorWords, setCustomCorrectorWords] = useState<Set<string>>(() => new Set());
   const editorSurfaceRef = useRef<HTMLDivElement | null>(null);
@@ -357,6 +359,7 @@ export function EditorPane({
     setTightenReview(null);
     setProvisionalTightenRange(null);
     setActiveWritingIssue(null);
+    setWritingIssues([]);
     setIgnoredWritingIssueKeys(new Set());
     setCustomCorrectorWords(new Set());
     setAutocompleteStatus({ state: "idle" });
@@ -440,6 +443,34 @@ export function EditorPane({
     return () => window.cancelAnimationFrame(frame);
   }, [activeWritingIssue]);
 
+  useEffect(() => {
+    if (!activeWritingIssue) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+
+      if (!(target instanceof Node)) {
+        return;
+      }
+
+      if (writingIssuePopoverRef.current?.contains(target)) {
+        return;
+      }
+
+      if (target instanceof Element && target.closest(".cm-writing-corrector-mark")) {
+        return;
+      }
+
+      setActiveWritingIssue(null);
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+
+    return () => window.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [activeWritingIssue]);
+
   const reportActiveSelection = useCallback((update: ViewUpdate) => {
     const selection = update.state.selection.main;
     const next =
@@ -485,6 +516,53 @@ export function EditorPane({
     () => (review?.mode === "edit_file" ? editReviewDisplay?.changedLineRanges : tightenChangedLineRanges),
     [editReviewDisplay?.changedLineRanges, review?.mode, tightenChangedLineRanges]
   );
+
+  useEffect(() => {
+    if (!file || !writingAssists?.correctorEnabled || writingAssists.language !== "en" || review || readOnly) {
+      setWritingIssues((currentIssues) => (currentIssues.length === 0 ? currentIssues : []));
+      return;
+    }
+
+    let cancelled = false;
+    const documentText = value;
+    const timer = window.setTimeout(() => {
+      void detectWritingIssues(documentText, {
+        language: writingAssists.language,
+        cursor: null,
+        blockedLineRanges,
+        ignoredIssueKeys: ignoredWritingIssueKeys,
+        customWords: customCorrectorWords
+      })
+        .then((issues) => {
+          if (!cancelled) {
+            setWritingIssues(issues);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setWritingIssues([]);
+          }
+        });
+    }, 700);
+
+    setWritingIssues((currentIssues) => (currentIssues.length === 0 ? currentIssues : []));
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    blockedLineRanges,
+    customCorrectorWords,
+    file?.path,
+    ignoredWritingIssueKeys,
+    readOnly,
+    review,
+    value,
+    writingAssists?.correctorEnabled,
+    writingAssists?.language
+  ]);
+
   const openWritingIssue = useCallback((issue: WritingIssue, view: EditorView) => {
     const coords = view.coordsAtPos(issue.from);
     const surface = editorSurfaceRef.current;
@@ -709,10 +787,7 @@ export function EditorPane({
         nextExtensions.push(
           ...writingCorrectorExtension({
             enabled: true,
-            language: writingAssists.language,
-            blockedLineRanges,
-            ignoredIssueKeys: ignoredWritingIssueKeys,
-            customWords: customCorrectorWords,
+            issues: writingIssues,
             onOpenIssue: openWritingIssue
           })
         );
@@ -835,6 +910,7 @@ export function EditorPane({
       selectionComments,
       tightenReviewHunk,
       writingAssists,
+      writingIssues,
       customCorrectorWords,
       readOnly
     ]
@@ -969,11 +1045,9 @@ export function EditorPane({
               }
             }}
           >
-            <p className="writing-corrector-message">
-              {activeWritingIssue.issue.suggestions.length > 0
-                ? writingAssists.labels.corrector.suggestion
-                : activeWritingIssue.issue.message}
-            </p>
+            {activeWritingIssue.issue.suggestions.length === 0 ? (
+              <p className="writing-corrector-message">{activeWritingIssue.issue.message}</p>
+            ) : null}
             <div className="writing-corrector-actions">
               {activeWritingIssue.issue.suggestions.slice(0, 5).map((suggestion) => (
                 <button

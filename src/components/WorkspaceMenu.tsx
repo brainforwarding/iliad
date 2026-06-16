@@ -24,10 +24,6 @@ function shortPath(path: string) {
   return segments.length <= 2 ? path : `…/${segments.slice(-2).join("/")}`;
 }
 
-// Stamped at build/dev-server start (vite.config.ts define), so it identifies
-// the running build — the static package version alone cannot.
-const appBuildLabel = `Iliad ${[__APP_VERSION__, __APP_BUILD_HASH__, __APP_BUILD_DATE__].filter(Boolean).join(" · ")}`;
-
 export function WorkspaceMenu({
   workspace,
   recentWorkspaces,
@@ -134,9 +130,6 @@ export function WorkspaceMenu({
               ))}
             </>
           ) : null}
-
-          <div className="workspace-divider" />
-          <div className="workspace-version">{appBuildLabel}</div>
         </div>
       ) : null}
     </div>
