@@ -9,6 +9,7 @@ import { registerSearchIpc } from "./ipc/search.js";
 import { registerSelectionCommentsIpc } from "./ipc/selectionComments.js";
 import { registerShellIpc } from "./ipc/shell.js";
 import { registerTightenIpc } from "./ipc/tighten.js";
+import { registerUpdatesIpc, updateCheckRequestedChannel } from "./ipc/updates.js";
 import { registerWorkspaceIpc } from "./ipc/workspace.js";
 import { registerWritingCorrectorMemoryIpc } from "./ipc/writingCorrectorMemory.js";
 import { parseLaunchWorkspacePath } from "./launch/argv.js";
@@ -17,6 +18,7 @@ import { AgentService } from "./agent/agentService.js";
 import { AgentChatHistoryStore } from "./agent/chatHistoryStore.js";
 import { RemoteRelayClient } from "./remote/remoteRelayClient.js";
 import { TelegramRemoteService } from "./remote/telegramRemoteService.js";
+import { UpdateService } from "./updates/updateService.js";
 import { installYouTubeEmbedHeaders } from "./window/youtubeEmbedHeaders.js";
 import { IliadWindowManager } from "./window/windowManager.js";
 
@@ -34,6 +36,7 @@ const windowManager = new IliadWindowManager();
 const queuedLaunchRequests: LaunchRequest[] = [];
 let appReady = false;
 let isProcessingLaunchRequests = false;
+let pendingUpdateCheckRequest = false;
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
 app.setName(isDev ? "Iliad MD Dev" : "Iliad MD");
@@ -81,6 +84,15 @@ function installApplicationMenu() {
       label: app.name,
       submenu: [
         { role: "about" },
+        {
+          label: "Check for Updates...",
+          click: () => {
+            if (!windowManager.sendToMostRecentWindow(updateCheckRequestedChannel)) {
+              pendingUpdateCheckRequest = true;
+              windowManager.createIliadWindow();
+            }
+          }
+        },
         { type: "separator" },
         { role: "services" },
         { type: "separator" },
@@ -300,6 +312,14 @@ app.whenReady().then(async () => {
     }
   });
   registerTightenIpc({ service: agentService });
+  registerUpdatesIpc({
+    service: new UpdateService({ currentVersion: app.getVersion() }),
+    consumePendingCheckRequest: () => {
+      const pending = pendingUpdateCheckRequest;
+      pendingUpdateCheckRequest = false;
+      return pending;
+    }
+  });
 
   appReady = true;
   queueOrHandleLaunchRequest({

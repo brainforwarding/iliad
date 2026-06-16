@@ -54,6 +54,19 @@ const api = {
   searchMarkdownContent: (request: MarkdownContentSearchRequest) =>
     ipcRenderer.invoke("file:search-markdown-content", request),
   openUrl: (url: string) => ipcRenderer.invoke("shell:open-url", url),
+  updates: {
+    check: () => ipcRenderer.invoke("updates:check"),
+    consumePendingCheckRequest: () => ipcRenderer.invoke("updates:consume-pending-check-request"),
+    onCheckRequested: (listener: () => void) => {
+      const handler = () => listener();
+
+      ipcRenderer.on("updates:check-requested", handler);
+
+      return () => {
+        ipcRenderer.removeListener("updates:check-requested", handler);
+      };
+    }
+  },
   openExternalFile: (workspaceRoot: string, filePath: string) =>
     ipcRenderer.invoke("file:open-external", workspaceRoot, filePath),
   revealInFinder: (workspaceRoot: string, filePath: string) =>

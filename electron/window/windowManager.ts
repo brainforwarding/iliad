@@ -63,6 +63,17 @@ export class IliadWindowManager {
     return true;
   }
 
+  sendToMostRecentWindow(channel: string, ...args: unknown[]) {
+    const window = this.getMostRecentWindow();
+
+    if (!window) {
+      return false;
+    }
+
+    window.webContents.send(channel, ...args);
+    return true;
+  }
+
   focusWindow(window: BrowserWindow) {
     if (window.isMinimized()) {
       window.restore();

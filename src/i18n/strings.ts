@@ -137,6 +137,16 @@ export const appStrings = {
       autocompleteEnableApiFallback: "Enable API fallback or connect Codex",
       autocompleteUnavailable: "Connect Codex or add an API key"
     },
+    updates: {
+      checkForUpdates: "Check for Updates...",
+      checking: "Checking for updates...",
+      available: (version: string) => `Iliad MD ${version} is available.`,
+      current: (version: string) => `Iliad MD ${version} is up to date.`,
+      checkFailed: "Could not check for updates.",
+      download: "Download",
+      viewRelease: "View Release",
+      dismiss: "Dismiss"
+    },
     editor: {
       emptyTitle: "Pick a file to start",
       emptyNewDocument: "New document",
@@ -648,6 +658,16 @@ export const appStrings = {
       autocompleteApi: "Usando la API de OpenAI",
       autocompleteEnableApiFallback: "Activa el respaldo API o conecta Codex",
       autocompleteUnavailable: "Conecta Codex o agrega una clave API"
+    },
+    updates: {
+      checkForUpdates: "Buscar actualizaciones...",
+      checking: "Buscando actualizaciones...",
+      available: (version: string) => `Iliad MD ${version} está disponible.`,
+      current: (version: string) => `Iliad MD ${version} está actualizado.`,
+      checkFailed: "No se pudo buscar actualizaciones.",
+      download: "Descargar",
+      viewRelease: "Ver versión",
+      dismiss: "Cerrar"
     },
     editor: {
       emptyTitle: "Elige un archivo para empezar",

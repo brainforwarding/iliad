@@ -5,22 +5,6 @@ import { collectInlineMarkdownRanges } from "../../src/editor/visualMarkdown/inl
 import { visualMarkdown } from "../../src/editor/visualMarkdown";
 import { collectDisplayMathBlocks } from "../../src/editor/visualMarkdown/math";
 
-function collectDecorationSpecs(state: EditorState) {
-  const specs: unknown[] = [];
-
-  for (const decorationSet of state.facet(EditorView.decorations)) {
-    if (typeof decorationSet === "function") {
-      continue;
-    }
-
-    (decorationSet as DecorationSet).between(0, state.doc.length, (_from, _to, value) => {
-      specs.push(value.spec);
-    });
-  }
-
-  return specs;
-}
-
 function collectDecorations(state: EditorState) {
   const decorations: Array<{ from: number; to: number; value: Decoration }> = [];
 
@@ -35,6 +19,34 @@ function collectDecorations(state: EditorState) {
   }
 
   return decorations;
+}
+
+function createVisualMarkdownState(doc: string, anchor: number) {
+  return EditorState.create({
+    doc,
+    selection: { anchor },
+    extensions: [
+      visualMarkdown({
+        documentPath: "/ws/doc.md",
+        initialEditorFocused: true,
+        labels: {
+          markdownImage: "image",
+          youtubeVideo: "video",
+          markTaskIncomplete: "incomplete",
+          markTaskComplete: "complete"
+        },
+        onOpenLink: () => undefined
+      })
+    ]
+  });
+}
+
+function classDecorations(state: EditorState, className: string) {
+  return collectDecorations(state).filter((entry) => (entry.value.spec as { class?: string }).class === className);
+}
+
+function widgetDecorations(state: EditorState) {
+  return collectDecorations(state).filter((entry) => Boolean((entry.value.spec as { widget?: unknown }).widget));
 }
 
 describe("visual Markdown inline ranges", () => {
@@ -153,24 +165,33 @@ describe("visual Markdown inline ranges", () => {
   });
 
   it("keeps Markdown source visible on the active line when initialized focused", () => {
-    const state = EditorState.create({
-      doc: "A **bold** statement",
-      selection: { anchor: 4 },
-      extensions: [
-        visualMarkdown({
-          documentPath: "/ws/doc.md",
-          initialEditorFocused: true,
-          labels: {
-            markdownImage: "image",
-            youtubeVideo: "video",
-            markTaskIncomplete: "incomplete",
-            markTaskComplete: "complete"
-          },
-          onOpenLink: () => undefined
-        })
-      ]
-    });
+    const state = createVisualMarkdownState("A **bold** statement", 4);
 
-    expect(collectDecorationSpecs(state).some((spec) => Boolean((spec as { widget?: unknown }).widget))).toBe(false);
+    expect(widgetDecorations(state)).toHaveLength(0);
+    expect(classDecorations(state, "cm-md-strong")).toMatchObject([{ from: 4, to: 8 }]);
+  });
+
+  it("updates active-line emphasis immediately when the closing marker is typed", () => {
+    const initialDoc = "Iliad is built around *that";
+    let state = createVisualMarkdownState(initialDoc, initialDoc.length);
+
+    state = state.update({ changes: { from: initialDoc.length, insert: "*" }, selection: { anchor: initialDoc.length + 1 } }).state;
+
+    const contentFrom = "Iliad is built around *".length;
+    const contentTo = contentFrom + "that".length;
+    expect(classDecorations(state, "cm-md-emphasis")).toMatchObject([{ from: contentFrom, to: contentTo }]);
+    expect(widgetDecorations(state)).toHaveLength(0);
+  });
+
+  it("updates active-line strong styling immediately when the closing marker is typed", () => {
+    const initialDoc = "Iliad is built around **that";
+    let state = createVisualMarkdownState(initialDoc, initialDoc.length);
+
+    state = state.update({ changes: { from: initialDoc.length, insert: "**" }, selection: { anchor: initialDoc.length + 2 } }).state;
+
+    const contentFrom = "Iliad is built around **".length;
+    const contentTo = contentFrom + "that".length;
+    expect(classDecorations(state, "cm-md-strong")).toMatchObject([{ from: contentFrom, to: contentTo }]);
+    expect(widgetDecorations(state)).toHaveLength(0);
   });
 });

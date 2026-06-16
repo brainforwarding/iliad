@@ -362,8 +362,11 @@ export function addStrongDecorations(
   ranges: Range<Decoration>[],
   lineFrom: number,
   text: string,
-  blockedRanges: BlockedRange[]
+  blockedRanges: BlockedRange[],
+  options: { hideSyntax?: boolean } = {}
 ) {
+  const hideSyntax = options.hideSyntax ?? true;
+
   for (const strongRange of collectInlineMarkdownRanges(text).strong) {
     const from = lineFrom + strongRange.from;
     const to = lineFrom + strongRange.to;
@@ -374,9 +377,13 @@ export function addStrongDecorations(
 
     const contentFrom = lineFrom + strongRange.contentFrom;
     const contentTo = lineFrom + strongRange.contentTo;
-    ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(from, contentFrom));
+    if (hideSyntax) {
+      ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(from, contentFrom));
+    }
     ranges.push(Decoration.mark({ class: "cm-md-strong" }).range(contentFrom, contentTo));
-    ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(contentTo, to));
+    if (hideSyntax) {
+      ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(contentTo, to));
+    }
   }
 }
 
@@ -384,8 +391,11 @@ export function addEmphasisDecorations(
   ranges: Range<Decoration>[],
   lineFrom: number,
   text: string,
-  blockedRanges: BlockedRange[]
+  blockedRanges: BlockedRange[],
+  options: { hideSyntax?: boolean } = {}
 ) {
+  const hideSyntax = options.hideSyntax ?? true;
+
   for (const emphasisRange of collectInlineMarkdownRanges(text).emphasis) {
     const markerFrom = lineFrom + emphasisRange.from;
     const to = lineFrom + emphasisRange.to;
@@ -396,9 +406,13 @@ export function addEmphasisDecorations(
 
     const contentFrom = lineFrom + emphasisRange.contentFrom;
     const contentTo = lineFrom + emphasisRange.contentTo;
-    ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(markerFrom, contentFrom));
+    if (hideSyntax) {
+      ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(markerFrom, contentFrom));
+    }
     ranges.push(Decoration.mark({ class: "cm-md-emphasis" }).range(contentFrom, contentTo));
-    ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(contentTo, to));
+    if (hideSyntax) {
+      ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(contentTo, to));
+    }
   }
 }
 
@@ -406,8 +420,11 @@ export function addInlineCodeDecorations(
   ranges: Range<Decoration>[],
   lineFrom: number,
   text: string,
-  blockedRanges: BlockedRange[]
+  blockedRanges: BlockedRange[],
+  options: { hideSyntax?: boolean } = {}
 ) {
+  const hideSyntax = options.hideSyntax ?? true;
+
   for (const codeRange of collectInlineMarkdownRanges(text).code) {
     const from = lineFrom + codeRange.from;
     const to = lineFrom + codeRange.to;
@@ -416,10 +433,14 @@ export function addInlineCodeDecorations(
       continue;
     }
 
-    ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(from, from + 1));
+    if (hideSyntax) {
+      ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(from, from + 1));
+    }
     ranges.push(Decoration.mark({ class: "cm-md-inline-code" }).range(from + 1, to - 1));
-    ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(to - 1, to));
-    addBlockedRange(blockedRanges, from, to);
+    if (hideSyntax) {
+      ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(to - 1, to));
+      addBlockedRange(blockedRanges, from, to);
+    }
   }
 }
 

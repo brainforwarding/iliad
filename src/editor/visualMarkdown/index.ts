@@ -188,7 +188,11 @@ function buildDecorations(
       continue;
     }
 
-    if (!active) {
+    if (active) {
+      addStrongDecorations(ranges, line.from, text, blockedRanges, { hideSyntax: false });
+      addEmphasisDecorations(ranges, line.from, text, blockedRanges, { hideSyntax: false });
+      addInlineCodeDecorations(ranges, line.from, text, blockedRanges, { hideSyntax: false });
+    } else {
       addInactiveBlockSyntaxDecorations(ranges, line.from, text, headingMatch, blockedRanges, options.labels);
       addImageDecorations(ranges, line.from, text, options.documentPath, blockedRanges, options.labels);
       addStrongDecorations(ranges, line.from, text, blockedRanges);

@@ -1,6 +1,6 @@
-import { ChevronDown, FolderOpen } from "lucide-react";
+import { ChevronDown, Download, ExternalLink, FolderOpen, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { WorkspaceInfo } from "../types/iliad";
+import type { UpdateCheckResult, WorkspaceInfo } from "../types/iliad";
 
 interface WorkspaceMenuLabels {
   changeFolder: string;
@@ -8,13 +8,29 @@ interface WorkspaceMenuLabels {
   recent: string;
 }
 
+interface WorkspaceMenuUpdateLabels {
+  checkForUpdates: string;
+  checking: string;
+  available: (version: string) => string;
+  current: (version: string) => string;
+  checkFailed: string;
+  download: string;
+  viewRelease: string;
+}
+
 interface WorkspaceMenuProps {
   workspace: WorkspaceInfo;
   recentWorkspaces: WorkspaceInfo[];
   labels: WorkspaceMenuLabels;
+  updateLabels: WorkspaceMenuUpdateLabels;
+  updateStatus: UpdateCheckResult | null;
+  updateChecking: boolean;
   onOpenFolder: () => void | Promise<void>;
   onOpenRecent: (workspace: WorkspaceInfo) => void | Promise<void>;
   onRevealWorkspace: () => void | Promise<void>;
+  onCheckForUpdates: () => void | Promise<void>;
+  onDownloadUpdate: () => void | Promise<void>;
+  onViewUpdateRelease: () => void | Promise<void>;
 }
 
 // Show the meaningful tail of a path (…/parent/folder) so the current route is
@@ -28,9 +44,15 @@ export function WorkspaceMenu({
   workspace,
   recentWorkspaces,
   labels,
+  updateLabels,
+  updateStatus,
+  updateChecking,
   onOpenFolder,
   onOpenRecent,
-  onRevealWorkspace
+  onRevealWorkspace,
+  onCheckForUpdates,
+  onDownloadUpdate,
+  onViewUpdateRelease
 }: WorkspaceMenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -129,6 +151,48 @@ export function WorkspaceMenu({
                 </button>
               ))}
             </>
+          ) : null}
+
+          <div className="workspace-divider" />
+
+          <button
+            type="button"
+            role="menuitem"
+            className="workspace-action"
+            disabled={updateChecking}
+            onClick={() => {
+              void onCheckForUpdates();
+            }}
+          >
+            <RefreshCw size={15} aria-hidden="true" />
+            <span>{updateChecking ? updateLabels.checking : updateLabels.checkForUpdates}</span>
+          </button>
+
+          {updateStatus ? (
+            <div className={`workspace-update-status is-${updateStatus.status}`}>
+              <p>
+                {updateStatus.status === "available"
+                  ? updateLabels.available(updateStatus.latestVersion)
+                  : updateStatus.status === "current"
+                    ? updateLabels.current(updateStatus.latestVersion)
+                    : updateLabels.checkFailed}
+              </p>
+
+              {updateStatus.status === "available" ? (
+                <div className="workspace-update-actions">
+                  {updateStatus.downloadUrl ? (
+                    <button type="button" onClick={() => void onDownloadUpdate()}>
+                      <Download size={14} aria-hidden="true" />
+                      <span>{updateLabels.download}</span>
+                    </button>
+                  ) : null}
+                  <button type="button" onClick={() => void onViewUpdateRelease()}>
+                    <ExternalLink size={14} aria-hidden="true" />
+                    <span>{updateLabels.viewRelease}</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </div>
       ) : null}

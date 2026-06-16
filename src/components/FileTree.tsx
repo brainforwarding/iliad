@@ -67,7 +67,7 @@ import {
   type FileTreeMoveDropTarget
 } from "../files/fileTreeMove";
 import { createImageReferenceDragPayload, imageReferenceDragMimeType } from "../files/imageReferenceDrag";
-import type { FileTreeNode, MarkdownContentSearchResponse, WorkspaceInfo } from "../types/iliad";
+import type { FileTreeNode, MarkdownContentSearchResponse, UpdateCheckResult, WorkspaceInfo } from "../types/iliad";
 
 interface FileTreeProps {
   workspace: WorkspaceInfo;
@@ -79,6 +79,9 @@ interface FileTreeProps {
   creatingFile: boolean;
   creatingFolder: boolean;
   labels: FileTreeLabels;
+  updateLabels: FileTreeUpdateLabels;
+  updateStatus: UpdateCheckResult | null;
+  updateChecking: boolean;
   renamingPath: string | null;
   revealPath?: string | null;
   onRevealComplete?: (path: string) => void;
@@ -89,6 +92,9 @@ interface FileTreeProps {
   onOpenFolder: () => void | Promise<void>;
   onOpenRecent: (workspace: WorkspaceInfo) => void | Promise<void>;
   onRevealWorkspace: () => void | Promise<void>;
+  onCheckForUpdates: () => void | Promise<void>;
+  onDownloadUpdate: () => void | Promise<void>;
+  onViewUpdateRelease: () => void | Promise<void>;
   onSelectNode: (node: FileTreeNode) => void;
   onSelectWorkspaceRoot: () => void;
   onMoveNode: (node: FileTreeNode, targetDirectoryPath: string) => Promise<FileTreeNode | null>;
@@ -98,6 +104,16 @@ interface FileTreeProps {
   onCancelRename: () => void;
   onCommitRename: (node: FileTreeNode, requestedName: string) => void;
   contentSearchProvider?: FileTreeContentSearchProvider;
+}
+
+interface FileTreeUpdateLabels {
+  checkForUpdates: string;
+  checking: string;
+  available: (version: string) => string;
+  current: (version: string) => string;
+  checkFailed: string;
+  download: string;
+  viewRelease: string;
 }
 
 interface FileTreeLabels {
@@ -964,6 +980,9 @@ export function FileTree({
   creatingFile,
   creatingFolder,
   labels,
+  updateLabels,
+  updateStatus,
+  updateChecking,
   renamingPath,
   revealPath,
   onRevealComplete,
@@ -974,6 +993,9 @@ export function FileTree({
   onOpenFolder,
   onOpenRecent,
   onRevealWorkspace,
+  onCheckForUpdates,
+  onDownloadUpdate,
+  onViewUpdateRelease,
   onSelectNode,
   onSelectWorkspaceRoot,
   onMoveNode,
@@ -2130,9 +2152,15 @@ export function FileTree({
           workspace={workspace}
           recentWorkspaces={recentWorkspaces}
           labels={labels}
+          updateLabels={updateLabels}
+          updateStatus={updateStatus}
+          updateChecking={updateChecking}
           onOpenFolder={onOpenFolder}
           onOpenRecent={onOpenRecent}
           onRevealWorkspace={onRevealWorkspace}
+          onCheckForUpdates={onCheckForUpdates}
+          onDownloadUpdate={onDownloadUpdate}
+          onViewUpdateRelease={onViewUpdateRelease}
         />
         <div className="sidebar-actions">
           <button

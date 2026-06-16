@@ -54,7 +54,13 @@ import {
 } from "./preferences/sidebarPreferences";
 import { useWritingAssistPreferences } from "./preferences/writingAssistPreferences";
 import type { EditorView } from "@codemirror/view";
-import type { FileTreeNode, MarkdownContentSearchResponse, WorkspaceInfo, WritingAssistStatus } from "./types/iliad";
+import type {
+  FileTreeNode,
+  MarkdownContentSearchResponse,
+  UpdateCheckResult,
+  WorkspaceInfo,
+  WritingAssistStatus
+} from "./types/iliad";
 
 function statusText(
   saveStatus: SaveStatus,
@@ -345,6 +351,9 @@ export default function App() {
   const [editorCanTighten, setEditorCanTighten] = useState(false);
   const [agentHasOpenAiApiKey, setAgentHasOpenAiApiKey] = useState(false);
   const [writingAssistStatus, setWritingAssistStatus] = useState<WritingAssistStatus | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateCheckResult | null>(null);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const updateCheckRequestIdRef = useRef(0);
   const refreshWritingAssistStatus = useCallback(async () => {
     try {
       const status = await window.iliad.getWritingAssistStatus({ autocompleteApiFallbackEnabled });
@@ -389,6 +398,82 @@ export default function App() {
       void refreshWritingAssistStatus();
     }
   }, [refreshWritingAssistStatus, writingAssistsOpen]);
+
+  const checkForUpdates = useCallback(async () => {
+    const requestId = updateCheckRequestIdRef.current + 1;
+    updateCheckRequestIdRef.current = requestId;
+    setUpdateChecking(true);
+
+    try {
+      const result = await window.iliad.updates.check();
+
+      if (updateCheckRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setUpdateStatus(result);
+
+      if (result.status === "current") {
+        setNotice(strings.updates.current(result.latestVersion));
+      } else if (result.status === "error") {
+        setNotice(strings.updates.checkFailed);
+      } else {
+        setNotice(null);
+      }
+    } catch {
+      if (updateCheckRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setUpdateStatus({
+        status: "error",
+        currentVersion: "",
+        message: strings.updates.checkFailed
+      });
+      setNotice(strings.updates.checkFailed);
+    } finally {
+      if (updateCheckRequestIdRef.current === requestId) {
+        setUpdateChecking(false);
+      }
+    }
+  }, [strings.updates]);
+
+  const downloadUpdate = useCallback(async () => {
+    if (updateStatus?.status !== "available" || !updateStatus.downloadUrl) {
+      return;
+    }
+
+    await window.iliad.openUrl(updateStatus.downloadUrl);
+  }, [updateStatus]);
+
+  const viewUpdateRelease = useCallback(async () => {
+    if (!updateStatus || updateStatus.status === "error") {
+      return;
+    }
+
+    if (updateStatus.releaseUrl) {
+      await window.iliad.openUrl(updateStatus.releaseUrl);
+    }
+  }, [updateStatus]);
+
+  useEffect(() => window.iliad.updates.onCheckRequested(() => void checkForUpdates()), [checkForUpdates]);
+  useEffect(() => {
+    let cancelled = false;
+
+    void window.iliad.updates
+      .consumePendingCheckRequest()
+      .then((pending) => {
+        if (pending && !cancelled) {
+          void checkForUpdates();
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [checkForUpdates]);
+
   const scrollToSelectionComment = useCallback(
     (commentId: string) => {
       const view = editorViewRef.current;
@@ -1211,6 +1296,33 @@ export default function App() {
           </button>
           {error ? <p className="error-text">{error}</p> : null}
         </div>
+        {!error && notice ? (
+          <div className="toast is-notice" role="status">
+            {notice}
+            <button type="button" onClick={() => setNotice(null)}>
+              {strings.toast.dismiss}
+            </button>
+          </div>
+        ) : null}
+
+        {!error && !notice && updateStatus?.status === "available" ? (
+          <div className="toast is-notice update-toast" role="status">
+            <span>{strings.updates.available(updateStatus.latestVersion)}</span>
+            <div className="update-toast-actions">
+              {updateStatus.downloadUrl ? (
+                <button type="button" onClick={() => void downloadUpdate()}>
+                  {strings.updates.download}
+                </button>
+              ) : null}
+              <button type="button" onClick={() => void viewUpdateRelease()}>
+                {strings.updates.viewRelease}
+              </button>
+              <button type="button" onClick={() => setUpdateStatus(null)}>
+                {strings.updates.dismiss}
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -1360,6 +1472,9 @@ export default function App() {
               renamingPath={renamingPath}
               revealPath={reviewRevealPath ?? revealFolderPath}
               labels={strings.sidebar}
+              updateLabels={strings.updates}
+              updateStatus={updateStatus}
+              updateChecking={updateChecking}
               onOpenNode={(node) => {
                 markEditorNavigationDuringRun();
                 clearReviewForNormalNavigation(node);
@@ -1382,6 +1497,9 @@ export default function App() {
               onOpenFolder={openWorkspace}
               onOpenRecent={openRecentWorkspace}
               onRevealWorkspace={() => void window.iliad.revealInFinder(workspace.path, workspace.path)}
+              onCheckForUpdates={checkForUpdates}
+              onDownloadUpdate={downloadUpdate}
+              onViewUpdateRelease={viewUpdateRelease}
               onSelectNode={(node) => setSelectedTreePath(node.path)}
               onSelectWorkspaceRoot={() => {
                 setSelectedTreePath(workspace.path);
@@ -1533,6 +1651,25 @@ export default function App() {
           <button type="button" onClick={() => setNotice(null)}>
             {strings.toast.dismiss}
           </button>
+        </div>
+      ) : null}
+
+      {!error && !notice && updateStatus?.status === "available" ? (
+        <div className="toast is-notice update-toast" role="status">
+          <span>{strings.updates.available(updateStatus.latestVersion)}</span>
+          <div className="update-toast-actions">
+            {updateStatus.downloadUrl ? (
+              <button type="button" onClick={() => void downloadUpdate()}>
+                {strings.updates.download}
+              </button>
+            ) : null}
+            <button type="button" onClick={() => void viewUpdateRelease()}>
+              {strings.updates.viewRelease}
+            </button>
+            <button type="button" onClick={() => setUpdateStatus(null)}>
+              {strings.updates.dismiss}
+            </button>
+          </div>
         </div>
       ) : null}
     </div>

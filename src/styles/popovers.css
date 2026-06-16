@@ -263,6 +263,15 @@
   outline: none;
 }
 
+.workspace-popover button:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.workspace-popover button:disabled:hover {
+  background: transparent;
+}
+
 .workspace-path {
   overflow: hidden;
   padding: 5px 8px;
@@ -329,6 +338,40 @@
   font-size: var(--text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workspace-update-status {
+  display: grid;
+  gap: 7px;
+  padding: 7px 8px 6px;
+  color: var(--muted-2);
+  font-size: var(--text-xs);
+  line-height: 1.25;
+}
+
+.workspace-update-status p {
+  margin: 0;
+}
+
+.workspace-update-status.is-available {
+  color: var(--ink-2);
+}
+
+.workspace-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.workspace-update-actions button {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid var(--hairline);
+  background: var(--editor);
+  font-size: var(--text-xs);
 }
 
 .tree-context-menu {
@@ -406,6 +449,16 @@
   font-size: var(--text-sm);
   font-weight: 700;
   padding: 5px 8px;
+}
+
+.update-toast {
+  align-items: flex-start;
+}
+
+.update-toast-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .error-text {

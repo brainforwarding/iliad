@@ -10,6 +10,11 @@ Pushing source does not update the public downloadable app. A user-facing
 release happens only after a versioned GitHub release contains validated DMG/zip
 artifacts.
 
+Update-aware releases also have a machine-readable updater manifest. Treat
+`release/latest-mac.yml` as a required artifact, not a convenience file. Future
+agents should never rely on memory here: run the verification script in this
+runbook and do not create the GitHub release if it fails.
+
 ## Repositories And History
 
 The local `origin` remote may point at the old/private development repository:
@@ -168,6 +173,24 @@ xcrun stapler staple "release/Iliad MD-X.Y.Z-mac-arm64.dmg"
 xcrun stapler validate "release/Iliad MD-X.Y.Z-mac-arm64.dmg"
 ```
 
+Create the exact artifact filenames referenced by `latest-mac.yml`. Electron
+Builder may write visible artifacts with spaces while writing URL-safe names
+inside update metadata:
+
+```bash
+cp -p "release/Iliad MD-X.Y.Z-mac-arm64.dmg" "release/Iliad-MD-X.Y.Z-mac-arm64.dmg"
+cp -p "release/Iliad MD-X.Y.Z-mac-arm64.zip" "release/Iliad-MD-X.Y.Z-mac-arm64.zip"
+cp -p "release/Iliad MD-X.Y.Z-mac-arm64.dmg.blockmap" "release/Iliad-MD-X.Y.Z-mac-arm64.dmg.blockmap"
+cp -p "release/Iliad MD-X.Y.Z-mac-arm64.zip.blockmap" "release/Iliad-MD-X.Y.Z-mac-arm64.zip.blockmap"
+```
+
+Refresh `latest-mac.yml` after DMG stapling and metadata-named copies are in
+place. Stapling changes the DMG size and SHA512:
+
+```bash
+npm run release:refresh-update-metadata
+```
+
 Validate the app inside both artifacts:
 
 ```bash
@@ -189,9 +212,40 @@ xcrun stapler validate "$ZIP_ROOT/Iliad MD.app"
 rm -rf "$MOUNT_ROOT" "$ZIP_ROOT"
 ```
 
+## Update Metadata Verification
+
+After the final artifacts are rebuilt from the notarized/stapled `.app`, verify
+the DMG is stapled, metadata-named copies exist, and update metadata is
+refreshed, verify the updater metadata before upload:
+
+```bash
+npm run release:verify-update-metadata
+```
+
+This script checks:
+
+- `release/latest-mac.yml` exists.
+- its version matches `package.json`;
+- its top-level `path` points to the macOS ZIP updater artifact;
+- every file referenced by `latest-mac.yml` exists in `release/`;
+- referenced file sizes and SHA512 hashes match the actual files;
+- the packaged app contains `Contents/Resources/app-update.yml`;
+- `app-update.yml` points at the public GitHub update provider
+  `brainforwarding/iliad`.
+
+If this script fails, fix the build output or regenerate the metadata. Do not
+publish and hope the updater can recover.
+
+Important naming rule: upload the exact filenames referenced by
+`latest-mac.yml`. GitHub release assets may contain spaces, but the updater only
+uses the filenames in `latest-mac.yml`. If additional copies are created for
+human convenience, they are extra assets; they do not replace the
+metadata-referenced files unless `latest-mac.yml` is refreshed and verified
+again.
+
 ## GitHub Release
 
-Create URL-safe copies of the artifacts before upload:
+Create optional dot-separated copies of the artifacts for human-facing links:
 
 ```bash
 cp "release/Iliad MD-X.Y.Z-mac-arm64.dmg" "release/Iliad.MD-X.Y.Z-mac-arm64.dmg"
@@ -200,10 +254,20 @@ shasum -a 256 "release/Iliad.MD-X.Y.Z-mac-arm64.dmg" \
               "release/Iliad.MD-X.Y.Z-mac-arm64.zip"
 ```
 
-Create the public release against the public-safe commit:
+Create the public release against the public-safe commit. Include the updater
+metadata and the exact generated filenames referenced by that metadata:
 
 ```bash
 gh release create "vX.Y.Z" \
+  "release/Iliad MD-X.Y.Z-mac-arm64.dmg" \
+  "release/Iliad MD-X.Y.Z-mac-arm64.zip" \
+  "release/Iliad MD-X.Y.Z-mac-arm64.dmg.blockmap" \
+  "release/Iliad MD-X.Y.Z-mac-arm64.zip.blockmap" \
+  "release/Iliad-MD-X.Y.Z-mac-arm64.dmg" \
+  "release/Iliad-MD-X.Y.Z-mac-arm64.zip" \
+  "release/Iliad-MD-X.Y.Z-mac-arm64.dmg.blockmap" \
+  "release/Iliad-MD-X.Y.Z-mac-arm64.zip.blockmap" \
+  "release/latest-mac.yml" \
   "release/Iliad.MD-X.Y.Z-mac-arm64.dmg" \
   "release/Iliad.MD-X.Y.Z-mac-arm64.zip" \
   --repo brainforwarding/iliad \

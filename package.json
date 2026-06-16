@@ -1,7 +1,7 @@
 {
   "name": "iliad",
   "productName": "Iliad MD",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "private": true,
   "description": "A local-first Markdown writing workspace.",
   "license": "MIT",
@@ -27,6 +27,8 @@
     "dist:mac:signed": "npm run build && electron-builder --mac",
     "preview": "vite preview --host 127.0.0.1",
     "smoke:review": "tsc -p electron/tsconfig.json && node scripts/reviewDiffSmoke.mjs",
+    "release:refresh-update-metadata": "node scripts/refreshMacUpdateMetadata.mjs",
+    "release:verify-update-metadata": "node scripts/verifyUpdateMetadata.mjs",
     "test": "vitest run",
     "typecheck": "tsc -b && tsc -p electron/tsconfig.json --noEmit",
     "relay:typecheck": "tsc -p relay/telegram/tsconfig.json --noEmit",

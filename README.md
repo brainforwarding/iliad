@@ -83,6 +83,12 @@ Read [`docs/release.md`](docs/release.md) before releasing. In particular:
   Apple notarization credentials are available to Electron Builder.
 - This machine has a stored `notarytool` profile named `iliad-notary`; use that
   profile for manual notarization when the Apple env vars are not present.
+- Update-aware releases must include the generated updater manifest. Before
+  creating the GitHub release, run `npm run release:refresh-update-metadata`
+  after final stapling/copying, then `npm run release:verify-update-metadata`.
+  Upload `release/latest-mac.yml` plus the exact updater ZIP/DMG filenames it
+  references. Do not replace metadata-referenced files with renamed copies
+  unless the manifest is refreshed and verified again.
 
 The base macOS build command is:
 

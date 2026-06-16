@@ -887,6 +887,36 @@ export interface TelegramRemoteApi {
   revokeSettings: () => Promise<TelegramRemoteSettings>;
 }
 
+export type UpdateCheckResult =
+  | {
+      status: "available";
+      currentVersion: string;
+      latestVersion: string;
+      releaseName: string;
+      releaseDate: string;
+      releaseUrl: string;
+      downloadUrl?: string;
+      notes?: string;
+    }
+  | {
+      status: "current";
+      currentVersion: string;
+      latestVersion: string;
+      releaseUrl?: string;
+    }
+  | {
+      status: "error";
+      currentVersion: string;
+      message: string;
+      detail?: string;
+    };
+
+export interface UpdatesApi {
+  check: () => Promise<UpdateCheckResult>;
+  consumePendingCheckRequest: () => Promise<boolean>;
+  onCheckRequested: (listener: () => void) => () => void;
+}
+
 export interface IliadApi {
   getLaunchWorkspace: () => Promise<WorkspaceInfo | null>;
   openWorkspaceDialog: (language?: "en" | "es") => Promise<WorkspaceInfo | null>;
@@ -902,6 +932,7 @@ export interface IliadApi {
   moveToTrash: (workspaceRoot: string, filePath: string) => Promise<void>;
   searchMarkdownContent: (request: MarkdownContentSearchRequest) => Promise<MarkdownContentSearchResponse>;
   openUrl: (url: string) => Promise<void>;
+  updates: UpdatesApi;
   openExternalFile: (workspaceRoot: string, filePath: string) => Promise<string>;
   revealInFinder: (workspaceRoot: string, filePath: string) => Promise<void>;
   saveImageAsset: (request: SaveImageAssetRequest) => Promise<SavedImageAsset>;
