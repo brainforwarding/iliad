@@ -53,7 +53,15 @@ export function buildMarkdownChangeProposal({
 
 export function markdownChangeProposalTitle(drafts: AgentDraftFileChange[]) {
   if (drafts.length === 1) {
-    return drafts[0].kind === "edit_file" ? `Edit ${drafts[0].relativePath}` : `Create ${drafts[0].relativePath}`;
+    if (drafts[0].kind === "edit_file") {
+      return `Edit ${drafts[0].relativePath}`;
+    }
+
+    if (drafts[0].kind === "delete_file") {
+      return `Delete ${drafts[0].relativePath}`;
+    }
+
+    return `Create ${drafts[0].relativePath}`;
   }
 
   return `Update ${drafts.length} files`;
@@ -83,12 +91,24 @@ function markdownChangeProposalFile(
     };
   }
 
+  if (draft.kind === "create_file") {
+    return {
+      id,
+      kind: "create_file",
+      status: "pending",
+      relativePath: draft.relativePath,
+      content: draft.content,
+      unifiedDiff: draft.unifiedDiff
+    };
+  }
+
   return {
     id,
-    kind: "create_file",
+    kind: "delete_file",
     status: "pending",
     relativePath: draft.relativePath,
-    content: draft.content,
+    baseHash: draft.baseHash,
+    baseContent: draft.baseContent,
     unifiedDiff: draft.unifiedDiff
   };
 }

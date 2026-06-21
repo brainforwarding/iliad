@@ -7,7 +7,7 @@ import type { DisplayReviewHunk } from "./diff";
 import { intralineTokenDiff, type IntralineRange } from "./intralineDiff";
 
 interface ReviewExtensionOptions {
-  mode: "edit_file" | "create_file";
+  mode: "edit_file" | "create_file" | "delete_file";
   hunks: DisplayReviewHunk[];
   activeHunkId: string | null;
   createLineCount: number;
@@ -306,9 +306,11 @@ function sameRanges(left: IntralineRange[], right: IntralineRange[]) {
 function buildDecorations(state: EditorState, options: ReviewExtensionOptions): DecorationSet {
   const ranges: Range<Decoration>[] = [];
 
-  if (options.mode === "create_file") {
+  if (options.mode === "create_file" || options.mode === "delete_file") {
+    const className = options.mode === "create_file" ? "cm-ai-review-line-inserted" : "cm-ai-review-line-removed";
+
     for (let lineNumber = 1; lineNumber <= Math.max(1, options.createLineCount); lineNumber += 1) {
-      ranges.push(Decoration.line({ class: "cm-ai-review-line-inserted" }).range(lineAt(state, lineNumber).from));
+      ranges.push(Decoration.line({ class: className }).range(lineAt(state, lineNumber).from));
     }
 
     return Decoration.set(ranges, true);

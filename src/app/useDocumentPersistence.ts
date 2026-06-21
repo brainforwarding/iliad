@@ -99,11 +99,12 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
   );
 
   const loadDocument = useCallback((text: string) => {
+    cancelPendingSave();
     setDocumentText(text);
     setSavedText(text);
     setSaveStatus("saved");
     setLastSavedAt(null);
-  }, []);
+  }, [cancelPendingSave]);
 
   const clearDocument = useCallback(() => {
     cancelPendingSave();

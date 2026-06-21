@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FileTreeNode, WorkspaceInfo } from "../types/iliad";
+import type { FileTreeNode, WorkspaceChangeEvent, WorkspaceInfo } from "../types/iliad";
 
 interface PersistedWorkspace {
   name: string;
@@ -74,6 +74,7 @@ export function useWorkspace({ messages, onError }: UseWorkspaceOptions) {
   const refreshRequestRef = useRef(0);
   const [workspace, setWorkspaceState] = useState<WorkspaceInfo | null>(null);
   const [tree, setTree] = useState<FileTreeNode[]>([]);
+  const [lastWorkspaceChange, setLastWorkspaceChange] = useState<WorkspaceChangeEvent | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [recentWorkspaces, setRecentWorkspaces] = useState<WorkspaceInfo[]>(() => readRecentWorkspaces());
 
@@ -188,8 +189,14 @@ export function useWorkspace({ messages, onError }: UseWorkspaceOptions) {
       return;
     }
 
-    return window.iliad.watchWorkspace(workspacePath, () => {
+    return window.iliad.watchWorkspace(workspacePath, (event) => {
       if (currentWorkspacePathRef.current !== workspacePath) {
+        return;
+      }
+
+      setLastWorkspaceChange(event);
+
+      if (event.treeChanged === false) {
         return;
       }
 
@@ -209,6 +216,7 @@ export function useWorkspace({ messages, onError }: UseWorkspaceOptions) {
     setWorkspace,
     tree,
     setTree,
+    lastWorkspaceChange,
     refreshTree,
     recentWorkspaces,
     pruneRecentWorkspace

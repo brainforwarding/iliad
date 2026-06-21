@@ -522,6 +522,48 @@ describe("agent IPC trust validation", () => {
     });
   });
 
+  it("starts external capture only through the resolved workspace session", async () => {
+    const { handleStartExternalCaptureIpc } = await import("../../electron/ipc/agent");
+    const workspaceRoot = await tempWorkspace();
+    const resolveWorkspaceRoot = vi.fn(async () => workspaceRoot);
+    const startExternalCapture = vi.fn(async () => ({
+      captureId: "capture-ipc",
+      workspaceRoot,
+      startedAt: "2026-06-17T12:00:00.000Z",
+      markdownFileCount: 1
+    }));
+
+    const response = await handleStartExternalCaptureIpc(
+      trustedEvent(),
+      { workspaceSessionId: "session-test", workspaceRoot: "/untrusted", agentName: "Claude" },
+      { startExternalCapture },
+      resolveWorkspaceRoot
+    );
+
+    expect(resolveWorkspaceRoot).toHaveBeenCalledWith(expect.anything(), "session-test");
+    expect(startExternalCapture).toHaveBeenCalledWith({ workspaceRoot, agentName: "Claude" });
+    expect(response.captureId).toBe("capture-ipc");
+  });
+
+  it("rejects untrusted external capture senders before calling the service", async () => {
+    const { handleStartExternalCaptureIpc } = await import("../../electron/ipc/agent");
+    const startExternalCapture = vi.fn();
+    electronMock.fromWebContents.mockReturnValue(null);
+
+    await expect(
+      handleStartExternalCaptureIpc(
+        {
+          sender: {},
+          senderFrame: { url: "file:///Applications/Iliad.app/index.html" }
+        } as never,
+        { workspaceSessionId: "session-test" },
+        { startExternalCapture },
+        vi.fn(async () => "/workspace")
+      )
+    ).rejects.toThrow("untrusted window");
+    expect(startExternalCapture).not.toHaveBeenCalled();
+  });
+
   it("trusts production file frames only when they belong to an app window", async () => {
     const { isTrustedAgentIpcSender } = await import("../../electron/ipc/agent");
     electronMock.fromWebContents.mockReturnValue({});

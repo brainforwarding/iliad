@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState, type SetStateAction } from "react";
 const correctorEnabledStorageKey = "iliad:writing-assist-corrector-enabled";
 const autocompleteEnabledStorageKey = "iliad:writing-assist-autocomplete-enabled";
 const autocompleteApiFallbackEnabledStorageKey = "iliad:writing-assist-autocomplete-api-fallback-enabled";
+const externalChangesTrackingEnabledStorageKey = "iliad:writing-assist-external-changes-tracking-enabled";
 
 function readBooleanPreference(key: string, fallback: boolean) {
   const storedValue = localStorage.getItem(key);
@@ -39,14 +40,19 @@ export function useWritingAssistPreferences() {
     autocompleteApiFallbackEnabledStorageKey,
     false
   );
+  const [externalChangesTrackingEnabled, setExternalChangesTrackingEnabled] = useStoredBooleanPreference(
+    externalChangesTrackingEnabledStorageKey,
+    true
+  );
 
   return {
     correctorEnabled,
     autocompleteEnabled,
     autocompleteApiFallbackEnabled,
+    externalChangesTrackingEnabled,
     setCorrectorEnabled,
     setAutocompleteEnabled,
-    setAutocompleteApiFallbackEnabled
+    setAutocompleteApiFallbackEnabled,
+    setExternalChangesTrackingEnabled
   };
 }
-

@@ -395,15 +395,31 @@ async function restoreCapturedDiskChanges(
       continue;
     }
 
-    if (current.status === "missing") {
+    if (draft.kind === "create_file") {
+      if (current.status === "missing") {
+        continue;
+      }
+
+      if (current.content !== draft.content) {
+        throw new Error(`Codex created ${relativePath}, but it changed before Iliad could remove it for review.`);
+      }
+
+      await rm(absolutePath, { force: true });
+      restoredPaths.add(relativePath);
+      restoredCount += 1;
       continue;
     }
 
-    if (current.content !== draft.content) {
-      throw new Error(`Codex created ${relativePath}, but it changed before Iliad could remove it for review.`);
+    if (current.status === "readable") {
+      if (current.content === draft.baseContent) {
+        continue;
+      }
+
+      throw new Error(`Codex removed ${relativePath}, but it changed again before Iliad could restore it.`);
     }
 
-    await rm(absolutePath, { force: true });
+    await mkdir(path.dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, draft.baseContent, "utf8");
     restoredPaths.add(relativePath);
     restoredCount += 1;
   }
@@ -462,7 +478,15 @@ async function isExistingUnsafePath(workspaceRoot: string, relativePath: string)
 }
 
 function draftProposalContent(draft: AgentDraftFileChange) {
-  return draft.kind === "edit_file" ? draft.replacement : draft.content;
+  if (draft.kind === "edit_file") {
+    return draft.replacement;
+  }
+
+  if (draft.kind === "create_file") {
+    return draft.content;
+  }
+
+  return "";
 }
 
 function normalizeWorkspaceRelativeMarkdownPath(workspaceRoot: string, rawPath: string) {

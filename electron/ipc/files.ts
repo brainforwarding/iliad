@@ -11,6 +11,7 @@ import {
   writeMarkdownFile,
   type FileTreeNode
 } from "../fs/fileOps.js";
+import { trackWorkspaceMutation } from "../fs/workspaceMutationMarkers.js";
 import type { WorkspaceInfo } from "../launch/workspace.js";
 
 interface RegisterFileIpcOptions {
@@ -44,26 +45,42 @@ export function registerFileIpc(options: RegisterFileIpcOptions = {}) {
     return readMarkdownFile(workspaceRoot, filePath);
   });
 
-  ipcMain.handle("file:write-markdown", async (_event, workspaceRoot: string, filePath: string, content: string) => {
-    return writeMarkdownFile(workspaceRoot, filePath, content);
+  ipcMain.handle("file:write-markdown", async (event, workspaceRoot: string, filePath: string, content: string) => {
+    const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
+
+    return trackWorkspaceMutation(verifiedWorkspaceRoot, [filePath], () =>
+      writeMarkdownFile(verifiedWorkspaceRoot, filePath, content)
+    );
   });
 
   ipcMain.handle(
     "file:create-markdown",
-    async (_event, workspaceRoot: string, directoryPath: string, requestedName: string): Promise<FileTreeNode> => {
-      return createMarkdownFile(workspaceRoot, directoryPath, requestedName);
+    async (event, workspaceRoot: string, directoryPath: string, requestedName: string): Promise<FileTreeNode> => {
+      const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
+
+      return trackWorkspaceMutation(verifiedWorkspaceRoot, undefined, () =>
+        createMarkdownFile(verifiedWorkspaceRoot, directoryPath, requestedName)
+      );
     }
   );
 
   ipcMain.handle(
     "folder:create",
-    async (_event, workspaceRoot: string, directoryPath: string, requestedName: string): Promise<FileTreeNode> => {
-      return createFolder(workspaceRoot, directoryPath, requestedName);
+    async (event, workspaceRoot: string, directoryPath: string, requestedName: string): Promise<FileTreeNode> => {
+      const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
+
+      return trackWorkspaceMutation(verifiedWorkspaceRoot, undefined, () =>
+        createFolder(verifiedWorkspaceRoot, directoryPath, requestedName)
+      );
     }
   );
 
-  ipcMain.handle("file:rename", async (_event, workspaceRoot: string, filePath: string, requestedName: string) => {
-    return renamePath(workspaceRoot, filePath, requestedName);
+  ipcMain.handle("file:rename", async (event, workspaceRoot: string, filePath: string, requestedName: string) => {
+    const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
+
+    return trackWorkspaceMutation(verifiedWorkspaceRoot, undefined, () =>
+      renamePath(verifiedWorkspaceRoot, filePath, requestedName)
+    );
   });
 
   ipcMain.handle(
@@ -76,16 +93,26 @@ export function registerFileIpc(options: RegisterFileIpcOptions = {}) {
     ): Promise<FileTreeNode> => {
       const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
 
-      return movePath(verifiedWorkspaceRoot, sourcePath, targetDirectoryPath);
+      return trackWorkspaceMutation(verifiedWorkspaceRoot, undefined, () =>
+        movePath(verifiedWorkspaceRoot, sourcePath, targetDirectoryPath)
+      );
     }
   );
 
-  ipcMain.handle("file:duplicate", async (_event, workspaceRoot: string, filePath: string): Promise<FileTreeNode> => {
-    return duplicatePath(workspaceRoot, filePath);
+  ipcMain.handle("file:duplicate", async (event, workspaceRoot: string, filePath: string): Promise<FileTreeNode> => {
+    const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
+
+    return trackWorkspaceMutation(verifiedWorkspaceRoot, undefined, () =>
+      duplicatePath(verifiedWorkspaceRoot, filePath)
+    );
   });
 
-  ipcMain.handle("file:trash", async (_event, workspaceRoot: string, filePath: string) => {
-    await assertTrashablePath(workspaceRoot, filePath);
-    await shell.trashItem(filePath);
+  ipcMain.handle("file:trash", async (event, workspaceRoot: string, filePath: string) => {
+    const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
+
+    await trackWorkspaceMutation(verifiedWorkspaceRoot, undefined, async () => {
+      await assertTrashablePath(verifiedWorkspaceRoot, filePath);
+      await shell.trashItem(filePath);
+    });
   });
 }

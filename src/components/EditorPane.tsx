@@ -21,7 +21,7 @@ import {
   type SelectionCommentsOverlayApi,
   type TightenOverlayLabels
 } from "../editor/selectionComments/overlay";
-import { visualMarkdown } from "../editor/visualMarkdown";
+import { visualMarkdown, visualMarkdownInteractionResetEffect } from "../editor/visualMarkdown";
 import { proseEnterExtension } from "../editor/proseEnter";
 import { writingCorrectorExtension } from "../editor/writingCorrector/extension";
 import { detectWritingIssues } from "../editor/writingCorrector/harper";
@@ -129,11 +129,13 @@ interface EditorPaneProps {
       rejectAll: string;
       rejectRemaining: string;
       create: string;
+      delete: string;
       discard: string;
       stale: string;
       acceptChange: string;
       rejectChange: string;
       pendingDocument: (path: string) => string;
+      pendingDeleteDocument: (path: string) => string;
     };
   };
   review: EditorReviewState | null;
@@ -260,7 +262,7 @@ export function EditorPane({
     return reviewHunksForDisplay(review.currentContent, review.file);
   }, [review]);
   const unresolvedHunks = editReviewDisplay?.hunks ?? [];
-  const readOnly = review?.mode === "create_file";
+  const readOnly = review?.mode === "create_file" || review?.mode === "delete_file" || Boolean(review?.mode === "edit_file" && review.readOnly);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
   const [provisionalCommentRange, setProvisionalCommentRange] = useState<{ from: number; to: number } | null>(null);
   const [provisionalTightenRange, setProvisionalTightenRange] = useState<{ from: number; to: number } | null>(null);
@@ -365,6 +367,21 @@ export function EditorPane({
     setAutocompleteStatus({ state: "idle" });
     setAutocompleteStatusAnchor(null);
   }, [file?.path]);
+
+  useEffect(() => {
+    if (!editorView || !file || review) {
+      return;
+    }
+
+    editorView.contentDOM.blur();
+    editorView.dom.blur();
+    editorView.dispatch({
+      effects: visualMarkdownInteractionResetEffect.of({
+        focused: false,
+        interacted: false
+      })
+    });
+  }, [editorView, file?.path, review]);
 
   useEffect(() => {
     const correctorMemory = writingAssists?.correctorMemory;
@@ -819,14 +836,18 @@ export function EditorPane({
       }
 
       if (review?.mode === "edit_file" && editReviewDisplay && !editReviewDisplay.stale) {
+        if (review.readOnly) {
+          nextExtensions.push(EditorState.readOnly.of(true), EditorView.editable.of(false));
+        }
+
         nextExtensions.push(
           aiReviewExtension({
             mode: "edit_file",
             hunks: editReviewDisplay.hunks,
             activeHunkId: null,
             createLineCount: 0,
-            onAcceptHunk: review.onAcceptHunk,
-            onRejectHunk: review.onRejectHunk,
+            onAcceptHunk: review.hideHunkActions ? undefined : review.onAcceptHunk,
+            onRejectHunk: review.hideHunkActions ? undefined : review.onRejectHunk,
             onOpenLink,
             renderInsertedAsSource: true,
             labels: {
@@ -854,12 +875,12 @@ export function EditorPane({
         );
       }
 
-      if (review?.mode === "create_file") {
+      if (review?.mode === "create_file" || review?.mode === "delete_file") {
         nextExtensions.push(
           EditorState.readOnly.of(true),
           EditorView.editable.of(false),
           aiReviewExtension({
-            mode: "create_file",
+            mode: review.mode,
             hunks: [],
             activeHunkId: null,
             createLineCount: Math.max(1, review.currentContent.split(/\r\n|\r|\n/).length),
@@ -944,8 +965,8 @@ export function EditorPane({
                 <span aria-hidden="true">·</span>
                 <span>
                   {editReviewDisplay?.stale || review.file.status === "stale"
-                    ? labels.reviewToolbar.stale
-                    : labels.reviewToolbar.changes(unresolvedHunks.length)}
+                    ? review.labels.stale
+                    : review.labels.changes(unresolvedHunks.length)}
                 </span>
               </div>
               <div className="editor-review-actions">
@@ -954,26 +975,42 @@ export function EditorPane({
                   disabled={Boolean(editReviewDisplay?.stale) || unresolvedHunks.length === 0}
                   onClick={review.onAcceptFile}
                 >
-                  {labels.reviewToolbar.acceptAll}
+                  {review.labels.acceptAll}
                 </button>
                 <button type="button" onClick={review.onRejectFile}>
                   {(review.file.hunks ?? []).some((hunk) => hunk.status === "accepted")
-                    ? labels.reviewToolbar.rejectRemaining
-                    : labels.reviewToolbar.rejectAll}
+                    ? review.labels.rejectRemaining
+                    : review.labels.rejectAll}
+                </button>
+              </div>
+            </>
+          ) : review.mode === "create_file" ? (
+            <>
+              <div className="editor-review-title">
+                <span className="editor-review-path">{review.labels.pendingDocument(review.file.relativePath)}</span>
+              </div>
+              <div className="editor-review-actions">
+                <button type="button" onClick={review.onAcceptFile}>
+                  {review.labels.create}
+                </button>
+                <button type="button" onClick={review.onRejectFile}>
+                  {review.labels.discard}
                 </button>
               </div>
             </>
           ) : (
             <>
               <div className="editor-review-title">
-                <span className="editor-review-path">{labels.reviewToolbar.pendingDocument(review.file.relativePath)}</span>
+                <span className="editor-review-path">
+                  {review.labels.pendingDeleteDocument(review.file.relativePath)}
+                </span>
               </div>
               <div className="editor-review-actions">
                 <button type="button" onClick={review.onAcceptFile}>
-                  {labels.reviewToolbar.create}
+                  {review.labels.delete}
                 </button>
                 <button type="button" onClick={review.onRejectFile}>
-                  {labels.reviewToolbar.discard}
+                  {review.labels.discard}
                 </button>
               </div>
             </>

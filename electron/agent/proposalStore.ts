@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { readMarkdownFile, writeMarkdownFile } from "../fs/fileOps.js";
 import { ensureMarkdownFile, ensureVisibleWorkspacePath } from "../fs/pathSafety.js";
@@ -48,6 +48,10 @@ function fileTreeNode(workspaceRoot: string, filePath: string) {
 }
 
 function mutableCreateFileStatus(status: AgentProposalFileStatus) {
+  return status === "pending" || status === "stale" || status === "failed";
+}
+
+function mutableStateOnlyFileStatus(status: AgentProposalFileStatus) {
   return status === "pending" || status === "stale" || status === "failed";
 }
 
@@ -132,7 +136,7 @@ function fileHasMutableWork(file: AgentProposalFileChange) {
     return file.status === "failed" || hasMutableReviewHunks(file);
   }
 
-  return mutableCreateFileStatus(file.status);
+  return mutableStateOnlyFileStatus(file.status);
 }
 
 function pruneTerminalHistory(proposals: AgentChangeProposal[]) {
@@ -323,45 +327,85 @@ export class AgentProposalStore {
         }
       }
 
-      try {
-        const filePath = validateGeneratedMarkdownPath(workspaceRoot, file.relativePath);
-
+      if (file.kind === "create_file") {
         try {
-          await mkdir(path.dirname(filePath), { recursive: true });
-          await writeFile(filePath, file.content, { encoding: "utf8", flag: "wx" });
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-            file.status = "stale";
-            file.error = CREATE_COLLISION_MESSAGE;
-            touchAndRecompute(proposal);
-            return {
-              kind: "create_file",
-              proposal: cloneProposal(proposal),
-              fileId: file.id,
-              status: file.status
-            };
+          const filePath = validateGeneratedMarkdownPath(workspaceRoot, file.relativePath);
+
+          try {
+            await mkdir(path.dirname(filePath), { recursive: true });
+            await writeFile(filePath, file.content, { encoding: "utf8", flag: "wx" });
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+              file.status = "stale";
+              file.error = CREATE_COLLISION_MESSAGE;
+              touchAndRecompute(proposal);
+              return {
+                kind: "create_file",
+                proposal: cloneProposal(proposal),
+                fileId: file.id,
+                status: file.status
+              };
+            }
+
+            throw error;
           }
 
-          throw error;
+          file.status = "applied";
+          delete file.error;
+          touchAndRecompute(proposal);
+          return {
+            kind: "create_file",
+            proposal: cloneProposal(proposal),
+            fileId: file.id,
+            status: file.status,
+            file: fileTreeNode(workspaceRoot, filePath),
+            content: file.content
+          };
+        } catch (error) {
+          file.status = "failed";
+          file.error = errorMessage(error);
+          touchAndRecompute(proposal);
+          return {
+            kind: "create_file",
+            proposal: cloneProposal(proposal),
+            fileId: file.id,
+            status: file.status
+          };
+        }
+      }
+
+      try {
+        const filePath = validateGeneratedMarkdownPath(workspaceRoot, file.relativePath);
+        const current = await readMarkdownFile(workspaceRoot, filePath);
+
+        if (current !== file.baseContent) {
+          file.status = "stale";
+          file.error = STALE_EDIT_MESSAGE;
+          touchAndRecompute(proposal);
+          return {
+            kind: "delete_file",
+            proposal: cloneProposal(proposal),
+            fileId: file.id,
+            status: file.status
+          };
         }
 
+        await rm(filePath);
         file.status = "applied";
         delete file.error;
         touchAndRecompute(proposal);
         return {
-          kind: "create_file",
+          kind: "delete_file",
           proposal: cloneProposal(proposal),
           fileId: file.id,
-          status: file.status,
-          file: fileTreeNode(workspaceRoot, filePath),
-          content: file.content
+          status: file.status
         };
       } catch (error) {
         file.status = "failed";
         file.error = errorMessage(error);
         touchAndRecompute(proposal);
         return {
-          kind: "create_file",
+          kind: "delete_file",
           proposal: cloneProposal(proposal),
           fileId: file.id,
           status: file.status
@@ -395,7 +439,7 @@ export class AgentProposalStore {
         return cloneProposal(proposal);
       }
 
-      if (file.status !== "rejected" && file.status !== "applied") {
+      if (mutableStateOnlyFileStatus(file.status)) {
         file.status = "rejected";
         delete file.error;
         touchAndRecompute(proposal);
@@ -429,7 +473,7 @@ export class AgentProposalStore {
           continue;
         }
 
-        if (mutableCreateFileStatus(file.status)) {
+        if (mutableStateOnlyFileStatus(file.status)) {
           file.status = "rejected";
           delete file.error;
         }

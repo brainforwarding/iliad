@@ -20,6 +20,9 @@ export type ReadDirectoryResponse =
 
 export interface WorkspaceChangeEvent {
   workspaceRoot: string;
+  treeChanged?: boolean;
+  markdownChanged?: boolean;
+  changedMarkdownPaths?: string[];
 }
 
 export interface SaveImageAssetRequest {
@@ -210,17 +213,28 @@ export interface AgentChangeProposal {
   updatedAt: string;
   model: string;
   source: AgentProposalSource;
+  metadata?: AgentChangeProposalMetadata;
   status: AgentProposalStatus;
   files: AgentProposalFileChange[];
 }
 
+export interface ExternalFilesystemProposalMetadata {
+  kind: "external_filesystem";
+  baselineId: string;
+  snapshotId: string;
+  liveDisk: true;
+  sessionScoped: true;
+}
+
+export type AgentChangeProposalMetadata = ExternalFilesystemProposalMetadata;
+
 export interface AgentProposalSource {
-  kind: "openai_response" | "legacy_marker_adapter" | "tool_call" | "subagent" | "codex_app_server";
+  kind: "openai_response" | "legacy_marker_adapter" | "tool_call" | "subagent" | "codex_app_server" | "external_agent";
   agentName?: string;
   parentRunId?: string;
 }
 
-export type AgentProposalFileChange = AgentEditFileProposal | AgentCreateFileProposal;
+export type AgentProposalFileChange = AgentEditFileProposal | AgentCreateFileProposal | AgentDeleteFileProposal;
 
 export interface AgentEditFileProposal {
   id: string;
@@ -233,6 +247,10 @@ export interface AgentEditFileProposal {
   unifiedDiff: string;
   hunks?: AgentReviewHunk[];
   error?: string;
+  baselineState?: "present" | "absent";
+  baselineContentHash?: string;
+  reviewedState?: "present" | "absent";
+  reviewedContentHash?: string;
 }
 
 export interface AgentCreateFileProposal {
@@ -243,6 +261,76 @@ export interface AgentCreateFileProposal {
   content: string;
   unifiedDiff: string;
   error?: string;
+  baselineState?: "present" | "absent";
+  baselineContentHash?: string;
+  reviewedState?: "present" | "absent";
+  reviewedContentHash?: string;
+}
+
+export interface AgentDeleteFileProposal {
+  id: string;
+  kind: "delete_file";
+  status: AgentProposalFileStatus;
+  relativePath: string;
+  baseHash: string;
+  baseContent: string;
+  unifiedDiff: string;
+  error?: string;
+  baselineState?: "present" | "absent";
+  baselineContentHash?: string;
+  reviewedState?: "present" | "absent";
+  reviewedContentHash?: string;
+}
+
+export interface ExternalAgentCaptureStartResponse {
+  captureId: string;
+  workspaceRoot: string;
+  startedAt: string;
+  markdownFileCount: number;
+  resumed?: boolean;
+}
+
+export type ExternalAgentCaptureFinishResponse =
+  | {
+      status: "proposal";
+      captureId: string;
+      proposal: AgentChangeProposal;
+      restoredRelativePaths: string[];
+      restoredCreateRelativePaths: string[];
+      unsupportedNotes: string[];
+    }
+  | {
+      status: "empty";
+      captureId: string;
+      restoredRelativePaths: string[];
+      restoredCreateRelativePaths: string[];
+      unsupportedNotes: string[];
+    }
+  | {
+      status: "unsupported_restored";
+      captureId: string;
+      restoredRelativePaths: string[];
+      restoredCreateRelativePaths: string[];
+      unsupportedNotes: string[];
+    }
+  | {
+      status: "git_baseline_changed";
+      captureId: string;
+      unsupportedNotes: string[];
+    }
+  | {
+      status: "unsafe";
+      captureId: string;
+      message: string;
+      unsupportedNotes: string[];
+    };
+
+export interface ExternalAgentCaptureCancelResponse {
+  status: "canceled";
+  captureId: string;
+  restoredRelativePaths: string[];
+  restoredCreateRelativePaths: string[];
+  unsupportedNotes: string[];
 }
 
 export type AgentErrorCode =
@@ -816,6 +904,12 @@ export type ApplyAgentProposalFileResponse =
       status: AgentProposalFileStatus;
       file?: FileTreeNode;
       content?: string;
+    }
+  | {
+      kind: "delete_file";
+      proposal: AgentChangeProposal;
+      fileId: string;
+      status: AgentProposalFileStatus;
     };
 
 export interface ResolveAgentProposalHunkResponse {
@@ -848,6 +942,18 @@ export interface AgentApi {
     document: AgentCreateDocumentProposal;
   }) => Promise<ApplyAgentCreateDocumentResponse>;
   listProposals: (workspaceRoot: string) => Promise<AgentChangeProposal[]>;
+  startExternalCapture: (request: {
+    workspaceSessionId: string;
+    agentName?: string;
+  }) => Promise<ExternalAgentCaptureStartResponse>;
+  finishExternalCapture: (request: {
+    workspaceSessionId: string;
+    captureId: string;
+  }) => Promise<ExternalAgentCaptureFinishResponse>;
+  cancelExternalCapture: (request: {
+    workspaceSessionId: string;
+    captureId: string;
+  }) => Promise<ExternalAgentCaptureCancelResponse>;
   applyProposalFile: (request: {
     workspaceRoot: string;
     proposalId: string;

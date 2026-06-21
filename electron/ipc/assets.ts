@@ -8,6 +8,7 @@ import {
   type SaveImageAssetRequest,
   type SavedImageAsset
 } from "../fs/fileOps.js";
+import { trackWorkspaceMutation } from "../fs/workspaceMutationMarkers.js";
 import { isInsideAllowedWorkspace } from "../fs/workspaceRegistry.js";
 import type { WorkspaceInfo } from "../launch/workspace.js";
 
@@ -67,7 +68,8 @@ function imagePathFromWorkspaceRelativePath(workspaceRoot: string, relativePath:
 export function registerAssetIpc(options: RegisterAssetIpcOptions = {}) {
   ipcMain.handle("asset:save-image", async (event, request: SaveImageAssetRequest): Promise<SavedImageAsset> => {
     const workspaceRoot = activeWorkspaceRoot(event, request.workspaceRoot, options);
-    return saveImageAsset({ ...request, workspaceRoot });
+
+    return trackWorkspaceMutation(workspaceRoot, undefined, () => saveImageAsset({ ...request, workspaceRoot }));
   });
 
   ipcMain.handle(

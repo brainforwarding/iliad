@@ -1,4 +1,4 @@
-import type { AgentCreateFileProposal, AgentEditFileProposal } from "../../types/iliad";
+import type { AgentCreateFileProposal, AgentDeleteFileProposal, AgentEditFileProposal } from "../../types/iliad";
 
 export type EditorReviewState =
   | {
@@ -6,6 +6,8 @@ export type EditorReviewState =
       file: AgentEditFileProposal;
       currentContent: string;
       activeHunkId: string | null;
+      readOnly?: boolean;
+      hideHunkActions?: boolean;
       onAcceptHunk: (hunkId: string) => void;
       onRejectHunk: (hunkId: string) => void;
       onAcceptFile: () => void;
@@ -32,5 +34,17 @@ export type EditorReviewState =
         create: string;
         discard: string;
         pendingDocument: (path: string) => string;
+      };
+    }
+  | {
+      mode: "delete_file";
+      file: AgentDeleteFileProposal;
+      currentContent: string;
+      onAcceptFile: () => void;
+      onRejectFile: () => void;
+      labels: {
+        delete: string;
+        discard: string;
+        pendingDeleteDocument: (path: string) => string;
       };
     };

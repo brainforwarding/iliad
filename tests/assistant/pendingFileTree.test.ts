@@ -61,6 +61,19 @@ function createFile(overrides: Partial<Extract<AgentProposalFileChange, { kind: 
   };
 }
 
+function deleteFile(overrides: Partial<Extract<AgentProposalFileChange, { kind: "delete_file" }>>) {
+  return {
+    id: "delete-file",
+    kind: "delete_file" as const,
+    status: "pending" as const,
+    relativePath: "old.md",
+    baseHash: "hash",
+    baseContent: "old\n",
+    unifiedDiff: "",
+    ...overrides
+  };
+}
+
 function fileNode(relativePath: string, kind: FileTreeNode["kind"] = "markdown", children?: FileTreeNode[]): FileTreeNode {
   const name = relativePath.split(/[\\/]/).filter(Boolean).pop() ?? relativePath;
 
@@ -81,7 +94,7 @@ function findDisplayNode(nodes: FileTreeDisplayNode[], relativePath: string): Fi
       return node;
     }
 
-    const children = node.source === "pending-create" ? undefined : node.children;
+    const children = node.source === "pending-create" || node.source === "pending-delete" ? undefined : node.children;
     const childMatch = children ? findDisplayNode(children, relativePath) : null;
 
     if (childMatch) {
@@ -106,12 +119,13 @@ describe("pending file tree changes", () => {
         files: [
           editFile({ id: "newer-file", relativePath: "notes//s2.md" }),
           createFile({ id: "applied-create", relativePath: "done.md", status: "applied" }),
-          createFile({ id: "pending-create", relativePath: "session-4/rubrica.md" })
+          createFile({ id: "pending-create", relativePath: "session-4/rubrica.md" }),
+          deleteFile({ id: "pending-delete", relativePath: "old.md" })
         ]
       })
     ]);
 
-    expect(changes).toHaveLength(2);
+    expect(changes).toHaveLength(3);
     expect(changes).toContainEqual(
       expect.objectContaining({
         proposalId: "newer",
@@ -126,6 +140,14 @@ describe("pending file tree changes", () => {
         fileId: "pending-create",
         kind: "create_file",
         normalizedRelativePath: "session-4/rubrica.md"
+      })
+    );
+    expect(changes).toContainEqual(
+      expect.objectContaining({
+        proposalId: "newer",
+        fileId: "pending-delete",
+        kind: "delete_file",
+        normalizedRelativePath: "old.md"
       })
     );
   });
@@ -201,19 +223,108 @@ describe("pending file tree display nodes", () => {
     expect(file).toMatchObject({ source: "pending-create", name: "new-annex.md" });
   });
 
-  it("does not insert a virtual create file when the real path already exists", () => {
-    const tree = [fileNode("new.md")];
+  it("decorates a real create file when the created path exists on disk", () => {
+    const tree = [fileNode("session-4", "directory", [fileNode("session-4/rubrica.md")])];
     const changes = buildPendingFileTreeChanges([
-      proposal({ id: "proposal-collision", files: [createFile({ id: "create-existing", relativePath: "new.md" })] })
+      proposal({ id: "proposal-create", files: [createFile({ id: "create-existing", relativePath: "session-4/rubrica.md" })] })
     ]);
 
     const displayTree = buildFileTreeDisplayNodes(tree, changes);
-    const newFileRows = displayTree.filter((node) => {
-      const relativePath = node.source === "real" ? node.node.relativePath : node.relativePath;
-      return relativePath === "new.md";
-    });
+    const folder = findDisplayNode(displayTree, "session-4");
+    const file = findDisplayNode(displayTree, "session-4/rubrica.md");
 
-    expect(newFileRows).toHaveLength(1);
-    expect(newFileRows[0]?.source).toBe("real");
+    expect(folder?.source).toBe("real");
+    expect(folder?.source === "real" ? folder.hasPendingDescendant : false).toBe(true);
+    expect(file?.source).toBe("real");
+    expect(file?.source === "real" ? file.pendingTarget?.kind : null).toBe("create_file");
+  });
+
+  it("decorates existing files with pending deletes", () => {
+    const tree = [fileNode("old.md")];
+    const changes = buildPendingFileTreeChanges([
+      proposal({ id: "proposal-delete", files: [deleteFile({ id: "delete-old", relativePath: "old.md" })] })
+    ]);
+
+    const displayTree = buildFileTreeDisplayNodes(tree, changes);
+    const file = findDisplayNode(displayTree, "old.md");
+
+    expect(file?.source).toBe("real");
+    expect(file?.source === "real" ? file.pendingTarget?.kind : null).toBe("delete_file");
+  });
+
+  it("inserts a virtual delete row when the target file is missing", () => {
+    const changes = buildPendingFileTreeChanges([
+      proposal({ id: "proposal-delete", files: [deleteFile({ id: "delete-missing", relativePath: "missing.md" })] })
+    ]);
+
+    const displayTree = buildFileTreeDisplayNodes([], changes);
+    const file = findDisplayNode(displayTree, "missing.md");
+
+    expect(file).toMatchObject({
+      source: "pending-delete",
+      name: "missing.md",
+      path: pendingFileTreePath("missing.md")
+    });
+  });
+
+  it("inserts a virtual delete row under an existing folder when the deleted file is missing", () => {
+    const tree = [
+      fileNode("workspace", "directory", [
+        fileNode("workspace/drafts", "directory", [fileNode("workspace/drafts/empty-draft.md")]),
+        fileNode("workspace/inbox", "directory", [])
+      ])
+    ];
+    const changes = buildPendingFileTreeChanges([
+      proposal({
+        id: "proposal-delete",
+        files: [deleteFile({ id: "delete-move-me", relativePath: "workspace/inbox/move-me-to-drafts.md" })]
+      })
+    ]);
+
+    const displayTree = buildFileTreeDisplayNodes(tree, changes);
+    const workspace = findDisplayNode(displayTree, "workspace");
+    const inbox = findDisplayNode(displayTree, "workspace/inbox");
+    const deletedFile = findDisplayNode(displayTree, "workspace/inbox/move-me-to-drafts.md");
+
+    expect(workspace?.source).toBe("real");
+    expect(workspace?.source === "real" ? workspace.hasPendingDescendant : false).toBe(true);
+    expect(inbox?.source).toBe("real");
+    expect(inbox?.source === "real" ? inbox.hasPendingDescendant : false).toBe(true);
+    expect(deletedFile).toMatchObject({
+      source: "pending-delete",
+      name: "move-me-to-drafts.md",
+      path: pendingFileTreePath("workspace/inbox/move-me-to-drafts.md")
+    });
+  });
+
+  it("annotates later pending siblings after an earlier pending child", () => {
+    const tree = [
+      fileNode("workspace", "directory", [
+        fileNode("workspace/drafts", "directory", [fileNode("workspace/drafts/empty-draft.md")]),
+        fileNode("workspace/inbox", "directory", []),
+        fileNode("workspace/search-field-notes.md")
+      ])
+    ];
+    const changes = buildPendingFileTreeChanges([
+      proposal({
+        id: "proposal-multiple",
+        files: [
+          editFile({ id: "edit-empty", relativePath: "workspace/drafts/empty-draft.md" }),
+          deleteFile({ id: "delete-move-me", relativePath: "workspace/inbox/move-me-to-drafts.md" }),
+          editFile({ id: "edit-search", relativePath: "workspace/search-field-notes.md" })
+        ]
+      })
+    ]);
+
+    const displayTree = buildFileTreeDisplayNodes(tree, changes);
+    const drafts = findDisplayNode(displayTree, "workspace/drafts");
+    const inbox = findDisplayNode(displayTree, "workspace/inbox");
+    const deletedFile = findDisplayNode(displayTree, "workspace/inbox/move-me-to-drafts.md");
+    const searchFile = findDisplayNode(displayTree, "workspace/search-field-notes.md");
+
+    expect(drafts?.source === "real" ? drafts.hasPendingDescendant : false).toBe(true);
+    expect(inbox?.source === "real" ? inbox.hasPendingDescendant : false).toBe(true);
+    expect(deletedFile?.source).toBe("pending-delete");
+    expect(searchFile?.source === "real" ? searchFile.pendingTarget?.fileId : null).toBe("edit-search");
   });
 });

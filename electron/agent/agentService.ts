@@ -1,7 +1,9 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { lstat, mkdir, readFile, rename, rmdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { readMarkdownFile, writeMarkdownFile } from "../fs/fileOps.js";
 import { ensureMarkdownFile, ensureVisibleWorkspacePath } from "../fs/pathSafety.js";
+import { trackWorkspaceMutation } from "../fs/workspaceMutationMarkers.js";
 import {
   createDiagnosticsLogger,
   sanitizeUnknownError,
@@ -40,6 +42,17 @@ import { CompactionCacheStore, compactionPrefixHash, type CompactionCacheHit } f
 import { sanitizeEditorSelection } from "./documentContext.js";
 import { AgentProposalStore } from "./proposalStore.js";
 import { buildMarkdownChangeProposal } from "./markdownChangeContract.js";
+import { buildLineReviewHunks } from "./reviewDiff.js";
+import {
+  captureGitAdvisorySnapshot,
+  checkGitAdvisorySnapshot,
+  type GitAdvisorySnapshot
+} from "./gitAdvisory.js";
+import {
+  captureMarkdownWorkspaceSnapshot,
+  compareMarkdownSnapshots,
+  type MarkdownSnapshot
+} from "./markdownCapture.js";
 import { CodexAppServerClient } from "./runtime/codexAppServerClient.js";
 import { CodexAppServerRuntimeProvider } from "./runtime/codexAppServerProvider.js";
 import { OpenAiResponsesRuntimeProvider } from "./runtime/openaiResponsesProvider.js";
@@ -77,9 +90,11 @@ import {
 } from "./transcription.js";
 import type {
   AgentDraftFileChange,
+  AgentChangeProposal,
   AgentError,
   AgentChatThread,
   AgentErrorCode,
+  AgentProposalFileChange,
   AgentProposalSource,
   AgentRunContextItem,
   AgentRunPhase,
@@ -90,8 +105,12 @@ import type {
   ApplyAgentCreateDocumentRequest,
   ApplyAgentCreateDocumentResponse,
   ApplyAgentProposalFileRequest,
+  ApplyAgentProposalFileResponse,
   ApplyAgentPatchRequest,
   ApplyAgentPatchResponse,
+  ExternalAgentCaptureCancelResponse,
+  ExternalAgentCaptureFinishResponse,
+  ExternalAgentCaptureStartResponse,
   RejectAgentProposalFileRequest,
   RejectAgentProposalRequest,
   ResolveAgentProposalHunkRequest
@@ -106,6 +125,18 @@ export interface AgentServiceOptions {
   compactionCacheStore?: CompactionCacheStore;
 }
 
+interface ExternalAgentCaptureSession {
+  captureId: string;
+  workspaceRoot: string;
+  agentName?: string;
+  startedAt: string;
+  baselineId: string;
+  snapshotId: string;
+  snapshot: MarkdownSnapshot;
+  gitSnapshot: GitAdvisorySnapshot;
+  proposal: AgentChangeProposal | null;
+}
+
 const compactionTimeoutMs = 60_000;
 const compactionFailureLimit = 2;
 
@@ -116,6 +147,8 @@ export class AgentService {
   private readonly contextManifestStore: AgentContextManifestStore;
   private readonly diagnostics: DiagnosticsLogger;
   private readonly activeRuns = new Map<string, AbortController>();
+  private readonly externalCaptures = new Map<string, ExternalAgentCaptureSession>();
+  private readonly externalCaptureIdsByWorkspace = new Map<string, string>();
   private codexAppServerClient: CodexAppServerClient | null = null;
   private readonly unavailableAutocompleteModels = new Set<string>();
   private readonly compactionCacheStore: CompactionCacheStore;
@@ -161,6 +194,8 @@ export class AgentService {
     }
 
     this.activeRuns.clear();
+    this.externalCaptures.clear();
+    this.externalCaptureIdsByWorkspace.clear();
     this.codexAppServerClient?.dispose();
     this.codexAppServerClient = null;
     void this.diagnostics.flush();
@@ -585,7 +620,9 @@ export class AgentService {
       throw new Error("The document changed after this proposal was created. Ask the assistant to regenerate it.");
     }
 
-    const result = await writeMarkdownFile(request.workspaceRoot, request.patch.path, request.patch.replacement);
+    const result = await trackWorkspaceMutation(request.workspaceRoot, [request.patch.path], () =>
+      writeMarkdownFile(request.workspaceRoot, request.patch.path, request.patch.replacement)
+    );
 
     return {
       savedAt: result.savedAt,
@@ -609,16 +646,18 @@ export class AgentService {
     ensureMarkdownFile(request.workspaceRoot, filePath);
     ensureVisibleWorkspacePath(request.workspaceRoot, path.dirname(filePath));
 
-    await mkdir(path.dirname(filePath), { recursive: true });
-    try {
-      await writeFile(filePath, request.document.content, { encoding: "utf8", flag: "wx" });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-        throw new Error("A file with that assistant-proposed name already exists.");
-      }
+    await trackWorkspaceMutation(request.workspaceRoot, [filePath], async () => {
+      await mkdir(path.dirname(filePath), { recursive: true });
+      try {
+        await writeFile(filePath, request.document.content, { encoding: "utf8", flag: "wx" });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+          throw new Error("A file with that assistant-proposed name already exists.");
+        }
 
-      throw error;
-    }
+        throw error;
+      }
+    });
 
     return {
       savedAt: new Date().toISOString(),
@@ -632,29 +671,229 @@ export class AgentService {
     };
   }
 
-  listProposals(workspaceRoot: string) {
-    return this.proposalStore.listProposals(workspaceRoot);
+  async startExternalCapture({
+    workspaceRoot,
+    agentName
+  }: {
+    workspaceRoot: string;
+    agentName?: string;
+  }): Promise<ExternalAgentCaptureStartResponse> {
+    const startedAt = Date.now();
+    const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+
+    try {
+      const existingCaptureId = this.externalCaptureIdsByWorkspace.get(resolvedWorkspaceRoot);
+
+      if (existingCaptureId) {
+        const existingSession = this.externalCaptures.get(existingCaptureId);
+
+        if (existingSession) {
+          this.logExternalCaptureInfo("external_capture.resumed", startedAt, existingSession.workspaceRoot, {
+            captureId: existingSession.captureId,
+            markdownFileCount: existingSession.snapshot.files.size,
+            hasProposal: Boolean(existingSession.proposal),
+            proposalFileCount: existingSession.proposal?.files.length ?? 0
+          });
+
+          return {
+            captureId: existingSession.captureId,
+            workspaceRoot: existingSession.workspaceRoot,
+            startedAt: existingSession.startedAt,
+            markdownFileCount: existingSession.snapshot.files.size,
+            resumed: true
+          };
+        }
+
+        this.externalCaptureIdsByWorkspace.delete(resolvedWorkspaceRoot);
+      }
+
+      const [snapshot, gitSnapshot] = await Promise.all([
+        captureMarkdownWorkspaceSnapshot({ workspaceRoot: resolvedWorkspaceRoot }),
+        captureGitAdvisorySnapshot(resolvedWorkspaceRoot)
+      ]);
+      const captureId = randomUUID();
+      const startedAtIso = new Date().toISOString();
+
+      this.externalCaptures.set(captureId, {
+        captureId,
+        workspaceRoot: resolvedWorkspaceRoot,
+        agentName: agentName?.trim() || undefined,
+        startedAt: startedAtIso,
+        baselineId: randomUUID(),
+        snapshotId: randomUUID(),
+        snapshot,
+        gitSnapshot,
+        proposal: null
+      });
+      this.externalCaptureIdsByWorkspace.set(resolvedWorkspaceRoot, captureId);
+      this.logExternalCaptureInfo("external_capture.started", startedAt, resolvedWorkspaceRoot, {
+        captureId,
+        markdownFileCount: snapshot.files.size,
+        gitStatus: gitSnapshot.status,
+        gitReason: gitSnapshot.status === "unavailable" ? gitSnapshot.reason : null
+      });
+
+      return {
+        captureId,
+        workspaceRoot: resolvedWorkspaceRoot,
+        startedAt: startedAtIso,
+        markdownFileCount: snapshot.files.size
+      };
+    } catch (error) {
+      this.logExternalCaptureWarn("external_capture.start_failed", startedAt, resolvedWorkspaceRoot, error);
+      throw error;
+    }
   }
 
-  applyProposalFile(request: ApplyAgentProposalFileRequest) {
-    return this.proposalStore.applyProposalFile(request.workspaceRoot, request.proposalId, request.fileId);
+  async finishExternalCapture({
+    workspaceRoot,
+    captureId
+  }: {
+    workspaceRoot: string;
+    captureId: string;
+  }): Promise<ExternalAgentCaptureFinishResponse> {
+    const startedAt = Date.now();
+    const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+
+    try {
+      const session = this.externalCaptureSession(workspaceRoot, captureId);
+
+      const after = await captureMarkdownWorkspaceSnapshot({ workspaceRoot: session.workspaceRoot });
+      const diff = compareMarkdownSnapshots({
+        before: session.snapshot,
+        after,
+        sourceLabel: session.agentName ?? "External agent"
+      });
+      session.gitSnapshot = await captureGitAdvisorySnapshot(session.workspaceRoot);
+      session.snapshotId = randomUUID();
+
+      if (diff.draftFileChanges.length === 0) {
+        session.proposal = null;
+        this.logExternalCaptureInfo("external_capture.finished", startedAt, session.workspaceRoot, {
+          captureId,
+          status: "empty",
+          markdownFileCount: after.files.size,
+          changeFileCount: 0,
+          unsupportedNoteCount: diff.unsupportedNotes.length
+        });
+
+        return {
+          status: "empty",
+          captureId,
+          restoredRelativePaths: [],
+          restoredCreateRelativePaths: [],
+          unsupportedNotes: diff.unsupportedNotes
+        };
+      }
+
+      const proposal = buildExternalFilesystemProposal(session, diff.draftFileChanges);
+      session.proposal = proposal;
+      this.logExternalCaptureInfo("external_capture.finished", startedAt, session.workspaceRoot, {
+        captureId,
+        status: "proposal",
+        markdownFileCount: after.files.size,
+        unsupportedNoteCount: diff.unsupportedNotes.length,
+        ...externalProposalFileKindDetails(proposal.files)
+      });
+
+      return {
+        status: "proposal",
+        captureId,
+        proposal,
+        restoredRelativePaths: [],
+        restoredCreateRelativePaths: [],
+        unsupportedNotes: diff.unsupportedNotes
+      };
+    } catch (error) {
+      this.logExternalCaptureWarn("external_capture.finish_failed", startedAt, resolvedWorkspaceRoot, error, { captureId });
+      throw error;
+    }
   }
 
-  rejectProposalFile(request: RejectAgentProposalFileRequest) {
+  async cancelExternalCapture({
+    workspaceRoot,
+    captureId
+  }: {
+    workspaceRoot: string;
+    captureId: string;
+  }): Promise<ExternalAgentCaptureCancelResponse> {
+    const startedAt = Date.now();
+    const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+
+    try {
+      const session = this.externalCaptureSession(workspaceRoot, captureId);
+      this.clearExternalCaptureSession(session);
+      this.logExternalCaptureInfo("external_capture.canceled", startedAt, session.workspaceRoot, { captureId });
+
+      return {
+        status: "canceled",
+        captureId,
+        restoredRelativePaths: [],
+        restoredCreateRelativePaths: [],
+        unsupportedNotes: []
+      };
+    } catch (error) {
+      this.logExternalCaptureWarn("external_capture.cancel_failed", startedAt, resolvedWorkspaceRoot, error, { captureId });
+      throw error;
+    }
+  }
+
+  async listProposals(workspaceRoot: string) {
+    const proposals = (await this.proposalStore.listProposals(workspaceRoot)).filter(
+      (proposal) => proposal.source.kind !== "external_agent" && proposal.metadata?.kind !== "external_filesystem"
+    );
+    const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+
+    for (const session of this.externalCaptures.values()) {
+      if (session.workspaceRoot === resolvedWorkspaceRoot && session.proposal) {
+        proposals.push(cloneAgentProposal(session.proposal));
+      }
+    }
+
+    return proposals.sort((a, b) => Date.parse(b.updatedAt || b.createdAt) - Date.parse(a.updatedAt || a.createdAt));
+  }
+
+  async applyProposalFile(request: ApplyAgentProposalFileRequest) {
+    const externalSession = this.externalCaptureSessionForProposal(request.workspaceRoot, request.proposalId);
+
+    if (externalSession) {
+      return this.applyExternalProposalFile(externalSession, request.fileId);
+    }
+
+    return trackWorkspaceMutation(request.workspaceRoot, undefined, () =>
+      this.proposalStore.applyProposalFile(request.workspaceRoot, request.proposalId, request.fileId)
+    );
+  }
+
+  async rejectProposalFile(request: RejectAgentProposalFileRequest) {
+    const externalSession = this.externalCaptureSessionForProposal(request.workspaceRoot, request.proposalId);
+
+    if (externalSession) {
+      return this.rejectExternalProposalFile(externalSession, request.fileId);
+    }
+
     return this.proposalStore.rejectProposalFile(request.workspaceRoot, request.proposalId, request.fileId);
   }
 
-  rejectProposal(request: RejectAgentProposalRequest) {
+  async rejectProposal(request: RejectAgentProposalRequest) {
+    const externalSession = this.externalCaptureSessionForProposal(request.workspaceRoot, request.proposalId);
+
+    if (externalSession) {
+      return this.rejectExternalProposal(externalSession);
+    }
+
     return this.proposalStore.rejectProposal(request.workspaceRoot, request.proposalId);
   }
 
   resolveProposalHunk(request: ResolveAgentProposalHunkRequest) {
-    return this.proposalStore.resolveProposalHunk(
-      request.workspaceRoot,
-      request.proposalId,
-      request.fileId,
-      request.hunkId,
-      request.decision
+    return trackWorkspaceMutation(request.workspaceRoot, undefined, () =>
+      this.proposalStore.resolveProposalHunk(
+        request.workspaceRoot,
+        request.proposalId,
+        request.fileId,
+        request.hunkId,
+        request.decision
+      )
     );
   }
 
@@ -1076,6 +1315,273 @@ const controller = new AbortController();
     );
   }
 
+  private externalCaptureSession(workspaceRoot: string, captureId: string) {
+    const session = this.externalCaptures.get(captureId);
+    const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+
+    if (!session || session.workspaceRoot !== resolvedWorkspaceRoot) {
+      throw new Error("External capture not found for this workspace.");
+    }
+
+    return session;
+  }
+
+  private externalCaptureSessionForProposal(workspaceRoot: string, proposalId: string) {
+    const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+
+    for (const session of this.externalCaptures.values()) {
+      if (session.workspaceRoot === resolvedWorkspaceRoot && session.proposal?.id === proposalId) {
+        return session;
+      }
+    }
+
+    return null;
+  }
+
+  private async refreshExternalCaptureProposal(session: ExternalAgentCaptureSession) {
+    const startedAt = Date.now();
+    const after = await captureMarkdownWorkspaceSnapshot({ workspaceRoot: session.workspaceRoot });
+    const diff = compareMarkdownSnapshots({
+      before: session.snapshot,
+      after,
+      sourceLabel: session.agentName ?? "External agent"
+    });
+
+    session.gitSnapshot = await captureGitAdvisorySnapshot(session.workspaceRoot);
+    session.snapshotId = randomUUID();
+
+    if (diff.draftFileChanges.length === 0) {
+      session.proposal = null;
+      this.logExternalCaptureInfo("external_capture.refreshed", startedAt, session.workspaceRoot, {
+        captureId: session.captureId,
+        status: "empty",
+        markdownFileCount: after.files.size,
+        changeFileCount: 0,
+        unsupportedNoteCount: diff.unsupportedNotes.length
+      });
+      return null;
+    }
+
+    session.proposal = buildExternalFilesystemProposal(session, diff.draftFileChanges);
+    this.logExternalCaptureInfo("external_capture.refreshed", startedAt, session.workspaceRoot, {
+      captureId: session.captureId,
+      status: "proposal",
+      markdownFileCount: after.files.size,
+      unsupportedNoteCount: diff.unsupportedNotes.length,
+      ...externalProposalFileKindDetails(session.proposal.files)
+    });
+    return session.proposal;
+  }
+
+  private async applyExternalProposalFile(
+    session: ExternalAgentCaptureSession,
+    fileId: string
+  ): Promise<ApplyAgentProposalFileResponse> {
+    const proposal = externalProposalOrThrow(session);
+    const action = await this.externalProposalFileForAction(session, proposal, fileId);
+
+    if (!action) {
+      const file = externalProposalFileOrThrow(proposal, fileId);
+      return externalApplyResponse(file, terminalExternalProposal(proposal, fileId, "stale"), "stale");
+    }
+
+    const { file } = action;
+
+    if (file.kind === "edit_file") {
+      this.setExternalBaselineFile(session, file.relativePath, file.replacement);
+      const refreshed = await this.refreshExternalCaptureProposal(session);
+      return externalApplyResponse(file, refreshed ?? terminalExternalProposal(action.proposal, fileId, "applied"), "applied", {
+        content: file.replacement
+      });
+    }
+
+    if (file.kind === "create_file") {
+      this.setExternalBaselineFile(session, file.relativePath, file.content);
+      const refreshed = await this.refreshExternalCaptureProposal(session);
+      return externalApplyResponse(file, refreshed ?? terminalExternalProposal(action.proposal, fileId, "applied"), "applied", {
+        content: file.content,
+        file: fileTreeNode(session.workspaceRoot, path.join(session.workspaceRoot, file.relativePath))
+      });
+    }
+
+    this.deleteExternalBaselineFile(session, file.relativePath);
+    const refreshed = await this.refreshExternalCaptureProposal(session);
+    return externalApplyResponse(file, refreshed ?? terminalExternalProposal(action.proposal, fileId, "applied"), "applied");
+  }
+
+  private async rejectExternalProposalFile(
+    session: ExternalAgentCaptureSession,
+    fileId: string
+  ): Promise<AgentChangeProposal> {
+    const proposal = externalProposalOrThrow(session);
+    const action = await this.externalProposalFileForAction(session, proposal, fileId);
+
+    if (!action) {
+      return cloneAgentProposal(terminalExternalProposal(proposal, fileId, "stale"));
+    }
+
+    const { file } = action;
+
+    await this.ensureExternalDestructiveWriteAllowed(session);
+
+    if (file.kind === "edit_file") {
+      await trackWorkspaceMutation(session.workspaceRoot, [path.join(session.workspaceRoot, file.relativePath)], () =>
+        writeMarkdownFile(session.workspaceRoot, path.join(session.workspaceRoot, file.relativePath), file.baseContent)
+      );
+    } else if (file.kind === "create_file") {
+      await trackWorkspaceMutation(session.workspaceRoot, [path.join(session.workspaceRoot, file.relativePath)], () =>
+        this.moveExternalFileToQuarantine(session.workspaceRoot, file.relativePath)
+      );
+    } else {
+      await trackWorkspaceMutation(session.workspaceRoot, [path.join(session.workspaceRoot, file.relativePath)], async () => {
+        const absolutePath = path.join(session.workspaceRoot, file.relativePath);
+        await mkdir(path.dirname(absolutePath), { recursive: true });
+        await writeMarkdownFile(session.workspaceRoot, absolutePath, file.baseContent);
+      });
+    }
+
+    return cloneAgentProposal(
+      (await this.refreshExternalCaptureProposal(session)) ?? terminalExternalProposal(action.proposal, fileId, "rejected")
+    );
+  }
+
+  private async externalProposalFileForAction(
+    session: ExternalAgentCaptureSession,
+    proposal: AgentChangeProposal,
+    fileId: string
+  ) {
+    const file = externalProposalFileOrThrow(proposal, fileId);
+    const current = await this.readExternalPathState(session.workspaceRoot, file.relativePath);
+
+    if (externalFileMatchesReviewedState(file, current)) {
+      return { proposal, file };
+    }
+
+    const refreshed = await this.refreshExternalCaptureProposal(session);
+
+    if (!refreshed) {
+      return null;
+    }
+
+    const refreshedFile = refreshed.files.find((candidate) => candidate.id === fileId);
+
+    if (!refreshedFile) {
+      return null;
+    }
+
+    const refreshedCurrent = await this.readExternalPathState(session.workspaceRoot, refreshedFile.relativePath);
+
+    if (!externalFileMatchesReviewedState(refreshedFile, refreshedCurrent)) {
+      return null;
+    }
+
+    return { proposal: refreshed, file: refreshedFile };
+  }
+
+  private async rejectExternalProposal(session: ExternalAgentCaptureSession): Promise<AgentChangeProposal> {
+    const proposal = externalProposalOrThrow(session);
+    const mutableFiles = proposal.files.filter((file) => file.status === "pending" || file.status === "stale" || file.status === "failed");
+
+    for (const file of mutableFiles) {
+      const current = await this.readExternalPathState(session.workspaceRoot, file.relativePath);
+
+      if (!externalFileMatchesReviewedState(file, current)) {
+        return cloneAgentProposal(
+          (await this.refreshExternalCaptureProposal(session)) ?? terminalExternalProposal(proposal, file.id, "stale")
+        );
+      }
+    }
+
+    await this.ensureExternalDestructiveWriteAllowed(session);
+
+    for (const file of mutableFiles) {
+      if (file.kind === "edit_file") {
+        await trackWorkspaceMutation(session.workspaceRoot, [path.join(session.workspaceRoot, file.relativePath)], () =>
+          writeMarkdownFile(session.workspaceRoot, path.join(session.workspaceRoot, file.relativePath), file.baseContent)
+        );
+      } else if (file.kind === "create_file") {
+        await trackWorkspaceMutation(session.workspaceRoot, [path.join(session.workspaceRoot, file.relativePath)], () =>
+          this.moveExternalFileToQuarantine(session.workspaceRoot, file.relativePath)
+        );
+      } else {
+        await trackWorkspaceMutation(session.workspaceRoot, [path.join(session.workspaceRoot, file.relativePath)], async () => {
+          const absolutePath = path.join(session.workspaceRoot, file.relativePath);
+          await mkdir(path.dirname(absolutePath), { recursive: true });
+          await writeMarkdownFile(session.workspaceRoot, absolutePath, file.baseContent);
+        });
+      }
+    }
+
+    return cloneAgentProposal(
+      (await this.refreshExternalCaptureProposal(session)) ?? terminalExternalProposal(proposal, mutableFiles[0]?.id ?? "", "rejected")
+    );
+  }
+
+  private async readExternalPathState(workspaceRoot: string, relativePath: string) {
+    const absolutePath = path.join(workspaceRoot, relativePath);
+
+    try {
+      ensureMarkdownFile(workspaceRoot, absolutePath);
+      ensureVisibleWorkspacePath(workspaceRoot, path.dirname(absolutePath));
+      await ensureSafeAncestors(workspaceRoot, path.dirname(absolutePath));
+      const stats = await lstat(absolutePath);
+
+      if (stats.isSymbolicLink() || !stats.isFile()) {
+        return { status: "unsafe" as const };
+      }
+
+      return { status: "present" as const, content: await readFile(absolutePath, "utf8") };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return { status: "absent" as const };
+      }
+
+      return { status: "unsafe" as const };
+    }
+  }
+
+  private setExternalBaselineFile(session: ExternalAgentCaptureSession, relativePath: string, content: string) {
+    const absolutePath = path.join(session.workspaceRoot, relativePath);
+    session.snapshot.files.set(relativePath, {
+      absolutePath,
+      relativePath,
+      content,
+      baseHash: hashMarkdown(content),
+      existed: true
+    });
+    session.baselineId = randomUUID();
+  }
+
+  private deleteExternalBaselineFile(session: ExternalAgentCaptureSession, relativePath: string) {
+    session.snapshot.files.delete(relativePath);
+    session.baselineId = randomUUID();
+  }
+
+  private async ensureExternalDestructiveWriteAllowed(session: ExternalAgentCaptureSession) {
+    const gitCheck = await checkGitAdvisorySnapshot(session.workspaceRoot, session.gitSnapshot);
+
+    if (gitCheck.status === "head_changed") {
+      throw new Error("Repository changed outside Iliad; refresh outside changes before restoring files.");
+    }
+
+    if (gitCheck.status === "unsafe") {
+      throw new Error("Repository state could not be checked before restoring outside changes.");
+    }
+  }
+
+  private async moveExternalFileToQuarantine(workspaceRoot: string, relativePath: string) {
+    const absolutePath = path.join(workspaceRoot, relativePath);
+    const quarantinePath = path.join(this.userDataPath, "external-review-trash", randomUUID(), relativePath);
+    await mkdir(path.dirname(quarantinePath), { recursive: true });
+    await rename(absolutePath, quarantinePath);
+    await removeEmptyAncestors(path.dirname(absolutePath), workspaceRoot);
+  }
+
+  private clearExternalCaptureSession(session: ExternalAgentCaptureSession) {
+    this.externalCaptures.delete(session.captureId);
+    this.externalCaptureIdsByWorkspace.delete(session.workspaceRoot);
+  }
+
   private async saveDraftProposals({
     request,
     responseId,
@@ -1113,11 +1619,48 @@ const controller = new AbortController();
         proposalCount: 1,
         fileCount: savedProposal.files.length,
         editFileCount: savedProposal.files.filter((file) => file.kind === "edit_file").length,
-        createFileCount: savedProposal.files.filter((file) => file.kind === "create_file").length
+        createFileCount: savedProposal.files.filter((file) => file.kind === "create_file").length,
+        deleteFileCount: savedProposal.files.filter((file) => file.kind === "delete_file").length
       }
     });
 
     return [savedProposal];
+  }
+
+  private logExternalCaptureInfo(
+    event: string,
+    startedAt: number,
+    workspaceRoot: string,
+    details: Record<string, DiagnosticDetailValue>
+  ) {
+    this.diagnostics.info({
+      area: "agent",
+      event,
+      durationMs: Date.now() - startedAt,
+      details: {
+        workspaceFingerprint: workspaceFingerprint(workspaceRoot),
+        ...details
+      }
+    });
+  }
+
+  private logExternalCaptureWarn(
+    event: string,
+    startedAt: number,
+    workspaceRoot: string,
+    error: unknown,
+    details: Record<string, DiagnosticDetailValue> = {}
+  ) {
+    this.diagnostics.warn({
+      area: "agent",
+      event,
+      durationMs: Date.now() - startedAt,
+      details: {
+        workspaceFingerprint: workspaceFingerprint(workspaceRoot),
+        ...details,
+        ...sanitizeUnknownError(error)
+      }
+    });
   }
 
   private logRunStarted(request: AgentRunRequest, model: string) {
@@ -1461,6 +2004,232 @@ function titleContextSnippet(text: string) {
 
 function estimateMessagesTokens(messages: ConversationHistoryMessage[]) {
   return messages.reduce((total, message) => total + estimateTokensFromText(message.content), 0);
+}
+
+function externalCaptureRunRequest(session: ExternalAgentCaptureSession): AgentRunRequest {
+  return {
+    runId: `external-agent-${session.captureId}`,
+    workspaceRoot: session.workspaceRoot,
+    activeFile: null,
+    messages: [],
+    prompt: "External agent changes",
+    mode: "balanced",
+    language: "en"
+  };
+}
+
+function buildExternalFilesystemProposal(
+  session: ExternalAgentCaptureSession,
+  draftFileChanges: AgentDraftFileChange[]
+): AgentChangeProposal {
+  const sortedDrafts = [...draftFileChanges].sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+  const proposal = buildMarkdownChangeProposal({
+    request: externalCaptureRunRequest(session),
+    model: "external-filesystem",
+    source: {
+      kind: "external_agent",
+      agentName: session.agentName
+    },
+    draftFileChanges: sortedDrafts
+  });
+
+  if (!proposal) {
+    throw new Error("External changes could not be prepared for review.");
+  }
+
+  proposal.id = externalProposalId(session);
+  proposal.runId = `external-agent-${session.captureId}`;
+  proposal.metadata = {
+    kind: "external_filesystem",
+    baselineId: session.baselineId,
+    snapshotId: session.snapshotId,
+    liveDisk: true,
+    sessionScoped: true
+  };
+  proposal.files = proposal.files.map((file) => {
+    file.id = externalFileId(file.relativePath);
+
+    if (file.kind === "edit_file") {
+      file.hunks = buildLineReviewHunks(file.baseContent, file.replacement, file.id);
+      file.baselineState = "present";
+      file.baselineContentHash = file.baseHash;
+      file.reviewedState = "present";
+      file.reviewedContentHash = hashMarkdown(file.replacement);
+    } else if (file.kind === "create_file") {
+      file.baselineState = "absent";
+      file.reviewedState = "present";
+      file.reviewedContentHash = hashMarkdown(file.content);
+    } else {
+      file.baselineState = "present";
+      file.baselineContentHash = file.baseHash;
+      file.reviewedState = "absent";
+    }
+
+    return file;
+  });
+
+  return proposal;
+}
+
+function externalProposalId(session: ExternalAgentCaptureSession) {
+  return `proposal-external-filesystem-${session.captureId}`;
+}
+
+function externalFileId(relativePath: string) {
+  return `external-file-${createHash("sha256").update(relativePath).digest("hex").slice(0, 16)}`;
+}
+
+function cloneAgentProposal(proposal: AgentChangeProposal): AgentChangeProposal {
+  return JSON.parse(JSON.stringify(proposal)) as AgentChangeProposal;
+}
+
+function externalProposalOrThrow(session: ExternalAgentCaptureSession) {
+  if (!session.proposal) {
+    throw new Error("No outside changes are pending review.");
+  }
+
+  return session.proposal;
+}
+
+function externalProposalFileOrThrow(proposal: AgentChangeProposal, fileId: string) {
+  const file = proposal.files.find((candidate) => candidate.id === fileId);
+
+  if (!file) {
+    throw new Error("Outside change was not found.");
+  }
+
+  return file;
+}
+
+async function ensureSafeAncestors(workspaceRoot: string, directoryPath: string) {
+  const root = path.resolve(workspaceRoot);
+  let current = path.resolve(directoryPath);
+  const ancestors: string[] = [];
+
+  while (current !== root) {
+    if (path.relative(root, current).startsWith("..")) {
+      throw new Error("Path is outside the workspace.");
+    }
+
+    ancestors.push(current);
+    current = path.dirname(current);
+  }
+
+  for (const ancestor of ancestors.reverse()) {
+    try {
+      const stats = await lstat(ancestor);
+
+      if (stats.isSymbolicLink() || !stats.isDirectory()) {
+        throw new Error("Path was replaced outside Iliad.");
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return;
+      }
+
+      throw error;
+    }
+  }
+}
+
+async function removeEmptyAncestors(directoryPath: string, workspaceRoot: string) {
+  let currentPath = path.resolve(directoryPath);
+  const root = path.resolve(workspaceRoot);
+
+  while (currentPath !== root && !path.relative(root, currentPath).startsWith("..")) {
+    try {
+      await rmdir(currentPath);
+    } catch {
+      return;
+    }
+
+    currentPath = path.dirname(currentPath);
+  }
+}
+
+function workspaceFingerprint(workspaceRoot: string) {
+  return createHash("sha256").update(path.resolve(workspaceRoot)).digest("hex").slice(0, 12);
+}
+
+function externalProposalFileKindDetails(files: AgentProposalFileChange[]): Record<string, DiagnosticDetailValue> {
+  return {
+    changeFileCount: files.length,
+    editFileCount: files.filter((file) => file.kind === "edit_file").length,
+    createFileCount: files.filter((file) => file.kind === "create_file").length,
+    deleteFileCount: files.filter((file) => file.kind === "delete_file").length
+  };
+}
+
+function externalFileMatchesReviewedState(
+  file: AgentProposalFileChange,
+  current: { status: "present"; content: string } | { status: "absent" } | { status: "unsafe" }
+) {
+  if (current.status === "unsafe") {
+    throw new Error("The reviewed path changed into an unsafe file type outside Iliad.");
+  }
+
+  if (file.reviewedState === "absent" || file.kind === "delete_file") {
+    return current.status === "absent";
+  }
+
+  if (current.status !== "present") {
+    return false;
+  }
+
+  const reviewedHash =
+    file.reviewedContentHash ??
+    (file.kind === "edit_file" ? hashMarkdown(file.replacement) : file.kind === "create_file" ? hashMarkdown(file.content) : undefined);
+
+  return Boolean(reviewedHash && hashMarkdown(current.content) === reviewedHash);
+}
+
+function terminalExternalProposal(
+  proposal: AgentChangeProposal,
+  fileId: string,
+  status: "applied" | "rejected" | "stale"
+): AgentChangeProposal {
+  const next = cloneAgentProposal(proposal);
+
+  for (const file of next.files) {
+    if (!fileId || file.id === fileId) {
+      file.status = status === "stale" ? "stale" : status;
+      if (file.kind === "edit_file") {
+        for (const hunk of file.hunks ?? []) {
+          if (hunk.status === "pending" || hunk.status === "stale") {
+            hunk.status = status === "applied" ? "accepted" : status === "rejected" ? "rejected" : "stale";
+          }
+        }
+      }
+    }
+  }
+
+  next.status = status === "stale" ? "stale" : status;
+  next.updatedAt = new Date().toISOString();
+  return next;
+}
+
+function externalApplyResponse(
+  file: AgentProposalFileChange,
+  proposal: AgentChangeProposal,
+  status: "applied" | "stale",
+  options: { content?: string; file?: { name: string; path: string; relativePath: string; kind: "markdown" } } = {}
+): ApplyAgentProposalFileResponse {
+  return {
+    kind: file.kind,
+    proposal: cloneAgentProposal(proposal),
+    fileId: file.id,
+    status,
+    ...options
+  } as ApplyAgentProposalFileResponse;
+}
+
+function fileTreeNode(workspaceRoot: string, filePath: string) {
+  return {
+    name: path.basename(filePath),
+    path: filePath,
+    relativePath: path.relative(workspaceRoot, filePath),
+    kind: "markdown" as const
+  };
 }
 
 function sanitizeRunRequest(request: AgentRunRequest): AgentRunRequest {

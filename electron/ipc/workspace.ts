@@ -3,7 +3,10 @@ import type { OpenDialogOptions, WebContents } from "electron";
 import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { readDirectory, type FileTreeNode } from "../fs/fileOps.js";
+import { isIgnoredWorkspaceName, markdownExtensions } from "../fs/pathSafety.js";
+import { workspaceMutationMarkerMatches } from "../fs/workspaceMutationMarkers.js";
 import { rememberWorkspace } from "../fs/workspaceRegistry.js";
+import { workspaceMutationLeaseOwner } from "../agent/workspaceMutationLease.js";
 import { canonicalizeWorkspaceDirectory, type WorkspaceInfo } from "../launch/workspace.js";
 
 interface WorkspaceIpcOptions {
@@ -25,6 +28,14 @@ interface WorkspaceWatcherState {
   workspaceRoot: string;
   watcher: FSWatcher;
   timer: NodeJS.Timeout | null;
+  pendingChange: WorkspaceChangePayload | null;
+}
+
+interface WorkspaceChangePayload {
+  workspaceRoot: string;
+  treeChanged: boolean;
+  markdownChanged: boolean;
+  changedMarkdownPaths: string[];
 }
 
 const latestReadRequestIdsByWebContentsId = new Map<number, number>();
@@ -60,6 +71,42 @@ export function workspaceWatchEventNeedsTreeRefresh(eventType: string | null | u
   return eventType === "rename";
 }
 
+function normalizeWatchFilename(filename: string | Buffer | null | undefined) {
+  if (!filename) {
+    return null;
+  }
+
+  const value = typeof filename === "string" ? filename : filename.toString("utf8");
+  const normalized = path.normalize(value);
+
+  if (path.isAbsolute(normalized) || normalized.startsWith("..")) {
+    return null;
+  }
+
+  return normalized;
+}
+
+export function workspaceWatchEventIsMarkdownChange(
+  eventType: string | null | undefined,
+  filename?: string | Buffer | null
+) {
+  if (eventType !== "change" && eventType !== "rename") {
+    return false;
+  }
+
+  const relativePath = normalizeWatchFilename(filename);
+  if (!relativePath) {
+    return false;
+  }
+
+  const segments = relativePath.split(path.sep);
+  if (segments.some(isIgnoredWorkspaceName)) {
+    return false;
+  }
+
+  return markdownExtensions.has(path.extname(relativePath).toLowerCase());
+}
+
 function closeWorkspaceWatcher(webContentsId: number) {
   const current = workspaceWatchersByWebContentsId.get(webContentsId);
   if (!current) {
@@ -74,7 +121,20 @@ function closeWorkspaceWatcher(webContentsId: number) {
   workspaceWatchersByWebContentsId.delete(webContentsId);
 }
 
-function scheduleWorkspaceChanged(sender: WebContents, state: WorkspaceWatcherState) {
+function scheduleWorkspaceChanged(sender: WebContents, state: WorkspaceWatcherState, change: WorkspaceChangePayload) {
+  const current = state.pendingChange;
+  const changedMarkdownPaths = new Set([
+    ...(current?.changedMarkdownPaths ?? []),
+    ...change.changedMarkdownPaths
+  ]);
+
+  state.pendingChange = {
+    workspaceRoot: state.workspaceRoot,
+    treeChanged: Boolean(current?.treeChanged || change.treeChanged),
+    markdownChanged: Boolean(current?.markdownChanged || change.markdownChanged),
+    changedMarkdownPaths: [...changedMarkdownPaths]
+  };
+
   if (state.timer) {
     clearTimeout(state.timer);
   }
@@ -87,7 +147,14 @@ function scheduleWorkspaceChanged(sender: WebContents, state: WorkspaceWatcherSt
       return;
     }
 
-    sender.send(workspaceChangeChannel, { workspaceRoot: state.workspaceRoot });
+    const payload = state.pendingChange ?? {
+      workspaceRoot: state.workspaceRoot,
+      treeChanged: true,
+      markdownChanged: false,
+      changedMarkdownPaths: []
+    };
+    state.pendingChange = null;
+    sender.send(workspaceChangeChannel, payload);
   }, workspaceWatchDebounceMs);
 }
 
@@ -103,9 +170,25 @@ function createWorkspaceWatcher(sender: WebContents, workspace: WorkspaceInfo): 
   const recursive = process.platform === "darwin" || process.platform === "win32";
   let state: WorkspaceWatcherState;
 
-  const onChange = (eventType: string | null) => {
-    if (workspaceWatchEventNeedsTreeRefresh(eventType)) {
-      scheduleWorkspaceChanged(sender, state);
+  const onChange = (eventType: string | null, filename?: string | Buffer | null) => {
+    const relativePath = normalizeWatchFilename(filename);
+    const treeChanged = workspaceWatchEventNeedsTreeRefresh(eventType);
+    const markdownChanged = workspaceWatchEventIsMarkdownChange(eventType, filename);
+
+    if (
+      (treeChanged || markdownChanged) &&
+      (workspaceMutationLeaseOwner(workspace.path) || workspaceMutationMarkerMatches(workspace.path, relativePath))
+    ) {
+      return;
+    }
+
+    if (treeChanged || markdownChanged) {
+      scheduleWorkspaceChanged(sender, state, {
+        workspaceRoot: workspace.path,
+        treeChanged,
+        markdownChanged,
+        changedMarkdownPaths: markdownChanged && relativePath ? [relativePath] : []
+      });
     }
   };
 
@@ -124,7 +207,8 @@ function createWorkspaceWatcher(sender: WebContents, workspace: WorkspaceInfo): 
   state = {
     workspaceRoot: workspace.path,
     watcher,
-    timer: null
+    timer: null,
+    pendingChange: null
   };
 
   watcher.on("error", (error) => {

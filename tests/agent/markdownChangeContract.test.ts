@@ -45,6 +45,20 @@ function createDraft(
   };
 }
 
+function deleteDraft(
+  overrides: Partial<Extract<AgentDraftFileChange, { kind: "delete_file" }>> = {}
+): AgentDraftFileChange {
+  return {
+    kind: "delete_file",
+    relativePath: "old.md",
+    baseHash: "base-hash",
+    baseContent: "Old\n",
+    unifiedDiff: "--- a/old.md\n+++ /dev/null\n",
+    summary: "Delete old",
+    ...overrides
+  };
+}
+
 function build(draftFileChanges: AgentDraftFileChange[]) {
   return buildMarkdownChangeProposal({
     request,
@@ -105,12 +119,29 @@ describe("Markdown change contract", () => {
   });
 
   it("keeps mixed edit/create drafts in one proposal with explicit file operation kinds", () => {
-    const proposal = build([editDraft(), createDraft()]);
+    const proposal = build([editDraft(), createDraft(), deleteDraft()]);
 
     expect(proposal?.id).toBe("proposal-run-contract");
-    expect(proposal?.title).toBe("Update 2 files");
-    expect(proposal?.files).toHaveLength(2);
-    expect(proposal?.files.map((file) => file.kind)).toEqual(["edit_file", "create_file"]);
+    expect(proposal?.title).toBe("Update 3 files");
+    expect(proposal?.files).toHaveLength(3);
+    expect(proposal?.files.map((file) => file.kind)).toEqual(["edit_file", "create_file", "delete_file"]);
+  });
+
+  it("turns one delete_file draft into one delete_file proposal change", () => {
+    const proposal = build([deleteDraft()]);
+
+    expect(proposal?.title).toBe("Delete old.md");
+    expect(proposal?.files).toEqual([
+      {
+        id: "delete_file-run-contract-1",
+        kind: "delete_file",
+        status: "pending",
+        relativePath: "old.md",
+        baseHash: "base-hash",
+        baseContent: "Old\n",
+        unifiedDiff: "--- a/old.md\n+++ /dev/null\n"
+      }
+    ]);
   });
 
   it("never converts create_file operations into edit_file operations", () => {
@@ -125,6 +156,7 @@ describe("Markdown change contract", () => {
   it("keeps proposal titles and summaries stable", () => {
     expect(markdownChangeProposalTitle([editDraft()])).toBe("Edit doc.md");
     expect(markdownChangeProposalTitle([createDraft()])).toBe("Create annex.md");
+    expect(markdownChangeProposalTitle([deleteDraft()])).toBe("Delete old.md");
     expect(markdownChangeProposalTitle([editDraft(), createDraft()])).toBe("Update 2 files");
     expect(markdownChangeProposalSummary([editDraft({ summary: "" }), createDraft({ summary: "Create annex" })])).toBe(
       "Create annex"

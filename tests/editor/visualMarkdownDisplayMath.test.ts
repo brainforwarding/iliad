@@ -1,7 +1,7 @@
 import { EditorState } from "@codemirror/state";
 import { EditorView, type Decoration, type DecorationSet } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
-import { visualMarkdown } from "../../src/editor/visualMarkdown";
+import { visualMarkdown, visualMarkdownInteractionResetEffect } from "../../src/editor/visualMarkdown";
 import { DisplayMathWidget } from "../../src/editor/visualMarkdown/widgets";
 
 const labels = {
@@ -108,6 +108,18 @@ describe("visual markdown display math", () => {
     });
 
     expect(hasHiddenHeadingMarker(state)).toBe(false);
+  });
+
+  it("can reset prior editor interaction so a navigated heading opens visually clean", () => {
+    const focusedState = createState("# TeachView Legal", 0, undefined, true);
+
+    expect(hasHiddenHeadingMarker(focusedState)).toBe(false);
+
+    const resetState = focusedState.update({
+      effects: visualMarkdownInteractionResetEffect.of({ focused: false, interacted: false })
+    }).state;
+
+    expect(hasHiddenHeadingMarker(resetState)).toBe(true);
   });
 
   it("renders an inactive fenced block as a block widget (the legal, state-derived source)", () => {

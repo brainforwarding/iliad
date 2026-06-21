@@ -57,6 +57,10 @@ export const appStrings = {
       fileTreeMoveFailed: "Move failed",
       pendingEdit: (path: string) => `Pending edit: ${path}`,
       proposedNewDocument: (path: string) => `Proposed new document: ${path}`,
+      pendingDelete: (path: string) => `Pending delete: ${path}`,
+      pendingReviewSummary: (count: number) => (count === 1 ? "1 pending review item" : `${count} pending review items`),
+      reviewPendingChanges: "Review",
+      discardPendingChanges: "Restore all...",
       rename: (name: string) => `Rename ${name}`,
       resizeFileTree: "Resize file tree",
       fileTreeWidthValue: (width: number) => `File tree width ${width} pixels`,
@@ -131,6 +135,7 @@ export const appStrings = {
       corrector: "Corrector",
       autocomplete: "Autocomplete",
       apiFallback: "Use API fallback",
+      externalChanges: "Capture external edits",
       correctorUnavailable: "English only for now",
       autocompleteCodex: "Using Codex",
       autocompleteApi: "Using OpenAI API",
@@ -208,11 +213,21 @@ export const appStrings = {
         rejectAll: "Reject all",
         rejectRemaining: "Reject remaining",
         create: "Create",
+        delete: "Delete",
         discard: "Discard",
+        keepChanges: "Keep changes",
+        restorePreviousVersion: "Restore previous version",
+        keepFile: "Keep file",
+        moveToTrash: "Move to Trash",
+        confirmDeletion: "Confirm deletion",
+        restoreFile: "Restore file",
+        keepEmptyFile: "Keep empty file",
+        restoreText: "Restore text",
         stale: "Stale",
         acceptChange: "Accept",
         rejectChange: "Reject",
-        pendingDocument: (path: string) => `Pending document: ${path}`
+        pendingDocument: (path: string) => `Pending document: ${path}`,
+        pendingDeleteDocument: (path: string) => `Pending delete: ${path}`
       }
     },
     assistant: {
@@ -360,6 +375,27 @@ export const appStrings = {
       noTextResponse: "The agent returned no text.",
       errorFallback: "Agent request failed.",
       fileChanged: "Reopen the original document before applying this proposal.",
+      externalCapture: {
+        title: "External agent changes",
+        start: "Track external changes",
+        active: "Watching external changes",
+        fileCount: (count: number) => (count === 1 ? "1 Markdown file tracked" : `${count} Markdown files tracked`),
+        review: "Review",
+        cancel: "Stop",
+        started: "Watching for external Markdown changes.",
+        proposalReady: "External changes are ready for review.",
+        proposalReadyWithNotes: (count: number) =>
+          count === 1 ? "External changes are ready; 1 unsupported change was restored." : `External changes are ready; ${count} unsupported changes were restored.`,
+        noChanges: "No external Markdown changes detected.",
+        unsupportedRestored: "Unsupported external changes were restored.",
+        gitBaselineChanged: "External Git changes were accepted outside Iliad.",
+        unsafe: "External changes could not be restored safely.",
+        canceled: "External changes were discarded.",
+        saveBeforeReview: "Save or wait for the current document before reviewing external changes.",
+        saveBeforeCancel: "Save or wait for the current document before canceling capture.",
+        finishBeforeWorkspaceSwitch: "Review or cancel external changes before switching workspaces.",
+        errorFallback: "Could not capture external changes."
+      },
       context: {
         label: "Context for next message",
         auto: "Auto",
@@ -475,7 +511,8 @@ export const appStrings = {
         reviewingChanges: "Reviewing changes",
         canceled: "Canceled by user",
         applied: "Applied reviewed changes",
-        created: "Created reviewed document"
+        created: "Created reviewed document",
+        discarded: "Discarded pending changes"
       }
     },
     toast: {
@@ -578,6 +615,11 @@ export const appStrings = {
       fileTreeMoveFailed: "No se pudo mover",
       pendingEdit: (path: string) => `Edición pendiente: ${path}`,
       proposedNewDocument: (path: string) => `Documento nuevo propuesto: ${path}`,
+      pendingDelete: (path: string) => `Eliminación pendiente: ${path}`,
+      pendingReviewSummary: (count: number) =>
+        count === 1 ? "1 cambio pendiente de revisión" : `${count} cambios pendientes de revisión`,
+      reviewPendingChanges: "Revisar",
+      discardPendingChanges: "Restaurar todo...",
       rename: (name: string) => `Renombrar ${name}`,
       resizeFileTree: "Redimensionar árbol de archivos",
       fileTreeWidthValue: (width: number) => `Ancho del árbol de archivos: ${width} píxeles`,
@@ -653,6 +695,7 @@ export const appStrings = {
       corrector: "Corrector",
       autocomplete: "Autocompletar",
       apiFallback: "Usar API como respaldo",
+      externalChanges: "Capturar ediciones externas",
       correctorUnavailable: "Solo inglés por ahora",
       autocompleteCodex: "Usando Codex",
       autocompleteApi: "Usando la API de OpenAI",
@@ -730,11 +773,21 @@ export const appStrings = {
         rejectAll: "Rechazar todo",
         rejectRemaining: "Rechazar restante",
         create: "Crear",
+        delete: "Eliminar",
         discard: "Descartar",
+        keepChanges: "Conservar cambios",
+        restorePreviousVersion: "Restaurar versión anterior",
+        keepFile: "Conservar archivo",
+        moveToTrash: "Mover a la papelera",
+        confirmDeletion: "Confirmar eliminación",
+        restoreFile: "Restaurar archivo",
+        keepEmptyFile: "Conservar archivo vacío",
+        restoreText: "Restaurar texto",
         stale: "Obsoleto",
         acceptChange: "Aceptar",
         rejectChange: "Rechazar",
-        pendingDocument: (path: string) => `Documento pendiente: ${path}`
+        pendingDocument: (path: string) => `Documento pendiente: ${path}`,
+        pendingDeleteDocument: (path: string) => `Eliminación pendiente: ${path}`
       }
     },
     assistant: {
@@ -885,6 +938,29 @@ export const appStrings = {
       noTextResponse: "El agente no devolvió texto.",
       errorFallback: "Falló la solicitud al agente.",
       fileChanged: "Vuelve a abrir el documento original antes de aplicar esta propuesta.",
+      externalCapture: {
+        title: "Cambios de agente externo",
+        start: "Observar cambios externos",
+        active: "Observando cambios externos",
+        fileCount: (count: number) => (count === 1 ? "1 archivo Markdown observado" : `${count} archivos Markdown observados`),
+        review: "Revisar",
+        cancel: "Detener",
+        started: "Observando cambios Markdown externos.",
+        proposalReady: "Los cambios externos están listos para revisar.",
+        proposalReadyWithNotes: (count: number) =>
+          count === 1
+            ? "Los cambios externos están listos; se restauró 1 cambio no compatible."
+            : `Los cambios externos están listos; se restauraron ${count} cambios no compatibles.`,
+        noChanges: "No se detectaron cambios Markdown externos.",
+        unsupportedRestored: "Se restauraron cambios externos no compatibles.",
+        gitBaselineChanged: "Git aceptó cambios externos fuera de Iliad.",
+        unsafe: "No se pudieron restaurar los cambios externos de forma segura.",
+        canceled: "Se descartaron los cambios externos.",
+        saveBeforeReview: "Guarda o espera el documento actual antes de revisar cambios externos.",
+        saveBeforeCancel: "Guarda o espera el documento actual antes de cancelar la captura.",
+        finishBeforeWorkspaceSwitch: "Revisa o cancela los cambios externos antes de cambiar de workspace.",
+        errorFallback: "No se pudieron capturar los cambios externos."
+      },
       context: {
         label: "Contexto del próximo mensaje",
         auto: "Auto",
@@ -1002,7 +1078,8 @@ export const appStrings = {
         reviewingChanges: "Revisando cambios",
         canceled: "Cancelado por el usuario",
         applied: "Cambios revisados aplicados",
-        created: "Documento revisado creado"
+        created: "Documento revisado creado",
+        discarded: "Cambios pendientes descartados"
       }
     },
     toast: {

@@ -5,6 +5,16 @@ export type FileKind = "directory" | "markdown" | "external";
 export const ignoredNames = new Set(["node_modules", "dist", "dist-electron"]);
 export const markdownExtensions = new Set([".md", ".markdown", ".mdown", ".mkd"]);
 
+export function isIgnoredWorkspaceName(name: string) {
+  return (
+    name.startsWith(".") ||
+    ignoredNames.has(name) ||
+    /^__tmp(?:[-_.]|$)/i.test(name) ||
+    name.endsWith(".tmp") ||
+    name.endsWith("~")
+  );
+}
+
 export function toKind(filePath: string, isDirectory: boolean): FileKind {
   if (isDirectory) {
     return "directory";
@@ -29,7 +39,7 @@ export function ensureVisibleWorkspacePath(workspaceRoot: string, filePath: stri
   const relative = path.relative(path.resolve(workspaceRoot), path.resolve(filePath));
   const segments = relative.split(path.sep);
 
-  if (segments.some((segment) => segment.startsWith("."))) {
+  if (segments.some((segment) => segment.startsWith(".") || /^__tmp(?:[-_.]|$)/i.test(segment))) {
     throw new Error("Hidden paths are not available in this workspace.");
   }
 }

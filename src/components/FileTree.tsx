@@ -5,6 +5,7 @@ import {
   File,
   FilePlus,
   FileText,
+  FileX,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -76,6 +77,9 @@ interface FileTreeProps {
   activePath?: string;
   selectedPath?: string | null;
   pendingChanges: PendingFileTreeChange[];
+  pendingReviewCount: number;
+  pendingReviewActive?: boolean;
+  pendingReviewBusy?: boolean;
   creatingFile: boolean;
   creatingFolder: boolean;
   labels: FileTreeLabels;
@@ -97,6 +101,8 @@ interface FileTreeProps {
   onViewUpdateRelease: () => void | Promise<void>;
   onSelectNode: (node: FileTreeNode) => void;
   onSelectWorkspaceRoot: () => void;
+  onReviewPendingChanges: () => void | Promise<void>;
+  onDiscardPendingChanges: () => void | Promise<void>;
   onMoveNode: (node: FileTreeNode, targetDirectoryPath: string) => Promise<FileTreeNode | null>;
   onShowContextMenu: (node: FileTreeNode, position: { x: number; y: number }) => void;
   contextMenuOpen?: boolean;
@@ -134,6 +140,10 @@ interface FileTreeLabels {
   fileTreeMoveFailed: string;
   pendingEdit: (path: string) => string;
   proposedNewDocument: (path: string) => string;
+  pendingDelete: (path: string) => string;
+  pendingReviewSummary: (count: number) => string;
+  reviewPendingChanges: string;
+  discardPendingChanges: string;
   rename: (name: string) => string;
   findInFileTree: string;
   fileTreeSearchPlaceholder: string;
@@ -261,20 +271,55 @@ function isImageNode(node: FileTreeNode) {
 }
 
 function pendingLabel(node: FileTreeDisplayNode, labels: FileTreeLabels) {
-  const target = node.source === "real" ? node.pendingTarget : node.source === "pending-create" ? node.pendingTarget : null;
+  const target =
+    node.source === "real"
+      ? node.pendingTarget
+      : node.source === "pending-create" || node.source === "pending-delete"
+        ? node.pendingTarget
+        : null;
 
   if (!target) {
     return null;
   }
 
-  return target.kind === "edit_file"
-    ? labels.pendingEdit(target.relativePath)
-    : labels.proposedNewDocument(target.relativePath);
+  if (target.kind === "edit_file") {
+    return labels.pendingEdit(target.relativePath);
+  }
+
+  if (target.kind === "delete_file") {
+    return labels.pendingDelete(target.relativePath);
+  }
+
+  return labels.proposedNewDocument(target.relativePath);
+}
+
+export function fileTreeNodeShowsPendingIndicator(node: FileTreeDisplayNode, isExpanded: boolean) {
+  if (node.source === "pending-create" || node.source === "pending-delete") {
+    return true;
+  }
+
+  if (node.source === "pending-dir") {
+    return !isExpanded && Boolean(node.hasPendingDescendant);
+  }
+
+  if (node.source !== "real") {
+    return false;
+  }
+
+  if (node.pendingTarget) {
+    return true;
+  }
+
+  return displayNodeKind(node) === "directory" && !isExpanded && Boolean(node.hasPendingDescendant);
 }
 
 function FileIcon({ node, isExpanded }: { node: FileTreeDisplayNode; isExpanded: boolean }) {
-  if (node.source === "pending-create") {
+  if (node.source === "pending-create" || (node.source === "real" && node.pendingTarget?.kind === "create_file")) {
     return <FilePlus size={16} />;
+  }
+
+  if (node.source === "pending-delete" || (node.source === "real" && node.pendingTarget?.kind === "delete_file")) {
+    return <FileX size={16} />;
   }
 
   const kind = displayNodeKind(node);
@@ -288,6 +333,48 @@ function FileIcon({ node, isExpanded }: { node: FileTreeDisplayNode; isExpanded:
   }
 
   return <File size={16} strokeWidth={1.6} />;
+}
+
+export function PendingReviewStrip({
+  count,
+  active,
+  busy,
+  labels,
+  onReview,
+  onDiscard
+}: {
+  count: number;
+  active?: boolean;
+  busy?: boolean;
+  labels: FileTreeLabels;
+  onReview: () => void | Promise<void>;
+  onDiscard: () => void | Promise<void>;
+}) {
+  if (count === 0) {
+    return null;
+  }
+
+  const showActions = !(active && count === 1);
+
+  return (
+    <div
+      className={`file-tree-pending-review${showActions ? "" : " is-current-review"}`}
+      role="region"
+      aria-label={labels.pendingReviewSummary(count)}
+    >
+      <span>{labels.pendingReviewSummary(count)}</span>
+      {showActions ? (
+        <div className="file-tree-pending-review-actions">
+          <button type="button" disabled={busy} onClick={() => void onReview()}>
+            {labels.reviewPendingChanges}
+          </button>
+          <button type="button" disabled={busy} onClick={() => void onDiscard()}>
+            {labels.discardPendingChanges}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function RealFileIcon({ node, isExpanded }: { node: FileTreeNode; isExpanded: boolean }) {
@@ -692,12 +779,15 @@ function TreeRow({
   const displayedName = displayTreeName(node);
   const fullRelativePath = displayNodeRelativePath(node) || displayNodeName(node);
   const pendingTitle = pendingLabel(node, labels);
-  const hasPendingIndicator =
-    node.source === "pending-create" ||
-    node.source === "pending-dir" ||
-    Boolean(node.source === "real" && (node.pendingTarget || node.hasPendingDescendant));
+  const hasPendingIndicator = fileTreeNodeShowsPendingIndicator(node, isExpanded);
   const pendingIndicatorClass =
-    node.source === "pending-create" || node.source === "pending-dir" ? "is-create" : "is-edit";
+    node.source === "pending-delete" || (node.source === "real" && node.pendingTarget?.kind === "delete_file")
+      ? "is-delete"
+      : node.source === "pending-create" ||
+          node.source === "pending-dir" ||
+          (node.source === "real" && node.pendingTarget?.kind === "create_file")
+        ? "is-create"
+        : "is-edit";
   const canDragContextFile = node.source === "real" && nodeKind === "markdown";
   const canDragImageReference = node.source === "real" && nodeKind === "external" && isImageNode(node.node);
   const canDragMove = node.source === "real" && !node.pendingTarget && !node.hasPendingDescendant;
@@ -718,7 +808,10 @@ function TreeRow({
     "tree-item",
     `is-${displayNodeKind(node)}`,
     node.source === "real" && isAssetNode(node.node) ? "is-asset" : "",
-    node.source === "pending-create" ? "is-pending-create" : "",
+    node.source === "pending-create" || (node.source === "real" && node.pendingTarget?.kind === "create_file")
+      ? "is-pending-create"
+      : "",
+    node.source === "pending-delete" ? "is-pending-delete" : "",
     node.source === "pending-dir" ? "is-pending-dir" : "",
     hasPendingIndicator ? "has-pending-indicator" : "",
     isActive ? "is-active" : "",
@@ -819,7 +912,7 @@ function TreeRow({
               onFocus={(event) => onShowPathPeek(fullRelativePath, event.currentTarget, { delayMs: 350 })}
               onKeyDown={onSearchRowKeyDown}
               onClick={() => {
-                if (node.source === "pending-create") {
+                if (node.source === "pending-create" || node.source === "pending-delete") {
                   void onOpenPendingChange(node.pendingTarget);
                   return;
                 }
@@ -977,6 +1070,9 @@ export function FileTree({
   activePath,
   selectedPath,
   pendingChanges,
+  pendingReviewCount,
+  pendingReviewActive = false,
+  pendingReviewBusy = false,
   creatingFile,
   creatingFolder,
   labels,
@@ -998,6 +1094,8 @@ export function FileTree({
   onViewUpdateRelease,
   onSelectNode,
   onSelectWorkspaceRoot,
+  onReviewPendingChanges,
+  onDiscardPendingChanges,
   onMoveNode,
   onShowContextMenu,
   contextMenuOpen = false,
@@ -1044,6 +1142,7 @@ export function FileTree({
   const searchInputId = `${generatedId}-file-tree-search-input`;
   const searchStatusId = `${generatedId}-file-tree-search-status`;
   const displayNodes = useMemo(() => buildFileTreeDisplayNodes(nodes, pendingChanges), [nodes, pendingChanges]);
+  const hasPendingReview = pendingReviewCount > 0;
   const pendingCreateRelativePaths = useMemo(
     () =>
       new Set(
@@ -2146,7 +2245,17 @@ export function FileTree({
   };
 
   return (
-    <aside ref={sidebarRef} className={`sidebar${searchOpen ? " has-file-tree-search" : ""}`} onKeyDown={handleSidebarKeyDown}>
+    <aside
+      ref={sidebarRef}
+      className={[
+        "sidebar",
+        searchOpen ? "has-file-tree-search" : "",
+        hasPendingReview ? "has-pending-review" : ""
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      onKeyDown={handleSidebarKeyDown}
+    >
       <div className="sidebar-header">
         <WorkspaceMenu
           workspace={workspace}
@@ -2239,6 +2348,15 @@ export function FileTree({
           onKeyDown={handleSearchInputKeyDown}
         />
       ) : null}
+
+      <PendingReviewStrip
+        count={pendingReviewCount}
+        active={pendingReviewActive}
+        busy={pendingReviewBusy}
+        labels={labels}
+        onReview={onReviewPendingChanges}
+        onDiscard={onDiscardPendingChanges}
+      />
 
       <div
         id={treeListId}

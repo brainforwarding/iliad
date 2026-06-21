@@ -28,6 +28,7 @@ import {
   type CodexCapturedFileChange,
   type CodexCapturedFileChangeMap
 } from "./codexFileChangeCapture.js";
+import { tryAcquireWorkspaceMutationLease } from "../workspaceMutationLease.js";
 import {
   codexDocumentDynamicTools,
   executeCodexDocumentToolCall,
@@ -71,7 +72,6 @@ interface CodexFailureInfo {
   code: string;
 }
 
-const activeWorkspaceRuns = new Set<string>();
 // One Codex app-server client can carry multiple Iliad runs, such as normal
 // chat plus background title generation. Route shared protocol events by turn.
 const activeCodexTurnKeys = new Set<string>();
@@ -458,7 +458,7 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
     const answerTextEmitter = createTextDeltaEmitter(request.runId, onRunEvent);
     answerTextEmitter.nextGeneration();
     const workspaceRunKey = path.resolve(request.workspaceRoot);
-    let workspaceRunAcquired = false;
+    let releaseWorkspaceRun: (() => void) | null = null;
     let threadId = "";
     let turnId = "";
     let activeTurnRegistered = false;
@@ -514,8 +514,7 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
 
     try {
       throwIfAborted(signal);
-      acquireWorkspaceRun(workspaceRunKey);
-      workspaceRunAcquired = true;
+      releaseWorkspaceRun = acquireWorkspaceRun(workspaceRunKey);
       const preRunSnapshot = await captureMarkdownSnapshot(request);
       emitPhase({ phase: "thread_start", method: "thread/start", status: "started" });
       let threadResponse: Record<string, unknown>;
@@ -701,9 +700,7 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
       signal.removeEventListener("abort", abort);
       removeRequestHandler();
       removeNotificationHandler();
-      if (workspaceRunAcquired) {
-        releaseWorkspaceRun(workspaceRunKey);
-      }
+      releaseWorkspaceRun?.();
       if (activeTurnRegistered) {
         activeCodexTurnKeys.delete(codexTurnKey(threadId, turnId));
       }
@@ -1333,15 +1330,13 @@ function throwIfAborted(signal: AbortSignal) {
 }
 
 function acquireWorkspaceRun(workspaceRoot: string) {
-  if (activeWorkspaceRuns.has(workspaceRoot)) {
+  const release = tryAcquireWorkspaceMutationLease(workspaceRoot, "codex_app_server");
+
+  if (!release) {
     throw codexRuntimeError("Codex is already working in this workspace. Wait for the current run to finish.", true);
   }
 
-  activeWorkspaceRuns.add(workspaceRoot);
-}
-
-function releaseWorkspaceRun(workspaceRoot: string) {
-  activeWorkspaceRuns.delete(workspaceRoot);
+  return release;
 }
 
 function codexTurnKey(threadId: string, turnId: string) {

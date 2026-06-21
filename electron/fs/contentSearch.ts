@@ -1,7 +1,7 @@
 import { lstat, readdir, readFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
-import { ensureInsideWorkspace, ensureVisibleWorkspacePath, ignoredNames, markdownExtensions } from "./pathSafety.js";
+import { ensureInsideWorkspace, ensureVisibleWorkspacePath, isIgnoredWorkspaceName, markdownExtensions } from "./pathSafety.js";
 
 export interface MarkdownContentSearchRequest {
   workspaceRoot: string;
@@ -417,7 +417,7 @@ async function visitDirectory(state: SearchState, directoryPath: string, depth: 
       return;
     }
 
-    if (entry.name.startsWith(".") || ignoredNames.has(entry.name)) {
+    if (isIgnoredWorkspaceName(entry.name)) {
       continue;
     }
 

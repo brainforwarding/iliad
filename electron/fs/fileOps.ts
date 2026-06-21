@@ -5,6 +5,7 @@ import {
   ensureMarkdownFile,
   ensureVisibleWorkspacePath,
   ignoredNames,
+  isIgnoredWorkspaceName,
   normalizeMarkdownName,
   toKind,
   validateDirectoryName,
@@ -54,7 +55,7 @@ function fileTreeNode(workspaceRoot: string, filePath: string, isDirectory: bool
 
 export async function readDirectory(rootPath: string, currentPath = rootPath): Promise<FileTreeNode[]> {
   const entries = await readdir(currentPath, { withFileTypes: true });
-  const visibleEntries = entries.filter((entry) => !entry.name.startsWith(".") && !ignoredNames.has(entry.name));
+  const visibleEntries = entries.filter((entry) => !isIgnoredWorkspaceName(entry.name));
 
   const nodes = await Promise.all(
     visibleEntries.map(async (entry) => {

@@ -4,7 +4,7 @@ import type { AgentChangeProposal, AgentProposalFileStatus, FileKind, FileTreeNo
 export interface PendingFileTreeChange {
   proposalId: string;
   fileId: string;
-  kind: "edit_file" | "create_file";
+  kind: "edit_file" | "create_file" | "delete_file";
   relativePath: string;
   normalizedRelativePath: string;
   status: AgentProposalFileStatus;
@@ -20,6 +20,13 @@ export type FileTreeDisplayNode =
     }
   | {
       source: "pending-create";
+      pendingTarget: PendingFileTreeChange;
+      name: string;
+      path: string;
+      relativePath: string;
+    }
+  | {
+      source: "pending-delete";
       pendingTarget: PendingFileTreeChange;
       name: string;
       path: string;
@@ -98,7 +105,7 @@ export function displayNodeKind(node: FileTreeDisplayNode): FileKind {
     return "directory";
   }
 
-  if (node.source === "pending-create") {
+  if (node.source === "pending-create" || node.source === "pending-delete") {
     return "markdown";
   }
 
@@ -106,7 +113,7 @@ export function displayNodeKind(node: FileTreeDisplayNode): FileKind {
 }
 
 export function displayNodeChildren(node: FileTreeDisplayNode) {
-  if (node.source === "pending-create") {
+  if (node.source === "pending-create" || node.source === "pending-delete") {
     return undefined;
   }
 
@@ -289,7 +296,7 @@ function findDirectoryChildren(
   return null;
 }
 
-function insertPendingCreate(nodes: FileTreeDisplayNode[], pendingTarget: PendingFileTreeChange) {
+function insertPendingVirtual(nodes: FileTreeDisplayNode[], pendingTarget: PendingFileTreeChange) {
   const segments = pendingTarget.normalizedRelativePath.split("/");
 
   if (segments.length === 0) {
@@ -331,7 +338,7 @@ function insertPendingCreate(nodes: FileTreeDisplayNode[], pendingTarget: Pendin
   }
 
   container.push({
-    source: "pending-create",
+    source: pendingTarget.kind === "delete_file" ? "pending-delete" : "pending-create",
     pendingTarget,
     name: segments[segments.length - 1] ?? pendingTarget.normalizedRelativePath,
     path: pendingFileTreePath(pendingTarget.normalizedRelativePath),
@@ -340,12 +347,16 @@ function insertPendingCreate(nodes: FileTreeDisplayNode[], pendingTarget: Pendin
 }
 
 function annotatePendingDescendants(node: FileTreeDisplayNode): boolean {
-  if (node.source === "pending-create") {
+  if (node.source === "pending-create" || node.source === "pending-delete") {
     return true;
   }
 
   const children = node.children;
-  const hasPendingChild = children?.some(annotatePendingDescendants) ?? false;
+  let hasPendingChild = false;
+
+  for (const child of children ?? []) {
+    hasPendingChild = annotatePendingDescendants(child) || hasPendingChild;
+  }
 
   if (node.source === "real") {
     node.hasPendingDescendant = hasPendingChild || undefined;
@@ -361,11 +372,11 @@ export function buildFileTreeDisplayNodes(
   pendingChanges: PendingFileTreeChange[]
 ): FileTreeDisplayNode[] {
   const realPaths = collectRealPaths(nodes);
-  const pendingEditsByPath = new Map<string, PendingFileTreeChange>();
+  const pendingRealTargetsByPath = new Map<string, PendingFileTreeChange>();
 
   for (const change of pendingChanges) {
-    if (change.kind === "edit_file" && realPaths.has(change.normalizedRelativePath)) {
-      pendingEditsByPath.set(change.normalizedRelativePath, change);
+    if (realPaths.has(change.normalizedRelativePath)) {
+      pendingRealTargetsByPath.set(change.normalizedRelativePath, change);
     }
   }
 
@@ -376,7 +387,7 @@ export function buildFileTreeDisplayNodes(
       source: "real",
       node,
       children: node.children?.map(toDisplayNode),
-      pendingTarget: pendingEditsByPath.get(normalizedRelativePath)
+      pendingTarget: pendingRealTargetsByPath.get(normalizedRelativePath)
     };
   };
 
@@ -384,7 +395,11 @@ export function buildFileTreeDisplayNodes(
 
   for (const change of pendingChanges) {
     if (change.kind === "create_file" && !realPaths.has(change.normalizedRelativePath)) {
-      insertPendingCreate(displayNodes, change);
+      insertPendingVirtual(displayNodes, change);
+    }
+
+    if (change.kind === "delete_file" && !realPaths.has(change.normalizedRelativePath)) {
+      insertPendingVirtual(displayNodes, change);
     }
   }
 

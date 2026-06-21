@@ -38,12 +38,20 @@ export interface VisualMarkdownOptions {
 }
 
 const editorFocusedEffect = StateEffect.define<boolean>();
+export const visualMarkdownInteractionResetEffect = StateEffect.define<{
+  focused: boolean;
+  interacted: boolean;
+}>();
 const editorFocusedField = StateField.define<boolean>({
   create() {
     return false;
   },
   update(value, transaction) {
     for (const effect of transaction.effects) {
+      if (effect.is(visualMarkdownInteractionResetEffect)) {
+        return effect.value.focused;
+      }
+
       if (effect.is(editorFocusedEffect)) {
         return effect.value;
       }
@@ -57,6 +65,12 @@ const editorInteractedField = StateField.define<boolean>({
     return false;
   },
   update(value, transaction) {
+    for (const effect of transaction.effects) {
+      if (effect.is(visualMarkdownInteractionResetEffect)) {
+        return effect.value.interacted;
+      }
+    }
+
     if (value) {
       return true;
     }

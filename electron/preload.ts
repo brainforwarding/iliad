@@ -12,7 +12,15 @@ const api = {
       workspaceRoot,
       requestId: ++workspaceReadRequestId
     }),
-  watchWorkspace: (workspaceRoot: string, listener: (event: { workspaceRoot: string }) => void) => {
+  watchWorkspace: (
+    workspaceRoot: string,
+    listener: (event: {
+      workspaceRoot: string;
+      treeChanged?: boolean;
+      markdownChanged?: boolean;
+      changedMarkdownPaths?: string[];
+    }) => void
+  ) => {
     const handler = (_event: IpcRendererEvent, payload: unknown) => {
       if (
         payload &&
@@ -21,7 +29,16 @@ const api = {
         typeof payload.workspaceRoot === "string" &&
         payload.workspaceRoot === workspaceRoot
       ) {
-        listener({ workspaceRoot: payload.workspaceRoot });
+        listener({
+          workspaceRoot: payload.workspaceRoot,
+          treeChanged: "treeChanged" in payload && typeof payload.treeChanged === "boolean" ? payload.treeChanged : true,
+          markdownChanged:
+            "markdownChanged" in payload && typeof payload.markdownChanged === "boolean" ? payload.markdownChanged : false,
+          changedMarkdownPaths:
+            "changedMarkdownPaths" in payload && Array.isArray(payload.changedMarkdownPaths)
+              ? payload.changedMarkdownPaths.filter((item): item is string => typeof item === "string")
+              : []
+        });
       }
     };
 
@@ -170,6 +187,9 @@ const api = {
     applyPatch: (request: unknown) => ipcRenderer.invoke("agent:apply-patch", request),
     applyNewDocument: (request: unknown) => ipcRenderer.invoke("agent:apply-new-document", request),
     listProposals: (workspaceRoot: string) => ipcRenderer.invoke("agent:list-proposals", workspaceRoot),
+    startExternalCapture: (request: unknown) => ipcRenderer.invoke("agent:external-capture-start", request),
+    finishExternalCapture: (request: unknown) => ipcRenderer.invoke("agent:external-capture-finish", request),
+    cancelExternalCapture: (request: unknown) => ipcRenderer.invoke("agent:external-capture-cancel", request),
     applyProposalFile: (request: unknown) => ipcRenderer.invoke("agent:apply-proposal-file", request),
     rejectProposalFile: (request: unknown) => ipcRenderer.invoke("agent:reject-proposal-file", request),
     rejectProposal: (request: unknown) => ipcRenderer.invoke("agent:reject-proposal", request),

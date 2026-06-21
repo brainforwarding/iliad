@@ -28,6 +28,7 @@ describe("markdown content search", () => {
     await write(".secret.md", "beta hidden");
     await write(".hidden/three.md", "beta hidden directory");
     await write("node_modules/four.md", "beta ignored");
+    await write("__tmp-draft.md", "beta temporary");
 
     const response = await searchMarkdownContent({
       workspaceRoot,

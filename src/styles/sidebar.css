@@ -12,6 +12,14 @@
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
+.sidebar.has-pending-review {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.sidebar.has-file-tree-search.has-pending-review {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
 .sidebar-header {
   display: grid;
   min-height: 44px;
@@ -85,6 +93,56 @@
   min-width: 0;
   grid-template-columns: minmax(0, 1fr);
   align-items: center;
+}
+
+.file-tree-pending-review {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+  padding: 8px;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+.file-tree-pending-review > span {
+  overflow: hidden;
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-pending-review-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+}
+
+.file-tree-pending-review-actions button {
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-control);
+  background: var(--editor);
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.file-tree-pending-review-actions button:hover:not(:disabled) {
+  background: var(--hover-wash);
+}
+
+.file-tree-pending-review-actions button:disabled {
+  color: var(--muted-3);
+  cursor: default;
 }
 
 .file-tree-search-input-wrap {
@@ -581,6 +639,22 @@
   font-weight: 600;
 }
 
+.tree-item.is-pending-delete .tree-name,
+.tree-item:has(.tree-pending-dot.is-delete) .tree-name {
+  color: var(--review-delete-ink);
+}
+
+.tree-item.is-pending-delete .tree-name {
+  opacity: 0.72;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.tree-item.is-pending-delete .tree-icon,
+.tree-item:has(.tree-pending-dot.is-delete) .tree-icon {
+  color: var(--review-delete-ink);
+}
+
 .tree-item.is-external,
 .tree-item.is-asset {
   color: var(--muted-3);
@@ -666,6 +740,10 @@
 
 .tree-pending-dot.is-create {
   background: var(--create);
+}
+
+.tree-pending-dot.is-delete {
+  background: var(--review-delete-ink);
 }
 
 .tree-rename-form {

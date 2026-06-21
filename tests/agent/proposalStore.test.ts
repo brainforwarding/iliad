@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -136,6 +136,89 @@ describe("AgentProposalStore", () => {
 
     expect(applied.status).toBe("applied");
     expect(await readFile(newPath, "utf8")).toBe("new\n");
+  });
+
+  it("deletes Markdown files only when a delete proposal is applied against unchanged base content", async () => {
+    const filePath = path.join(root, "old.md");
+    await writeFile(filePath, "old\n", "utf8");
+
+    const store = new AgentProposalStore(userData);
+    const saved = await store.saveProposal(
+      proposal({
+        id: "proposal-delete",
+        title: "Delete old.md",
+        files: [
+          {
+            id: "file-delete",
+            kind: "delete_file",
+            status: "pending",
+            relativePath: "old.md",
+            baseHash: "",
+            baseContent: "old\n",
+            unifiedDiff: ""
+          }
+        ]
+      })
+    );
+
+    const applied = await store.applyProposalFile(root, saved.id, "file-delete");
+
+    expect(applied).toMatchObject({ kind: "delete_file", status: "applied" });
+    await expect(stat(filePath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects delete proposals without recreating missing files", async () => {
+    const store = new AgentProposalStore(userData);
+    const saved = await store.saveProposal(
+      proposal({
+        id: "proposal-delete-reject",
+        title: "Delete missing.md",
+        files: [
+          {
+            id: "file-delete-reject",
+            kind: "delete_file",
+            status: "pending",
+            relativePath: "missing.md",
+            baseHash: "",
+            baseContent: "old\n",
+            unifiedDiff: ""
+          }
+        ]
+      })
+    );
+
+    const rejected = await store.rejectProposalFile(root, saved.id, "file-delete-reject");
+
+    expect(rejected.files[0]).toMatchObject({ kind: "delete_file", status: "rejected" });
+    await expect(stat(path.join(root, "missing.md"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("marks delete proposals stale instead of deleting changed files", async () => {
+    const filePath = path.join(root, "old.md");
+    await writeFile(filePath, "changed\n", "utf8");
+
+    const store = new AgentProposalStore(userData);
+    const saved = await store.saveProposal(
+      proposal({
+        id: "proposal-delete-stale",
+        files: [
+          {
+            id: "file-delete-stale",
+            kind: "delete_file",
+            status: "pending",
+            relativePath: "old.md",
+            baseHash: "",
+            baseContent: "old\n",
+            unifiedDiff: ""
+          }
+        ]
+      })
+    );
+
+    const result = await store.applyProposalFile(root, saved.id, "file-delete-stale");
+
+    expect(result).toMatchObject({ kind: "delete_file", status: "stale" });
+    expect(await readFile(filePath, "utf8")).toBe("changed\n");
   });
 
   it("migrates legacy proposals to review hunks while preserving terminal status", async () => {
