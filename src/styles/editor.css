@@ -532,6 +532,11 @@
   box-decoration-break: clone;
 }
 
+.cm-line.cm-ai-review-line-removed,
+.cm-line.cm-ai-review-line-inserted {
+  min-height: 1.35em;
+}
+
 .cm-ai-review-line-removed.is-active {
   background-image: linear-gradient(var(--diff-del-strong), var(--diff-del-strong));
 }

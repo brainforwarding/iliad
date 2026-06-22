@@ -4,6 +4,7 @@ import { findNode } from "../files/fileTree";
 import type { OpenNodeResult } from "../files/fileActions";
 import type { EditorReviewState } from "../editor/aiReview/types";
 import { fileHasMutableReview } from "../assistant/assistantUtils";
+import { logReviewNavigation } from "../assistant/reviewDebug";
 import {
   buildPendingFileTreeChanges,
   normalizeRelativePath,
@@ -101,6 +102,61 @@ export function externalReviewTargetForActiveFile(
   return null;
 }
 
+export function reviewTargetAfterActiveFileChange({
+  activeRelativePath,
+  currentTarget,
+  proposals
+}: {
+  activeRelativePath: string | undefined | null;
+  currentTarget: ReviewTarget | null;
+  proposals: AgentChangeProposal[];
+}) {
+  if (!currentTarget) {
+    return currentTarget;
+  }
+
+  const proposal = proposals.find((candidate) => candidate.id === currentTarget.proposalId);
+  const file = proposal?.files.find((candidate) => candidate.id === currentTarget.fileId);
+
+  if (file?.kind === "create_file") {
+    return null;
+  }
+
+  if (
+    (file?.kind === "edit_file" || file?.kind === "delete_file") &&
+    !sameRelativePath(activeRelativePath ?? "", file.relativePath)
+  ) {
+    return null;
+  }
+
+  return currentTarget;
+}
+
+export function editorReviewActionLabelsForMode(
+  mode: EditorReviewState["mode"],
+  reviewToolbar: AppStrings["editor"]["reviewToolbar"]
+) {
+  if (mode === "edit_file") {
+    return {
+      acceptAll: reviewToolbar.acceptAll,
+      rejectAll: reviewToolbar.rejectAll,
+      rejectRemaining: reviewToolbar.rejectRemaining
+    };
+  }
+
+  if (mode === "create_file") {
+    return {
+      create: reviewToolbar.acceptAll,
+      discard: reviewToolbar.rejectAll
+    };
+  }
+
+  return {
+    delete: reviewToolbar.acceptAll,
+    discard: reviewToolbar.rejectAll
+  };
+}
+
 export function useAgentProposals({
   activeFile,
   documentText,
@@ -122,8 +178,10 @@ export function useAgentProposals({
   const [agentProposals, setAgentProposals] = useState<AgentChangeProposal[]>([]);
   const [agentReviewTarget, setAgentReviewTarget] = useState<ReviewTarget | null>(null);
   const [proposalLoadState, setProposalLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [reviewActionKey, setReviewActionKey] = useState<string | null>(null);
   const workspacePathRef = useRef<string | null>(null);
   const activeFilePathRef = useRef<string | null>(null);
+  const reviewActionKeyRef = useRef<string | null>(null);
   workspacePathRef.current = workspace?.path ?? null;
 
   useEffect(() => {
@@ -139,23 +197,27 @@ export function useAgentProposals({
       return;
     }
 
+    logReviewNavigation("active_file_changed", {
+      previousPath,
+      currentPath,
+      activeRelativePath: activeFile?.relativePath ?? null
+    });
+
     setAgentReviewTarget((current) => {
-      if (!current) {
-        return current;
+      const next = reviewTargetAfterActiveFileChange({
+        activeRelativePath: activeFile?.relativePath,
+        currentTarget: current,
+        proposals: agentProposals
+      });
+
+      if (current && !next) {
+        logReviewNavigation("active_file_cleared_review_target", {
+          activeRelativePath: activeFile?.relativePath ?? null,
+          target: current
+        });
       }
 
-      const proposal = agentProposals.find((candidate) => candidate.id === current.proposalId);
-      const file = proposal?.files.find((candidate) => candidate.id === current.fileId);
-
-      if (file?.kind === "create_file") {
-        return null;
-      }
-
-      if (file?.kind === "edit_file" && !sameRelativePath(activeFile?.relativePath ?? "", file.relativePath)) {
-        return null;
-      }
-
-      return current;
+      return next;
     });
   }, [activeFile?.path, activeFile?.relativePath, agentProposals]);
 
@@ -205,24 +267,56 @@ export function useAgentProposals({
 
   const pendingTreeChanges = useMemo(() => buildPendingFileTreeChanges(agentProposals), [agentProposals]);
 
+  const runReviewAction = useCallback(async <T,>(key: string, action: () => Promise<T>) => {
+    if (reviewActionKeyRef.current) {
+      logReviewNavigation("review_action_blocked", {
+        key,
+        inFlight: reviewActionKeyRef.current
+      });
+      return undefined;
+    }
+
+    reviewActionKeyRef.current = key;
+    setReviewActionKey(key);
+    logReviewNavigation("review_action_start", { key });
+
+    try {
+      const result = await action();
+      logReviewNavigation("review_action_finish", { key });
+      return result;
+    } catch (error) {
+      logReviewNavigation("review_action_error", {
+        key,
+        message: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    } finally {
+      if (reviewActionKeyRef.current === key) {
+        reviewActionKeyRef.current = null;
+        setReviewActionKey(null);
+      }
+    }
+  }, []);
+
   const applyAgentProposalFile = useCallback(
     async (proposalId: string, fileId: string) => {
-      if (!workspace) {
-        return;
-      }
+      return runReviewAction(`apply-file:${proposalId}:${fileId}`, async () => {
+        if (!workspace) {
+          return;
+        }
 
-      const proposal = agentProposals.find((candidate) => candidate.id === proposalId);
+        const proposal = agentProposals.find((candidate) => candidate.id === proposalId);
 
-      if (!isExternalFilesystemProposal(proposal)) {
-        await flushSave();
-      }
+        if (!isExternalFilesystemProposal(proposal)) {
+          await flushSave();
+        }
 
-      try {
-        const result = await window.iliad.agent.applyProposalFile({
-          workspaceRoot: workspace.path,
-          proposalId,
-          fileId
-        });
+        try {
+          const result = await window.iliad.agent.applyProposalFile({
+            workspaceRoot: workspace.path,
+            proposalId,
+            fileId
+          });
         mergeAgentProposals([result.proposal]);
 
         if (result.kind === "edit_file" && result.content) {
@@ -266,10 +360,11 @@ export function useAgentProposals({
         } else {
           setError(resultFile?.error ?? strings.assistant.errorFallback);
         }
-      } catch (applyError) {
-        setError(applyError instanceof Error ? applyError.message : strings.assistant.errorFallback);
-        throw applyError;
-      }
+        } catch (applyError) {
+          setError(applyError instanceof Error ? applyError.message : strings.assistant.errorFallback);
+          throw applyError;
+        }
+      });
     },
     [
       activeFile?.path,
@@ -280,6 +375,7 @@ export function useAgentProposals({
       mergeAgentProposals,
       recordNormalNavigation,
       refreshTree,
+      runReviewAction,
       setActiveFile,
       setError,
       setNotice,
@@ -293,30 +389,32 @@ export function useAgentProposals({
 
   const rejectAgentProposal = useCallback(
     async (proposalId: string) => {
-      if (!workspace) {
-        return;
-      }
+      return runReviewAction(`reject-proposal:${proposalId}`, async () => {
+        if (!workspace) {
+          return;
+        }
 
-      const proposal = agentProposals.find((candidate) => candidate.id === proposalId);
+        const proposal = agentProposals.find((candidate) => candidate.id === proposalId);
 
-      if (!isExternalFilesystemProposal(proposal)) {
-        await flushSave();
-      }
+        if (!isExternalFilesystemProposal(proposal)) {
+          await flushSave();
+        }
 
-      try {
-        const proposal = await rejectProposalWithoutSaving({
-          agent: window.iliad.agent,
-          workspaceRoot: workspace.path,
-          proposalId
-        });
-        mergeAgentProposals([proposal]);
-        setAgentReviewTarget((current) => (current?.proposalId === proposalId ? null : current));
-      } catch (rejectError) {
-        setError(rejectError instanceof Error ? rejectError.message : strings.assistant.errorFallback);
-        throw rejectError;
-      }
+        try {
+          const proposal = await rejectProposalWithoutSaving({
+            agent: window.iliad.agent,
+            workspaceRoot: workspace.path,
+            proposalId
+          });
+          mergeAgentProposals([proposal]);
+          setAgentReviewTarget((current) => (current?.proposalId === proposalId ? null : current));
+        } catch (rejectError) {
+          setError(rejectError instanceof Error ? rejectError.message : strings.assistant.errorFallback);
+          throw rejectError;
+        }
+      });
     },
-    [agentProposals, flushSave, mergeAgentProposals, setError, strings.assistant.errorFallback, workspace]
+    [agentProposals, flushSave, mergeAgentProposals, runReviewAction, setError, strings.assistant.errorFallback, workspace]
   );
   const rejectAgentProposalStateOnly = useCallback(
     async (proposalId: string) => {
@@ -342,24 +440,25 @@ export function useAgentProposals({
 
   const rejectAgentProposalFile = useCallback(
     async (proposalId: string, fileId: string) => {
-      if (!workspace) {
-        return;
-      }
+      return runReviewAction(`reject-file:${proposalId}:${fileId}`, async () => {
+        if (!workspace) {
+          return;
+        }
 
-      const previousProposal = agentProposals.find((candidate) => candidate.id === proposalId);
-      const previousFile = previousProposal?.files.find((candidate) => candidate.id === fileId);
-      const externalReview = isExternalFilesystemProposal(previousProposal);
+        const previousProposal = agentProposals.find((candidate) => candidate.id === proposalId);
+        const previousFile = previousProposal?.files.find((candidate) => candidate.id === fileId);
+        const externalReview = isExternalFilesystemProposal(previousProposal);
 
-      if (!externalReview) {
-        await flushSave();
-      }
+        if (!externalReview) {
+          await flushSave();
+        }
 
-      try {
-        const proposal = await window.iliad.agent.rejectProposalFile({
-          workspaceRoot: workspace.path,
-          proposalId,
-          fileId
-        });
+        try {
+          const proposal = await window.iliad.agent.rejectProposalFile({
+            workspaceRoot: workspace.path,
+            proposalId,
+            fileId
+          });
         mergeAgentProposals([proposal]);
 
         if (externalReview) {
@@ -384,10 +483,11 @@ export function useAgentProposals({
         setAgentReviewTarget((current) =>
           current?.proposalId === proposalId && current.fileId === fileId ? null : current
         );
-      } catch (rejectError) {
-        setError(rejectError instanceof Error ? rejectError.message : strings.assistant.errorFallback);
-        throw rejectError;
-      }
+        } catch (rejectError) {
+          setError(rejectError instanceof Error ? rejectError.message : strings.assistant.errorFallback);
+          throw rejectError;
+        }
+      });
     },
     [
       activeFile,
@@ -396,6 +496,7 @@ export function useAgentProposals({
       loadDocument,
       mergeAgentProposals,
       refreshTree,
+      runReviewAction,
       setActiveFile,
       setError,
       setSelectedTreePath,
@@ -406,19 +507,20 @@ export function useAgentProposals({
 
   const resolveAgentProposalHunk = useCallback(
     async (proposalId: string, fileId: string, hunkId: string, decision: "accept" | "reject") => {
-      if (!workspace) {
-        return;
-      }
+      return runReviewAction(`hunk:${proposalId}:${fileId}:${hunkId}:${decision}`, async () => {
+        if (!workspace) {
+          return;
+        }
 
-      await flushSave();
-      try {
-        const result = await window.iliad.agent.resolveProposalHunk({
-          workspaceRoot: workspace.path,
-          proposalId,
-          fileId,
-          hunkId,
-          decision
-        });
+        await flushSave();
+        try {
+          const result = await window.iliad.agent.resolveProposalHunk({
+            workspaceRoot: workspace.path,
+            proposalId,
+            fileId,
+            hunkId,
+            decision
+          });
         mergeAgentProposals([result.proposal]);
 
         const file = result.proposal.files.find((candidate) => candidate.id === result.fileId);
@@ -439,16 +541,18 @@ export function useAgentProposals({
         if (file?.error) {
           setError(file.error);
         }
-      } catch (resolveError) {
-        setError(resolveError instanceof Error ? resolveError.message : strings.assistant.errorFallback);
-        throw resolveError;
-      }
+        } catch (resolveError) {
+          setError(resolveError instanceof Error ? resolveError.message : strings.assistant.errorFallback);
+          throw resolveError;
+        }
+      });
     },
     [
       activeFile?.relativePath,
       flushSave,
       loadDocument,
       mergeAgentProposals,
+      runReviewAction,
       setError,
       strings.assistant.errorFallback,
       workspace
@@ -458,14 +562,24 @@ export function useAgentProposals({
   const selectAgentReviewTarget = useCallback(
     async (target: ReviewTarget | null) => {
       if (!target) {
+        logReviewNavigation("select_target_clear_requested", {
+          activeRelativePath: activeFile?.relativePath ?? null
+        });
         setAgentReviewTarget(null);
         return;
       }
+
+      logReviewNavigation("select_target_start", {
+        target,
+        activeRelativePath: activeFile?.relativePath ?? null,
+        workspacePath: workspace?.path ?? null
+      });
 
       let proposals = agentProposals;
       let proposal = proposals.find((candidate) => candidate.id === target.proposalId);
 
       if (!proposal && workspace) {
+        logReviewNavigation("select_target_refetch_proposals", { target });
         proposals = await window.iliad.agent.listProposals(workspace.path);
         mergeAgentProposals(proposals);
         proposal = proposals.find((candidate) => candidate.id === target.proposalId);
@@ -474,11 +588,23 @@ export function useAgentProposals({
       const file = proposal?.files.find((candidate) => candidate.id === target.fileId);
 
       if (!proposal || !file || proposal.workspaceRoot !== workspace?.path) {
+        logReviewNavigation("select_target_invalid", {
+          target,
+          hasProposal: Boolean(proposal),
+          hasFile: Boolean(file),
+          proposalWorkspaceRoot: proposal?.workspaceRoot ?? null,
+          workspacePath: workspace?.path ?? null
+        });
         setAgentReviewTarget(null);
         return;
       }
 
       if (shouldFlushBeforeSelectingReviewTarget(proposal)) {
+        logReviewNavigation("select_target_flush_save", {
+          target,
+          fileKind: file.kind,
+          relativePath: file.relativePath
+        });
         await flushSave();
       }
 
@@ -486,24 +612,51 @@ export function useAgentProposals({
         const node = findNodeByRelativePath(tree, file.relativePath);
 
         if (!node) {
+          logReviewNavigation("select_target_missing_edit_node", {
+            target,
+            relativePath: file.relativePath
+          });
           setError(strings.assistant.fileChanged);
           return;
         }
 
         if (!sameRelativePath(activeFile?.relativePath ?? "", file.relativePath)) {
+          logReviewNavigation("select_target_open_edit_node", {
+            target,
+            fromRelativePath: activeFile?.relativePath ?? null,
+            toRelativePath: file.relativePath,
+            nodePath: node.path
+          });
           const result = await openNode(node);
 
           if (result.kind !== "markdown") {
+            logReviewNavigation("select_target_open_edit_node_failed", {
+              target,
+              resultKind: result.kind
+            });
             setError(strings.assistant.fileChanged);
             return;
           }
         }
 
+        logReviewNavigation("select_target_reveal_edit", {
+          target,
+          nodePath: node.path,
+          relativePath: file.relativePath
+        });
         requestReviewReveal?.(node.path);
       }
 
       if (file.kind === "create_file") {
         const node = findNodeByRelativePath(tree, file.relativePath);
+        if (!node) {
+          setSelectedTreePath(null);
+        }
+        logReviewNavigation("select_target_reveal_create", {
+          target,
+          nodePath: node?.path ?? null,
+          relativePath: file.relativePath
+        });
         requestReviewReveal?.(node?.path ?? pendingFileTreePath(file.relativePath));
       }
 
@@ -511,17 +664,36 @@ export function useAgentProposals({
         const node = findNodeByRelativePath(tree, file.relativePath);
 
         if (node && !sameRelativePath(activeFile?.relativePath ?? "", file.relativePath)) {
+          logReviewNavigation("select_target_open_delete_node", {
+            target,
+            fromRelativePath: activeFile?.relativePath ?? null,
+            toRelativePath: file.relativePath,
+            nodePath: node.path
+          });
           const result = await openNode(node);
 
           if (result.kind !== "markdown") {
+            logReviewNavigation("select_target_open_delete_node_failed", {
+              target,
+              resultKind: result.kind
+            });
             setError(strings.assistant.fileChanged);
             return;
           }
         }
 
+        if (!node) {
+          setSelectedTreePath(null);
+        }
+
         requestReviewReveal?.(node ? node.path : pendingFileTreePath(file.relativePath));
       }
 
+      logReviewNavigation("select_target_set", {
+        target,
+        fileKind: file.kind,
+        relativePath: file.relativePath
+      });
       setAgentReviewTarget(target);
     },
     [
@@ -532,6 +704,7 @@ export function useAgentProposals({
       openNode,
       requestReviewReveal,
       setError,
+      setSelectedTreePath,
       strings.assistant.fileChanged,
       tree,
       workspace
@@ -601,18 +774,6 @@ export function useAgentProposals({
     return { proposal, file };
   }, [agentProposals, agentReviewTarget, workspace]);
 
-  useEffect(() => {
-    if (agentReviewTarget || !workspace || !activeFile?.relativePath) {
-      return;
-    }
-
-    const target = externalReviewTargetForActiveFile(agentProposals, workspace.path, activeFile.relativePath);
-
-    if (target) {
-      setAgentReviewTarget(target);
-    }
-  }, [activeFile?.relativePath, agentProposals, agentReviewTarget, workspace]);
-
   const virtualReviewFile = useMemo<FileTreeNode | null>(() => {
     if (!activeReview || (activeReview.file.kind !== "create_file" && activeReview.file.kind !== "delete_file")) {
       return null;
@@ -636,7 +797,6 @@ export function useAgentProposals({
 
     if (activeReview.file.kind === "edit_file") {
       const externalReview = isExternalFilesystemProposal(activeReview.proposal);
-      const clearedFile = externalReview && activeReview.file.replacement.length === 0;
 
       return {
         mode: "edit_file",
@@ -645,23 +805,10 @@ export function useAgentProposals({
         activeHunkId: null,
         readOnly: externalReview,
         hideHunkActions: externalReview,
+        actionBusy: Boolean(reviewActionKey),
         labels: {
           ...strings.editor.reviewToolbar,
-          acceptAll: externalReview
-            ? clearedFile
-              ? strings.editor.reviewToolbar.keepEmptyFile
-              : strings.editor.reviewToolbar.keepChanges
-            : strings.editor.reviewToolbar.acceptAll,
-          rejectAll: externalReview
-            ? clearedFile
-              ? strings.editor.reviewToolbar.restoreText
-              : strings.editor.reviewToolbar.restorePreviousVersion
-            : strings.editor.reviewToolbar.rejectAll,
-          rejectRemaining: externalReview
-            ? clearedFile
-              ? strings.editor.reviewToolbar.restoreText
-              : strings.editor.reviewToolbar.restorePreviousVersion
-            : strings.editor.reviewToolbar.rejectRemaining
+          ...editorReviewActionLabelsForMode("edit_file", strings.editor.reviewToolbar)
         },
         onAcceptHunk: (hunkId) => {
           onReviewNavigation?.();
@@ -683,16 +830,14 @@ export function useAgentProposals({
     }
 
     if (activeReview.file.kind === "create_file") {
-      const externalReview = isExternalFilesystemProposal(activeReview.proposal);
-
       return {
         mode: "create_file",
         file: activeReview.file,
         currentContent: activeReview.file.content,
+        actionBusy: Boolean(reviewActionKey),
         labels: {
           ...strings.editor.reviewToolbar,
-          create: externalReview ? strings.editor.reviewToolbar.keepFile : strings.editor.reviewToolbar.create,
-          discard: externalReview ? strings.editor.reviewToolbar.moveToTrash : strings.editor.reviewToolbar.discard
+          ...editorReviewActionLabelsForMode("create_file", strings.editor.reviewToolbar)
         },
         onAcceptFile: () => {
           onReviewNavigation?.();
@@ -705,16 +850,14 @@ export function useAgentProposals({
       };
     }
 
-    const externalReview = isExternalFilesystemProposal(activeReview.proposal);
-
     return {
       mode: "delete_file",
       file: activeReview.file,
       currentContent: activeReview.file.baseContent,
+      actionBusy: Boolean(reviewActionKey),
       labels: {
         ...strings.editor.reviewToolbar,
-        delete: externalReview ? strings.editor.reviewToolbar.confirmDeletion : strings.editor.reviewToolbar.delete,
-        discard: externalReview ? strings.editor.reviewToolbar.restoreFile : strings.editor.reviewToolbar.discard
+        ...editorReviewActionLabelsForMode("delete_file", strings.editor.reviewToolbar)
       },
       onAcceptFile: () => {
         onReviewNavigation?.();
@@ -732,18 +875,21 @@ export function useAgentProposals({
     onReviewNavigation,
     rejectAgentProposalFile,
     resolveAgentProposalHunk,
+    reviewActionKey,
     strings.editor.reviewToolbar
   ]);
 
   return {
     activeReview,
     agentProposals,
+    applyAgentProposalFile,
     clearReviewForNormalNavigation,
     editorReview,
     mergeAgentProposals,
     pendingTreeChanges,
     proposalLoadState,
     rejectAgentProposal,
+    rejectAgentProposalFile,
     rejectAgentProposalStateOnly,
     selectAgentReviewTarget,
     setAgentProposals,

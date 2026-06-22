@@ -63,8 +63,8 @@ function renderFileTree(overrides: Partial<Parameters<typeof FileTree>[0]> = {})
       onViewUpdateRelease={() => undefined}
       onSelectNode={() => undefined}
       onSelectWorkspaceRoot={() => undefined}
-      onReviewPendingChanges={() => undefined}
-      onDiscardPendingChanges={() => undefined}
+      onAcceptPendingChanges={() => undefined}
+      onRejectPendingChanges={() => undefined}
       onMoveNode={async () => null}
       onShowContextMenu={() => undefined}
       onCancelRename={() => undefined}
@@ -80,8 +80,8 @@ describe("FileTree pending review strip", () => {
 
     expect(html).toContain("file-tree-pending-review");
     expect(html).toContain("2 pending review items");
-    expect(html).toContain(">Review<");
-    expect(html).toContain(">Restore all...<");
+    expect(html).toContain(">Accept all<");
+    expect(html).toContain(">Reject all<");
     expect(html).toContain("new");
   });
 
@@ -97,16 +97,16 @@ describe("FileTree pending review strip", () => {
 
     expect(html).toContain("file-tree-pending-review is-current-review");
     expect(html).toContain("1 pending review item");
-    expect(html).not.toContain(">Review<");
-    expect(html).not.toContain(">Restore all...<");
+    expect(html).not.toContain(">Accept all<");
+    expect(html).not.toContain(">Reject all<");
   });
 
   it("keeps strip actions for multiple pending items even when one item is visible", () => {
     const html = renderFileTree({ pendingReviewCount: 2, pendingReviewActive: true });
 
     expect(html).toContain("2 pending review items");
-    expect(html).toContain(">Review<");
-    expect(html).toContain(">Restore all...<");
+    expect(html).toContain(">Accept all<");
+    expect(html).toContain(">Reject all<");
   });
 
   it("disables both strip actions while a pending review action is busy", () => {
@@ -116,20 +116,20 @@ describe("FileTree pending review strip", () => {
     expect(html.match(/disabled=\"\"/g)).toHaveLength(2);
   });
 
-  it("calls the discard handler from the strip without requiring a real file node", () => {
-    const onDiscard = vi.fn();
+  it("calls the reject handler from the strip without requiring a real file node", () => {
+    const onReject = vi.fn();
     const element = PendingReviewStrip({
       count: 2,
       labels: appStrings.en.sidebar,
-      onReview: () => undefined,
-      onDiscard
+      onAccept: () => undefined,
+      onReject
     }) as ReactElement;
     const [, actions] = element.props.children as ReactElement[];
-    const [, discardButton] = actions.props.children as ReactElement[];
+    const [, rejectButton] = actions.props.children as ReactElement[];
 
-    discardButton.props.onClick();
+    rejectButton.props.onClick();
 
-    expect(onDiscard).toHaveBeenCalledTimes(1);
+    expect(onReject).toHaveBeenCalledTimes(1);
   });
 });
 

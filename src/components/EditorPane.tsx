@@ -846,8 +846,8 @@ export function EditorPane({
             hunks: editReviewDisplay.hunks,
             activeHunkId: null,
             createLineCount: 0,
-            onAcceptHunk: review.hideHunkActions ? undefined : review.onAcceptHunk,
-            onRejectHunk: review.hideHunkActions ? undefined : review.onRejectHunk,
+            onAcceptHunk: review.hideHunkActions || review.actionBusy ? undefined : review.onAcceptHunk,
+            onRejectHunk: review.hideHunkActions || review.actionBusy ? undefined : review.onRejectHunk,
             onOpenLink,
             renderInsertedAsSource: true,
             labels: {
@@ -972,12 +972,12 @@ export function EditorPane({
               <div className="editor-review-actions">
                 <button
                   type="button"
-                  disabled={Boolean(editReviewDisplay?.stale) || unresolvedHunks.length === 0}
+                  disabled={review.actionBusy || Boolean(editReviewDisplay?.stale) || unresolvedHunks.length === 0}
                   onClick={review.onAcceptFile}
                 >
                   {review.labels.acceptAll}
                 </button>
-                <button type="button" onClick={review.onRejectFile}>
+                <button type="button" disabled={review.actionBusy} onClick={review.onRejectFile}>
                   {(review.file.hunks ?? []).some((hunk) => hunk.status === "accepted")
                     ? review.labels.rejectRemaining
                     : review.labels.rejectAll}
@@ -990,10 +990,10 @@ export function EditorPane({
                 <span className="editor-review-path">{review.labels.pendingDocument(review.file.relativePath)}</span>
               </div>
               <div className="editor-review-actions">
-                <button type="button" onClick={review.onAcceptFile}>
+                <button type="button" disabled={review.actionBusy} onClick={review.onAcceptFile}>
                   {review.labels.create}
                 </button>
-                <button type="button" onClick={review.onRejectFile}>
+                <button type="button" disabled={review.actionBusy} onClick={review.onRejectFile}>
                   {review.labels.discard}
                 </button>
               </div>
@@ -1006,10 +1006,10 @@ export function EditorPane({
                 </span>
               </div>
               <div className="editor-review-actions">
-                <button type="button" onClick={review.onAcceptFile}>
+                <button type="button" disabled={review.actionBusy} onClick={review.onAcceptFile}>
                   {review.labels.delete}
                 </button>
-                <button type="button" onClick={review.onRejectFile}>
+                <button type="button" disabled={review.actionBusy} onClick={review.onRejectFile}>
                   {review.labels.discard}
                 </button>
               </div>

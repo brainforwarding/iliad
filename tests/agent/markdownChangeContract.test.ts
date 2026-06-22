@@ -127,6 +127,21 @@ describe("Markdown change contract", () => {
     expect(proposal?.files.map((file) => file.kind)).toEqual(["edit_file", "create_file", "delete_file"]);
   });
 
+  it("coalesces duplicate same-run file targets into one failed review file", () => {
+    const proposal = build([
+      editDraft({ relativePath: "notes/doc.md" }),
+      editDraft({ relativePath: "notes/./doc.md", replacement: "Different\n" })
+    ]);
+
+    expect(proposal?.files).toHaveLength(1);
+    expect(proposal?.files[0]).toMatchObject({
+      kind: "edit_file",
+      status: "failed",
+      relativePath: "notes/doc.md",
+      error: "Multiple proposed changes targeted this file. Ask the assistant to regenerate the proposal."
+    });
+  });
+
   it("turns one delete_file draft into one delete_file proposal change", () => {
     const proposal = build([deleteDraft()]);
 

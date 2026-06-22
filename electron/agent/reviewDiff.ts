@@ -123,9 +123,7 @@ export function buildLineReviewHunks(baseContent: string, replacement: string, f
         ? startOldIndex + oldLines.length
         : Math.max(0, Math.min(startOldIndex, oldSegments.length));
 
-    hunks.push({
-      id: `${fileId}-hunk-${hunks.length + 1}`,
-      status: "pending",
+    appendReviewHunks(hunks, fileId, {
       anchorLine,
       oldStartLine,
       oldLines,
@@ -136,6 +134,68 @@ export function buildLineReviewHunks(baseContent: string, replacement: string, f
   }
 
   return hunks;
+}
+
+type ReviewHunkDraft = Omit<AgentReviewHunk, "id" | "status">;
+
+function hasOnlyWhitespaceLines(lines: string[]) {
+  return lines.length > 0 && lines.every((line) => line.trim().length === 0);
+}
+
+function hasNonWhitespaceLine(lines: string[]) {
+  return lines.some((line) => line.trim().length > 0);
+}
+
+function pushReviewHunk(hunks: AgentReviewHunk[], fileId: string, draft: ReviewHunkDraft) {
+  hunks.push({
+    id: `${fileId}-hunk-${hunks.length + 1}`,
+    status: "pending",
+    ...draft
+  });
+}
+
+function appendReviewHunks(hunks: AgentReviewHunk[], fileId: string, draft: ReviewHunkDraft) {
+  if (hasOnlyWhitespaceLines(draft.oldLines) && hasNonWhitespaceLine(draft.newLines)) {
+    pushReviewHunk(hunks, fileId, {
+      anchorLine: Math.max(0, draft.oldStartLine - 1),
+      oldStartLine: draft.oldStartLine,
+      oldLines: [],
+      newLines: draft.newLines,
+      oldLineBreaks: [],
+      newLineBreaks: draft.newLineBreaks
+    });
+    pushReviewHunk(hunks, fileId, {
+      anchorLine: draft.anchorLine,
+      oldStartLine: draft.oldStartLine,
+      oldLines: draft.oldLines,
+      newLines: [],
+      oldLineBreaks: draft.oldLineBreaks,
+      newLineBreaks: []
+    });
+    return;
+  }
+
+  if (hasOnlyWhitespaceLines(draft.newLines) && hasNonWhitespaceLine(draft.oldLines)) {
+    pushReviewHunk(hunks, fileId, {
+      anchorLine: draft.anchorLine,
+      oldStartLine: draft.oldStartLine,
+      oldLines: draft.oldLines,
+      newLines: [],
+      oldLineBreaks: draft.oldLineBreaks,
+      newLineBreaks: []
+    });
+    pushReviewHunk(hunks, fileId, {
+      anchorLine: Math.max(0, draft.oldStartLine - 1),
+      oldStartLine: draft.oldStartLine,
+      oldLines: [],
+      newLines: draft.newLines,
+      oldLineBreaks: [],
+      newLineBreaks: draft.newLineBreaks
+    });
+    return;
+  }
+
+  pushReviewHunk(hunks, fileId, draft);
 }
 
 export function reconstructContent(baseContent: string, hunks: AgentReviewHunk[]): string {

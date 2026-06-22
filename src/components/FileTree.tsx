@@ -101,8 +101,8 @@ interface FileTreeProps {
   onViewUpdateRelease: () => void | Promise<void>;
   onSelectNode: (node: FileTreeNode) => void;
   onSelectWorkspaceRoot: () => void;
-  onReviewPendingChanges: () => void | Promise<void>;
-  onDiscardPendingChanges: () => void | Promise<void>;
+  onAcceptPendingChanges: () => void | Promise<void>;
+  onRejectPendingChanges: () => void | Promise<void>;
   onMoveNode: (node: FileTreeNode, targetDirectoryPath: string) => Promise<FileTreeNode | null>;
   onShowContextMenu: (node: FileTreeNode, position: { x: number; y: number }) => void;
   contextMenuOpen?: boolean;
@@ -142,8 +142,8 @@ interface FileTreeLabels {
   proposedNewDocument: (path: string) => string;
   pendingDelete: (path: string) => string;
   pendingReviewSummary: (count: number) => string;
-  reviewPendingChanges: string;
-  discardPendingChanges: string;
+  acceptPendingChanges: string;
+  rejectPendingChanges: string;
   rename: (name: string) => string;
   findInFileTree: string;
   fileTreeSearchPlaceholder: string;
@@ -340,15 +340,15 @@ export function PendingReviewStrip({
   active,
   busy,
   labels,
-  onReview,
-  onDiscard
+  onAccept,
+  onReject
 }: {
   count: number;
   active?: boolean;
   busy?: boolean;
   labels: FileTreeLabels;
-  onReview: () => void | Promise<void>;
-  onDiscard: () => void | Promise<void>;
+  onAccept: () => void | Promise<void>;
+  onReject: () => void | Promise<void>;
 }) {
   if (count === 0) {
     return null;
@@ -365,11 +365,11 @@ export function PendingReviewStrip({
       <span>{labels.pendingReviewSummary(count)}</span>
       {showActions ? (
         <div className="file-tree-pending-review-actions">
-          <button type="button" disabled={busy} onClick={() => void onReview()}>
-            {labels.reviewPendingChanges}
+          <button type="button" disabled={busy} onClick={() => void onAccept()}>
+            {labels.acceptPendingChanges}
           </button>
-          <button type="button" disabled={busy} onClick={() => void onDiscard()}>
-            {labels.discardPendingChanges}
+          <button type="button" disabled={busy} onClick={() => void onReject()}>
+            {labels.rejectPendingChanges}
           </button>
         </div>
       ) : null}
@@ -1094,8 +1094,8 @@ export function FileTree({
   onViewUpdateRelease,
   onSelectNode,
   onSelectWorkspaceRoot,
-  onReviewPendingChanges,
-  onDiscardPendingChanges,
+  onAcceptPendingChanges,
+  onRejectPendingChanges,
   onMoveNode,
   onShowContextMenu,
   contextMenuOpen = false,
@@ -2354,8 +2354,8 @@ export function FileTree({
         active={pendingReviewActive}
         busy={pendingReviewBusy}
         labels={labels}
-        onReview={onReviewPendingChanges}
-        onDiscard={onDiscardPendingChanges}
+        onAccept={onAcceptPendingChanges}
+        onReject={onRejectPendingChanges}
       />
 
       <div

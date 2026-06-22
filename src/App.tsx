@@ -18,7 +18,7 @@ import {
   useDocumentPersistence,
   type SaveStatus
 } from "./app/useDocumentPersistence";
-import { useAgentProposals } from "./app/useAgentProposals";
+import { externalReviewTargetForActiveFile, useAgentProposals } from "./app/useAgentProposals";
 import { useSelectionComments } from "./app/useSelectionComments";
 import { useWorkspace } from "./app/useWorkspace";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
@@ -42,12 +42,12 @@ import {
 } from "./assistant/fileTreeContentSearch";
 import { fileHasMutableReview } from "./assistant/assistantUtils";
 import { sameRelativePath } from "./assistant/pendingFileTree";
+import { logReviewNavigation } from "./assistant/reviewDebug";
 import {
-  firstMutableReviewTarget,
-  mutableReviewFileCount,
-  mutableReviewProposalIds,
-  mutableReviewProposals
-} from "./assistant/pendingReviewState";
+  buildReviewQueueSummary,
+  internalReviewProposals,
+  pendingFileTreeChangesFromQueue
+} from "./assistant/reviewQueue";
 import type { ContextAttachmentMoveHandler } from "./assistant/useAssistantRun";
 import type { ContentSearchRevealTarget } from "./editor/contentSearchReveal";
 import { useFileActions } from "./files/fileActions";
@@ -223,12 +223,15 @@ export default function App() {
     const runId = runningAssistantRunIdRef.current;
 
     if (!runId) {
+      logReviewNavigation("navigation_mark_without_running_run");
       return;
     }
 
+    logReviewNavigation("navigation_mark_during_run", { runId });
     editorNavigationDuringRunRef.current = { runId, changed: true };
   }, []);
   const handleRunningAssistantRunChange = useCallback((runId: string | null) => {
+    logReviewNavigation("running_run_changed", { runId });
     runningAssistantRunIdRef.current = runId;
     setRunningAssistantRunId(runId);
     editorNavigationDuringRunRef.current = { runId, changed: false };
@@ -298,13 +301,12 @@ export default function App() {
   const {
     activeReview,
     agentProposals,
+    applyAgentProposalFile,
     clearReviewForNormalNavigation,
     editorReview,
     mergeAgentProposals,
-    pendingTreeChanges,
     proposalLoadState,
-    rejectAgentProposal,
-    rejectAgentProposalStateOnly,
+    rejectAgentProposalFile,
     selectAgentReviewTarget,
     setAgentProposals,
     setAgentReviewTarget,
@@ -327,18 +329,31 @@ export default function App() {
     tree,
     workspace
   });
-  const pendingReviewProposals = useMemo(() => mutableReviewProposals(agentProposals), [agentProposals]);
-  const pendingReviewFileCount = useMemo(() => mutableReviewFileCount(pendingReviewProposals), [pendingReviewProposals]);
-  const firstPendingReviewTarget = useMemo(() => firstMutableReviewTarget(pendingReviewProposals), [pendingReviewProposals]);
-  const pendingReviewActive = Boolean(activeReview && fileHasMutableReview(activeReview.file));
-  const hasPendingExternalFilesystemReview = useMemo(
-    () =>
-      agentProposals.some(
-        (proposal) =>
-          proposal.metadata?.kind === "external_filesystem" && proposal.files.some((file) => fileHasMutableReview(file))
-      ),
-    [agentProposals]
+  const reviewQueue = useMemo(() => buildReviewQueueSummary(agentProposals), [agentProposals]);
+  const pendingTreeChanges = useMemo(
+    () => pendingFileTreeChangesFromQueue(reviewQueue.items),
+    [reviewQueue.items]
   );
+  const assistantPanelProposals = useMemo(() => internalReviewProposals(agentProposals), [agentProposals]);
+  const pendingReviewFileCount = reviewQueue.visibleItems.length;
+  const pendingReviewActive = Boolean(
+    activeReview &&
+      fileHasMutableReview(activeReview.file) &&
+      reviewQueue.visibleItems.some(
+        (item) => item.proposalId === activeReview.proposal.id && item.fileId === activeReview.file.id
+      )
+  );
+  const selectedTreePathForFileTree = useMemo(() => {
+    if (
+      activeReview?.file.kind === "delete_file" &&
+      !findNodeByRelativePath(tree, activeReview.file.relativePath)
+    ) {
+      return null;
+    }
+
+    return selectedTreePath;
+  }, [activeReview?.file.kind, activeReview?.file.relativePath, selectedTreePath, tree]);
+  const hasPendingExternalFilesystemReview = reviewQueue.externalItems.length > 0;
   const [pendingReviewDiscarding, setPendingReviewDiscarding] = useState(false);
 
   // One transient signal bridges the panel-closed gap: the first comment saved
@@ -542,10 +557,15 @@ export default function App() {
 
   const handleManualReviewTargetChange = useCallback(
     (target: Parameters<typeof selectAgentReviewTarget>[0]) => {
+      logReviewNavigation("manual_review_target_change", {
+        target,
+        activeRelativePath: activeFile?.relativePath ?? null,
+        selectedTreePath
+      });
       markEditorNavigationDuringRun();
       return selectAgentReviewTarget(target);
     },
-    [markEditorNavigationDuringRun, selectAgentReviewTarget]
+    [activeFile?.relativePath, markEditorNavigationDuringRun, selectAgentReviewTarget, selectedTreePath]
   );
   const reloadActiveFileAfterExternalCapture = useCallback(
     async ({
@@ -709,13 +729,22 @@ export default function App() {
       if (result.status === "proposal") {
         mergeAgentProposals([result.proposal]);
 
-        const file = result.proposal.files.find(fileHasMutableReview);
-        if (file) {
+        const target =
+          activeFile?.kind === "markdown"
+            ? externalReviewTargetForActiveFile([result.proposal], workspace.path, activeFile.relativePath)
+            : null;
+        if (target) {
           const alreadyReviewingFile =
-            activeReview?.proposal.id === result.proposal.id && activeReview.file.id === file.id;
+            activeReview?.proposal.id === target.proposalId && activeReview.file.id === target.fileId;
+
+          logReviewNavigation("external_capture_active_file_target", {
+            target,
+            alreadyReviewingFile,
+            activeRelativePath: activeFile?.relativePath ?? null
+          });
 
           if (!alreadyReviewingFile) {
-            await selectAgentReviewTarget({ proposalId: result.proposal.id, fileId: file.id });
+            await selectAgentReviewTarget(target);
           }
         }
 
@@ -998,92 +1027,81 @@ export default function App() {
     },
     [markEditorNavigationDuringRun, openDocumentLink]
   );
-  const rejectAgentProposalWithNavigation = useCallback(
-    (proposalId: Parameters<typeof rejectAgentProposal>[0]) => {
-      markEditorNavigationDuringRun();
-      return rejectAgentProposal(proposalId);
-    },
-    [markEditorNavigationDuringRun, rejectAgentProposal]
-  );
-  const reviewPendingTreeChanges = useCallback(() => {
-    if (!firstPendingReviewTarget) {
+  const acceptPendingTreeChanges = useCallback(async () => {
+    const items = reviewQueue.visibleItems;
+
+    if (items.length === 0 || pendingReviewDiscarding) {
       return;
     }
 
-    void handleManualReviewTargetChange(firstPendingReviewTarget);
-  }, [firstPendingReviewTarget, handleManualReviewTargetChange]);
-  const discardPendingTreeChanges = useCallback(async () => {
-    const proposalIds = mutableReviewProposalIds(pendingReviewProposals);
-
-    if (proposalIds.length === 0 || pendingReviewDiscarding) {
-      return;
-    }
-
-    const hasExternalReview = pendingReviewProposals.some(
-      (proposal) => proposal.metadata?.kind === "external_filesystem"
-    );
-    const activeExternalReview =
-      activeReview?.proposal.metadata?.kind === "external_filesystem" ? activeReview : null;
-
+    logReviewNavigation("bulk_accept_pending_changes_start", {
+      count: items.length,
+      items: items.map((item) => ({
+        proposalId: item.proposalId,
+        fileId: item.fileId,
+        source: item.source,
+        kind: item.kind,
+        relativePath: item.relativePath
+      }))
+    });
     markEditorNavigationDuringRun();
     setPendingReviewDiscarding(true);
 
     try {
-      for (const proposalId of proposalIds) {
-        await rejectAgentProposalStateOnly(proposalId);
+      for (const item of items) {
+        await applyAgentProposalFile(item.proposalId, item.fileId);
       }
 
-      if (workspace) {
-        const proposals = await window.iliad.agent.listProposals(workspace.path);
-        setAgentProposals(proposals);
+      setNotice(strings.assistant.status.applied);
+    } finally {
+      setPendingReviewDiscarding(false);
+      logReviewNavigation("bulk_accept_pending_changes_finish", { count: items.length });
+    }
+  }, [
+    applyAgentProposalFile,
+    markEditorNavigationDuringRun,
+    pendingReviewDiscarding,
+    reviewQueue.visibleItems,
+    setNotice,
+    strings.assistant.status.applied
+  ]);
+  const rejectPendingTreeChanges = useCallback(async () => {
+    const items = reviewQueue.visibleItems;
 
-        if (hasExternalReview) {
-          const nextTree = await refreshTree(workspace.path);
-          setAgentReviewTarget(null);
+    if (items.length === 0 || pendingReviewDiscarding) {
+      return;
+    }
 
-          if (activeExternalReview) {
-            const node = findNodeByRelativePath(nextTree, activeExternalReview.file.relativePath);
+    logReviewNavigation("bulk_reject_pending_changes_start", {
+      count: items.length,
+      items: items.map((item) => ({
+        proposalId: item.proposalId,
+        fileId: item.fileId,
+        source: item.source,
+        kind: item.kind,
+        relativePath: item.relativePath
+      }))
+    });
+    markEditorNavigationDuringRun();
+    setPendingReviewDiscarding(true);
 
-            if (node) {
-              try {
-                const text = await window.iliad.readMarkdown(workspace.path, node.path);
-                setActiveFile(node);
-                setSelectedTreePath(node.path);
-                loadDocument(text);
-              } catch {
-                setActiveFile(null);
-                setSelectedTreePath(null);
-                clearDocument();
-              }
-            } else {
-              setActiveFile(null);
-              setSelectedTreePath(null);
-              clearDocument();
-            }
-          }
-        }
+    try {
+      for (const item of items) {
+        await rejectAgentProposalFile(item.proposalId, item.fileId);
       }
 
       setNotice(strings.assistant.status.discarded);
     } finally {
       setPendingReviewDiscarding(false);
+      logReviewNavigation("bulk_reject_pending_changes_finish", { count: items.length });
     }
   }, [
-    activeReview,
-    clearDocument,
-    loadDocument,
     markEditorNavigationDuringRun,
     pendingReviewDiscarding,
-    pendingReviewProposals,
-    refreshTree,
-    rejectAgentProposalStateOnly,
-    setActiveFile,
-    setAgentProposals,
-    setAgentReviewTarget,
+    rejectAgentProposalFile,
+    reviewQueue.visibleItems,
     setNotice,
-    setSelectedTreePath,
-    strings.assistant.status.discarded,
-    workspace
+    strings.assistant.status.discarded
   ]);
 
   const completeDocumentClose = useCallback(() => {
@@ -2046,7 +2064,7 @@ export default function App() {
               recentWorkspaces={recentWorkspaces}
               nodes={tree}
               activePath={editorFile?.path}
-              selectedPath={selectedTreePath}
+              selectedPath={selectedTreePathForFileTree}
               pendingChanges={pendingTreeChanges}
               pendingReviewCount={pendingReviewFileCount}
               pendingReviewActive={pendingReviewActive}
@@ -2060,13 +2078,24 @@ export default function App() {
               updateStatus={updateStatus}
               updateChecking={updateChecking}
               onOpenNode={(node) => {
+                logReviewNavigation("file_tree_open_node", {
+                  relativePath: node.relativePath,
+                  path: node.path,
+                  kind: node.kind
+                });
                 markEditorNavigationDuringRun();
                 clearReviewForNormalNavigation(node);
                 return openNode(node);
               }}
-              onOpenPendingChange={(target) =>
-                handleManualReviewTargetChange({ proposalId: target.proposalId, fileId: target.fileId })
-              }
+              onOpenPendingChange={(target) => {
+                logReviewNavigation("file_tree_open_pending_change", {
+                  proposalId: target.proposalId,
+                  fileId: target.fileId,
+                  kind: target.kind,
+                  relativePath: target.relativePath
+                });
+                return handleManualReviewTargetChange({ proposalId: target.proposalId, fileId: target.fileId });
+              }}
               onRevealComplete={(path) => {
                 if (reviewRevealPath === path) {
                   setReviewRevealPath(null);
@@ -2088,8 +2117,8 @@ export default function App() {
               onSelectWorkspaceRoot={() => {
                 setSelectedTreePath(workspace.path);
               }}
-              onReviewPendingChanges={reviewPendingTreeChanges}
-              onDiscardPendingChanges={discardPendingTreeChanges}
+              onAcceptPendingChanges={acceptPendingTreeChanges}
+              onRejectPendingChanges={rejectPendingTreeChanges}
               onMoveNode={moveNodeWithNavigation}
               onShowContextMenu={(node, position) => setTreeContextMenu({ node, ...position })}
               contextMenuOpen={Boolean(treeContextMenu)}
@@ -2153,11 +2182,12 @@ export default function App() {
             fileTree={tree}
             labels={strings.assistant}
             language={language}
-            proposals={agentProposals}
+            proposals={assistantPanelProposals}
             selectionComments={assistantSelectionComments}
             workspace={workspace}
             onProposalsChanged={mergeAgentProposals}
-            onRejectProposal={rejectAgentProposalWithNavigation}
+            onAcceptProposalFile={applyAgentProposalFile}
+            onRejectProposalFile={rejectAgentProposalFile}
             onReviewTargetChange={handleManualReviewTargetChange}
             onAutoReviewTargetChange={selectAgentReviewTarget}
             editorNavigationChangedDuringRun={editorNavigationChangedDuringRun}

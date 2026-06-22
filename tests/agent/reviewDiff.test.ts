@@ -45,6 +45,28 @@ describe("review diff hunks", () => {
     expect(endInsert?.anchorLine).toBe(1);
   });
 
+  it("splits blank-line deletion from inserted text so decisions stay independent", () => {
+    const base = "Formula list:\n\n";
+    const replacement = "Formula list:\n=SUM(A1:A3)\n";
+    const hunks = buildLineReviewHunks(base, replacement, "file-blank");
+
+    expect(hunks).toHaveLength(2);
+    expect(hunks.map((hunk) => ({ oldLines: hunk.oldLines, newLines: hunk.newLines }))).toEqual([
+      { oldLines: [], newLines: ["=SUM(A1:A3)"] },
+      { oldLines: [""], newLines: [] }
+    ]);
+    expect(reconstructContent(base, withStatus(hunks, "accepted"))).toBe(replacement);
+    expect(
+      reconstructContent(
+        base,
+        hunks.map((hunk, index) => ({
+          ...hunk,
+          status: index === 0 ? ("accepted" as const) : ("rejected" as const)
+        }))
+      )
+    ).toBe("Formula list:\n=SUM(A1:A3)\n\n");
+  });
+
   it("treats stale hunks as mutable after partial acceptance", () => {
     const hunks = buildLineReviewHunks("one\ntwo\n", "ONE\ntwo\nthree\n", "file-6");
 

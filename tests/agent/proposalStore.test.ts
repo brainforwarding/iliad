@@ -111,6 +111,44 @@ describe("AgentProposalStore", () => {
     expect(await readFile(filePath, "utf8")).toBe(base);
   });
 
+  it("rejects one edit hunk without rejecting unrelated pending hunks", async () => {
+    const filePath = path.join(root, "doc.md");
+    const base = "one\nsame\ntwo\n";
+    const replacement = "ONE\nsame\nTWO\n";
+    await writeFile(filePath, base, "utf8");
+
+    const store = new AgentProposalStore(userData);
+    const saved = await store.saveProposal(
+      proposal({
+        files: [
+          {
+            id: "file-reject-one",
+            kind: "edit_file",
+            status: "pending",
+            relativePath: "doc.md",
+            baseHash: "",
+            baseContent: base,
+            replacement,
+            unifiedDiff: ""
+          }
+        ]
+      })
+    );
+    const file = saved.files[0];
+
+    expect(file.kind === "edit_file" ? file.hunks : []).toHaveLength(2);
+    const first = file.kind === "edit_file" ? file.hunks?.[0] : undefined;
+    const rejected = await store.resolveProposalHunk(root, saved.id, file.id, first!.id, "reject");
+    const rejectedFile = rejected.proposal.files[0];
+
+    expect(rejectedFile.kind).toBe("edit_file");
+    expect(rejectedFile.kind === "edit_file" && rejectedFile.hunks?.map((hunk) => hunk.status)).toEqual([
+      "rejected",
+      "pending"
+    ]);
+    expect(await readFile(filePath, "utf8")).toBe(base);
+  });
+
   it("creates generated Markdown files only when applied", async () => {
     const store = new AgentProposalStore(userData);
     const saved = await store.saveProposal(

@@ -46,7 +46,8 @@ interface AssistantPanelProps {
   selectionComments?: AssistantPanelSelectionComments;
   workspace: WorkspaceInfo;
   onProposalsChanged: (proposals: AgentChangeProposal[]) => void;
-  onRejectProposal: (proposalId: string) => Promise<void>;
+  onAcceptProposalFile: (proposalId: string, fileId: string) => Promise<void>;
+  onRejectProposalFile: (proposalId: string, fileId: string) => Promise<void>;
   onReviewTargetChange: (target: ReviewTarget | null) => void | Promise<void>;
   onAutoReviewTargetChange?: (target: ReviewTarget | null) => void | Promise<void>;
   editorNavigationChangedDuringRun?: (runId: string) => boolean;
@@ -67,7 +68,8 @@ export function AssistantPanel({
   selectionComments,
   workspace,
   onProposalsChanged,
-  onRejectProposal,
+  onAcceptProposalFile,
+  onRejectProposalFile,
   onReviewTargetChange,
   onAutoReviewTargetChange,
   editorNavigationChangedDuringRun,
@@ -293,8 +295,8 @@ export function AssistantPanel({
           <AssistantPendingProposals
             labels={labels}
             proposals={proposals}
-            onRejectProposal={onRejectProposal}
-            onReviewTargetChange={onReviewTargetChange}
+            onAcceptProposalFile={onAcceptProposalFile}
+            onRejectProposalFile={onRejectProposalFile}
           />
 
           <AssistantTranscript

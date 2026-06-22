@@ -34,21 +34,78 @@ export function buildMarkdownChangeProposal({
   }
 
   const now = (clock?.() ?? new Date()).toISOString();
+  const { drafts, duplicatePaths } = coalesceDraftFileChanges(draftFileChanges);
 
   return {
     id: `proposal-${request.runId}`,
     runId: request.runId,
     responseId,
     workspaceRoot: request.workspaceRoot,
-    title: markdownChangeProposalTitle(draftFileChanges),
-    summary: markdownChangeProposalSummary(draftFileChanges),
+    title: markdownChangeProposalTitle(drafts),
+    summary: markdownChangeProposalSummary(drafts),
     createdAt: now,
     updatedAt: now,
     model,
     source,
     status: "pending",
-    files: draftFileChanges.map((draft, index) => markdownChangeProposalFile(request.runId, draft, index))
+    files: drafts.map((draft, index) => {
+      const file = markdownChangeProposalFile(request.runId, draft, index);
+
+      if (duplicatePaths.has(normalizeDraftRelativePath(draft.relativePath))) {
+        file.status = "failed";
+        file.error = "Multiple proposed changes targeted this file. Ask the assistant to regenerate the proposal.";
+      }
+
+      return file;
+    })
   };
+}
+
+function normalizeDraftRelativePath(relativePath: string) {
+  const normalizedInput = relativePath.trim().replace(/\\/g, "/");
+
+  if (normalizedInput.startsWith("/") || /^[A-Za-z]:\//.test(normalizedInput)) {
+    return "";
+  }
+
+  const segments: string[] = [];
+
+  for (const segment of normalizedInput.split("/")) {
+    if (!segment || segment === ".") {
+      continue;
+    }
+
+    if (segment === "..") {
+      return "";
+    }
+
+    segments.push(segment);
+  }
+
+  return segments.join("/");
+}
+
+function coalesceDraftFileChanges(draftFileChanges: AgentDraftFileChange[]) {
+  const drafts: AgentDraftFileChange[] = [];
+  const duplicatePaths = new Set<string>();
+  const seenPaths = new Set<string>();
+
+  for (const draft of draftFileChanges) {
+    const normalizedPath = normalizeDraftRelativePath(draft.relativePath);
+
+    if (normalizedPath && seenPaths.has(normalizedPath)) {
+      duplicatePaths.add(normalizedPath);
+      continue;
+    }
+
+    if (normalizedPath) {
+      seenPaths.add(normalizedPath);
+    }
+
+    drafts.push(draft);
+  }
+
+  return { drafts, duplicatePaths };
 }
 
 export function markdownChangeProposalTitle(drafts: AgentDraftFileChange[]) {

@@ -36,6 +36,7 @@ import {
   chooseInitialReviewTarget,
   type ReviewTarget
 } from "./reviewNavigation";
+import { logReviewNavigation } from "./reviewDebug";
 import { useDictation } from "./useDictation";
 import type {
   AgentActivityRunEvent,
@@ -1521,13 +1522,24 @@ export function useAssistantRun({
       ]);
 
       onProposalsChanged(result.proposals);
+      const currentActiveRelativePath =
+        activeFile?.kind === "markdown" ? normalizeRelativePath(activeFile.relativePath) : null;
+      const navigationChangedDuringRun = editorNavigationChangedDuringRun?.(id) ?? false;
       const reviewTarget = chooseInitialReviewTarget({
         proposals: result.proposals,
         runId: id,
         runActiveRelativePath,
-        currentActiveRelativePath:
-          activeFile?.kind === "markdown" ? normalizeRelativePath(activeFile.relativePath) : null,
-        editorNavigationChangedDuringRun: editorNavigationChangedDuringRun?.(id) ?? false
+        currentActiveRelativePath,
+        editorNavigationChangedDuringRun: navigationChangedDuringRun
+      });
+
+      logReviewNavigation("assistant_run_initial_review_target", {
+        runId: id,
+        proposalIds: result.proposals.map((proposal) => proposal.id),
+        runActiveRelativePath,
+        currentActiveRelativePath,
+        navigationChangedDuringRun,
+        reviewTarget
       });
 
       if (reviewTarget) {

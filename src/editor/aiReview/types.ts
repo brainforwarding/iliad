@@ -8,6 +8,7 @@ export type EditorReviewState =
       activeHunkId: string | null;
       readOnly?: boolean;
       hideHunkActions?: boolean;
+      actionBusy?: boolean;
       onAcceptHunk: (hunkId: string) => void;
       onRejectHunk: (hunkId: string) => void;
       onAcceptFile: () => void;
@@ -28,6 +29,7 @@ export type EditorReviewState =
       mode: "create_file";
       file: AgentCreateFileProposal;
       currentContent: string;
+      actionBusy?: boolean;
       onAcceptFile: () => void;
       onRejectFile: () => void;
       labels: {
@@ -40,6 +42,7 @@ export type EditorReviewState =
       mode: "delete_file";
       file: AgentDeleteFileProposal;
       currentContent: string;
+      actionBusy?: boolean;
       onAcceptFile: () => void;
       onRejectFile: () => void;
       labels: {
