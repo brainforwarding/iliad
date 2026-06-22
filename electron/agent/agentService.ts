@@ -855,35 +855,92 @@ export class AgentService {
   }
 
   async applyProposalFile(request: ApplyAgentProposalFileRequest) {
+    const startedAt = Date.now();
     const externalSession = this.externalCaptureSessionForProposal(request.workspaceRoot, request.proposalId);
-
-    if (externalSession) {
-      return this.applyExternalProposalFile(externalSession, request.fileId);
-    }
-
-    return trackWorkspaceMutation(request.workspaceRoot, undefined, () =>
-      this.proposalStore.applyProposalFile(request.workspaceRoot, request.proposalId, request.fileId)
+    const actionDetails = await this.proposalActionDetails(
+      request.workspaceRoot,
+      request.proposalId,
+      request.fileId,
+      externalSession
     );
+
+    this.logProposalActionInfo("agent.proposal_file.apply_started", startedAt, actionDetails);
+
+    try {
+      const result = externalSession
+        ? await this.applyExternalProposalFile(externalSession, request.fileId)
+        : await trackWorkspaceMutation(request.workspaceRoot, undefined, () =>
+            this.proposalStore.applyProposalFile(request.workspaceRoot, request.proposalId, request.fileId)
+          );
+
+      this.logProposalActionInfo("agent.proposal_file.apply_finished", startedAt, {
+        ...this.proposalActionDetailsFromProposal(request.workspaceRoot, result.proposal, request.fileId, Boolean(externalSession)),
+        resultKind: result.kind,
+        resultStatus: result.status
+      });
+      return result;
+    } catch (error) {
+      this.logProposalActionWarn("agent.proposal_file.apply_failed", startedAt, actionDetails, error);
+      throw error;
+    }
   }
 
   async rejectProposalFile(request: RejectAgentProposalFileRequest) {
+    const startedAt = Date.now();
     const externalSession = this.externalCaptureSessionForProposal(request.workspaceRoot, request.proposalId);
+    const actionDetails = await this.proposalActionDetails(
+      request.workspaceRoot,
+      request.proposalId,
+      request.fileId,
+      externalSession
+    );
 
-    if (externalSession) {
-      return this.rejectExternalProposalFile(externalSession, request.fileId);
+    this.logProposalActionInfo("agent.proposal_file.reject_started", startedAt, actionDetails);
+
+    try {
+      const proposal = externalSession
+        ? await this.rejectExternalProposalFile(externalSession, request.fileId)
+        : await this.proposalStore.rejectProposalFile(request.workspaceRoot, request.proposalId, request.fileId);
+
+      this.logProposalActionInfo(
+        "agent.proposal_file.reject_finished",
+        startedAt,
+        this.proposalActionDetailsFromProposal(request.workspaceRoot, proposal, request.fileId, Boolean(externalSession))
+      );
+      return proposal;
+    } catch (error) {
+      this.logProposalActionWarn("agent.proposal_file.reject_failed", startedAt, actionDetails, error);
+      throw error;
     }
-
-    return this.proposalStore.rejectProposalFile(request.workspaceRoot, request.proposalId, request.fileId);
   }
 
   async rejectProposal(request: RejectAgentProposalRequest) {
+    const startedAt = Date.now();
     const externalSession = this.externalCaptureSessionForProposal(request.workspaceRoot, request.proposalId);
+    const actionDetails = await this.proposalActionDetails(
+      request.workspaceRoot,
+      request.proposalId,
+      undefined,
+      externalSession
+    );
 
-    if (externalSession) {
-      return this.rejectExternalProposal(externalSession);
+    this.logProposalActionInfo("agent.proposal.reject_started", startedAt, actionDetails);
+
+    try {
+      const proposal = externalSession
+        ? await this.rejectExternalProposal(externalSession)
+        : await this.proposalStore.rejectProposal(request.workspaceRoot, request.proposalId);
+
+      this.logProposalActionInfo(
+        "agent.proposal.reject_finished",
+        startedAt,
+        this.proposalActionDetailsFromProposal(request.workspaceRoot, proposal, undefined, Boolean(externalSession))
+      );
+      return proposal;
+    } catch (error) {
+      this.logProposalActionWarn("agent.proposal.reject_failed", startedAt, actionDetails, error);
+      throw error;
     }
-
-    return this.proposalStore.rejectProposal(request.workspaceRoot, request.proposalId);
   }
 
   resolveProposalHunk(request: ResolveAgentProposalHunkRequest) {
@@ -1692,6 +1749,68 @@ const controller = new AbortController();
       durationMs: Date.now() - startedAt,
       details: {
         workspaceFingerprint: workspaceFingerprint(workspaceRoot),
+        ...details,
+        ...sanitizeUnknownError(error)
+      }
+    });
+  }
+
+  private async proposalActionDetails(
+    workspaceRoot: string,
+    proposalId: string,
+    fileId: string | undefined,
+    externalSession: ExternalAgentCaptureSession | null
+  ): Promise<Record<string, DiagnosticDetailValue>> {
+    const proposal = externalSession?.proposal ?? (await this.proposalStore.getProposal(workspaceRoot, proposalId));
+
+    return this.proposalActionDetailsFromProposal(workspaceRoot, proposal, fileId, Boolean(externalSession), proposalId);
+  }
+
+  private proposalActionDetailsFromProposal(
+    workspaceRoot: string,
+    proposal: AgentChangeProposal | null,
+    fileId: string | undefined,
+    externalSessionFound: boolean,
+    requestedProposalId = proposal?.id ?? "missing"
+  ): Record<string, DiagnosticDetailValue> {
+    const file = fileId ? proposal?.files.find((candidate) => candidate.id === fileId) : undefined;
+
+    return {
+      workspaceFingerprint: workspaceFingerprint(workspaceRoot),
+      proposalId: requestedProposalId,
+      requestedFileId: fileId ?? null,
+      externalSessionFound,
+      proposalFound: Boolean(proposal),
+      sourceKind: proposal?.source.kind ?? null,
+      metadataKind: proposal?.metadata?.kind ?? null,
+      proposalStatus: proposal?.status ?? null,
+      proposalFileCount: proposal?.files.length ?? 0,
+      fileFound: fileId ? Boolean(file) : null,
+      fileKind: file?.kind ?? null,
+      fileStatus: file?.status ?? null
+    };
+  }
+
+  private logProposalActionInfo(event: string, startedAt: number, details: Record<string, DiagnosticDetailValue>) {
+    this.diagnostics.info({
+      area: "agent",
+      event,
+      durationMs: Date.now() - startedAt,
+      details
+    });
+  }
+
+  private logProposalActionWarn(
+    event: string,
+    startedAt: number,
+    details: Record<string, DiagnosticDetailValue>,
+    error: unknown
+  ) {
+    this.diagnostics.warn({
+      area: "agent",
+      event,
+      durationMs: Date.now() - startedAt,
+      details: {
         ...details,
         ...sanitizeUnknownError(error)
       }

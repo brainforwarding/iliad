@@ -78,6 +78,43 @@ Added logging around the central review-target state machine:
 - `select_target_clear_requested`
   - logs explicit clearing of review target.
 
+### `electron/agent/agentService.ts`
+
+Added persisted main-process diagnostics for proposal actions. Renderer console logs are useful in dev, but packaged-window testing can lose them, and IPC failures such as `Proposal not found for this workspace` need evidence from the process that owns the proposal store.
+
+The app now writes JSONL entries under:
+
+```text
+~/Library/Application Support/iliad-dev/logs/
+```
+
+For proposal action debugging, search for:
+
+```text
+agent.proposal_file.apply_started
+agent.proposal_file.apply_finished
+agent.proposal_file.apply_failed
+agent.proposal_file.reject_started
+agent.proposal_file.reject_finished
+agent.proposal_file.reject_failed
+agent.proposal.reject_started
+agent.proposal.reject_finished
+agent.proposal.reject_failed
+```
+
+Each entry includes safe identifiers and state only:
+
+- workspace fingerprint;
+- proposal id;
+- requested file id;
+- whether an external capture session was found;
+- whether the proposal/file was found;
+- source kind and metadata kind;
+- proposal/file status;
+- sanitized error details on failure.
+
+It intentionally does not log Markdown content or absolute document paths.
+
 Also exposed the existing file-level handlers from this hook so higher-level UI can call them directly:
 
 - `applyAgentProposalFile`

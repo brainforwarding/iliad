@@ -291,16 +291,12 @@
   }
 }
 
-/* Selection comments: quiet blue bottom band on commented text. Overlaps are merged
+/* Selection comments: quiet blue fill on commented text. Overlaps are merged
    into one decoration layer in code, so the wash never compounds. No cursor
    override: click places the cursor like anywhere else. */
 .cm-comment-wash {
   border-radius: 2px;
-  background-color: transparent;
-  background-image: linear-gradient(var(--comment), var(--comment));
-  background-position: 0 90%;
-  background-repeat: no-repeat;
-  background-size: 100% 0.62em;
+  background-color: var(--comment);
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
@@ -311,10 +307,10 @@
 
 @keyframes comment-wash-fade {
   from {
-    background-image: linear-gradient(var(--comment), var(--comment));
+    background-color: var(--comment);
   }
   to {
-    background-image: linear-gradient(transparent, transparent);
+    background-color: transparent;
   }
 }
 
@@ -475,18 +471,14 @@
 
   .cm-comment-wash-fading {
     animation: none;
-    background-image: linear-gradient(transparent, transparent);
+    background-color: transparent;
   }
 }
 
-/* Tighten/Edit: a quiet graphite band on the safe unit while the rewrite runs. */
+/* Tighten/Edit: a quiet graphite fill on the safe unit while the rewrite runs. */
 .cm-tighten-wash {
   border-radius: 2px;
-  background-color: transparent;
-  background-image: linear-gradient(var(--tighten-wash), var(--tighten-wash));
-  background-position: 0 90%;
-  background-repeat: no-repeat;
-  background-size: 100% 0.72em;
+  background-color: var(--tighten-wash);
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
@@ -522,11 +514,7 @@
 
 .cm-ai-review-line-removed {
   border-radius: 2px;
-  background-color: transparent;
-  background-image: linear-gradient(var(--diff-del-soft), var(--diff-del-soft));
-  background-position: 0 90%;
-  background-repeat: no-repeat;
-  background-size: 100% 0.72em;
+  background-color: var(--diff-del-soft);
   color: var(--diff-del-ink);
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
@@ -538,16 +526,12 @@
 }
 
 .cm-ai-review-line-removed.is-active {
-  background-image: linear-gradient(var(--diff-del-strong), var(--diff-del-strong));
+  background-color: var(--diff-del-strong);
 }
 
 .cm-ai-review-removed-token {
   border-radius: 2px;
-  background-color: transparent;
-  background-image: linear-gradient(var(--diff-del-strong), var(--diff-del-strong));
-  background-position: 0 88%;
-  background-repeat: no-repeat;
-  background-size: 100% 0.78em;
+  background-color: var(--diff-del-strong);
   color: var(--diff-del-ink);
   text-decoration: line-through;
   text-decoration-color: var(--diff-del-line);
@@ -557,11 +541,7 @@
 
 .cm-ai-review-inserted-token {
   border-radius: 2px;
-  background-color: transparent;
-  background-image: linear-gradient(var(--diff-ins-strong), var(--diff-ins-strong));
-  background-position: 0 88%;
-  background-repeat: no-repeat;
-  background-size: 100% 0.78em;
+  background-color: var(--diff-ins-strong);
   color: var(--diff-ins-ink);
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
@@ -569,18 +549,14 @@
 
 .cm-ai-review-line-inserted {
   border-radius: 2px;
-  background-color: transparent;
-  background-image: linear-gradient(var(--diff-ins-soft), var(--diff-ins-soft));
-  background-position: 0 90%;
-  background-repeat: no-repeat;
-  background-size: 100% 0.72em;
+  background-color: var(--diff-ins-soft);
   color: var(--diff-ins-ink);
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
 
 .cm-ai-review-line-inserted.is-active {
-  background-image: linear-gradient(var(--diff-ins-strong), var(--diff-ins-strong));
+  background-color: var(--diff-ins-strong);
 }
 
 .cm-ai-review-inserted-block,
@@ -627,11 +603,7 @@
 
 .cm-ai-review-rendered-host:not(.is-source) .cm-ai-review-rendered :is(p, li, h1, h2, h3, h4, blockquote, td, th) {
   border-radius: 2px;
-  background-color: transparent;
-  background-image: linear-gradient(var(--diff-ins-soft), var(--diff-ins-soft));
-  background-position: 0 90%;
-  background-repeat: no-repeat;
-  background-size: 100% 0.72em;
+  background-color: var(--diff-ins-soft);
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
@@ -640,7 +612,7 @@
   .cm-ai-review-rendered-host:not(.is-source)
   .cm-ai-review-rendered
   :is(p, li, h1, h2, h3, h4, blockquote, td, th) {
-  background-image: linear-gradient(var(--diff-ins-strong), var(--diff-ins-strong));
+  background-color: var(--diff-ins-strong);
 }
 
 .cm-ai-review-rendered > :first-child {
@@ -697,11 +669,7 @@
 .cm-ai-review-rendered-fallback {
   margin: 0;
   padding: 1px 0;
-  background-color: transparent;
-  background-image: linear-gradient(var(--diff-ins-soft), var(--diff-ins-soft));
-  background-position: 0 90%;
-  background-repeat: no-repeat;
-  background-size: 100% 0.72em;
+  background-color: var(--diff-ins-soft);
   color: var(--diff-ins-ink);
   font: inherit;
   white-space: pre-wrap;
