@@ -6,7 +6,7 @@ export function sanitizeThinkingSummary(text: string) {
     return "";
   }
 
-  if (/```|~~~/.test(text) || /\b(?:FULL_REPLACEMENT|NEW_DOCUMENT):/i.test(text)) {
+  if (/```|~~~/.test(text) || /\b(?:FULL_REPLACEMENT|NEW_DOCUMENT|DELETE_DOCUMENT):/i.test(text)) {
     return "";
   }
 

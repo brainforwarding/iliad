@@ -451,6 +451,7 @@ describe("TelegramRemoteService", () => {
     expect(String(body.instructions)).toContain("read-only Telegram Remote Chat");
     expect(String(body.instructions)).not.toContain("FULL_REPLACEMENT");
     expect(String(body.instructions)).not.toContain("NEW_DOCUMENT");
+    expect(String(body.instructions)).not.toContain("DELETE_DOCUMENT");
   });
 
   it("rejects answers without verified sources and edit-shaped remote answers", async () => {
@@ -483,6 +484,15 @@ describe("TelegramRemoteService", () => {
       contextManifest: manifest([documentReadItem("notes/source.md")])
     });
     await expect(service.handleRequest(askRequest({ id: "ask-marker" }))).resolves.toMatchObject({
+      ok: false,
+      error: { code: "agent_unavailable" }
+    });
+
+    agent.nextResponse = agentResponse({
+      text: "DELETE_DOCUMENT: notes/source.md",
+      contextManifest: manifest([documentReadItem("notes/source.md")])
+    });
+    await expect(service.handleRequest(askRequest({ id: "ask-delete-marker" }))).resolves.toMatchObject({
       ok: false,
       error: { code: "agent_unavailable" }
     });

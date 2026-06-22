@@ -7,6 +7,7 @@ export type ReviewQueueSource = "internal_agent" | "external_filesystem";
 
 export type ReviewQueueBlockedReason =
   | "external_drift_same_path"
+  | "superseded_same_path"
   | "stale"
   | "missing_file"
   | "path_collision";
@@ -21,6 +22,7 @@ export interface ReviewQueueItem {
   kind: AgentProposalFileChange["kind"];
   relativePath: string;
   normalizedRelativePath: string;
+  createdAt: string;
   updatedAt: string;
   visibleInFileTree: boolean;
   blockedReason?: ReviewQueueBlockedReason;
@@ -45,8 +47,34 @@ function proposalSource(proposal: AgentChangeProposal): ReviewQueueSource {
   return proposal.metadata?.kind === "external_filesystem" ? "external_filesystem" : "internal_agent";
 }
 
+function proposalCreatedTime(proposal: Pick<AgentChangeProposal, "createdAt">) {
+  const parsed = Date.parse(proposal.createdAt);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function proposalCreationCompareDesc(
+  left: Pick<AgentChangeProposal, "id" | "runId" | "createdAt">,
+  right: Pick<AgentChangeProposal, "id" | "runId" | "createdAt">
+) {
+  const timestampDifference = proposalCreatedTime(right) - proposalCreatedTime(left);
+
+  if (timestampDifference !== 0) {
+    return timestampDifference;
+  }
+
+  const runDifference = right.runId.localeCompare(left.runId);
+
+  if (runDifference !== 0) {
+    return runDifference;
+  }
+
+  return right.id.localeCompare(left.id);
+}
+
 function itemSort(left: ReviewQueueItem, right: ReviewQueueItem) {
-  const timestampDifference = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+  const leftTime = Number.isFinite(Date.parse(left.createdAt)) ? Date.parse(left.createdAt) : 0;
+  const rightTime = Number.isFinite(Date.parse(right.createdAt)) ? Date.parse(right.createdAt) : 0;
+  const timestampDifference = rightTime - leftTime;
 
   if (timestampDifference !== 0) {
     return timestampDifference;
@@ -60,14 +88,63 @@ export function isExternalFilesystemProposal(proposal: AgentChangeProposal | und
 }
 
 export function internalReviewProposals(proposals: AgentChangeProposal[]) {
-  return proposals.filter(
-    (proposal) => !isExternalFilesystemProposal(proposal) && proposal.files.some(fileHasMutableReview)
-  );
+  const visibleFileIdsByProposal = new Map<string, Set<string>>();
+
+  for (const item of buildReviewQueueItems(proposals)) {
+    if (item.source !== "internal_agent" || !item.visibleInFileTree || item.blockedReason) {
+      continue;
+    }
+
+    const fileIds = visibleFileIdsByProposal.get(item.proposalId) ?? new Set<string>();
+    fileIds.add(item.fileId);
+
+    for (const duplicateFileId of item.duplicateFileIds) {
+      fileIds.add(duplicateFileId);
+    }
+
+    visibleFileIdsByProposal.set(item.proposalId, fileIds);
+  }
+
+  return proposals
+    .filter((proposal) => !isExternalFilesystemProposal(proposal) && visibleFileIdsByProposal.has(proposal.id))
+    .map((proposal) => ({
+      ...proposal,
+      files: proposal.files.filter((file) => visibleFileIdsByProposal.get(proposal.id)?.has(file.id))
+    }))
+    .filter((proposal) => proposal.files.some(fileHasMutableReview));
 }
 
 export function buildReviewQueueItems(proposals: AgentChangeProposal[]): ReviewQueueItem[] {
   const candidates: ReviewQueueItem[] = [];
   const grouped = new Map<string, ReviewQueueItem>();
+  const newestInternalPathOwner = new Map<
+    string,
+    { proposalId: string; fileId: string; proposal: AgentChangeProposal }
+  >();
+
+  proposals.forEach((proposal) => {
+    if (proposalSource(proposal) !== "internal_agent") {
+      return;
+    }
+
+    proposal.files.forEach((file) => {
+      const normalizedRelativePath = normalizeRelativePath(file.relativePath);
+
+      if (!normalizedRelativePath) {
+        return;
+      }
+
+      const current = newestInternalPathOwner.get(normalizedRelativePath);
+
+      if (!current || proposalCreationCompareDesc(proposal, current.proposal) < 0) {
+        newestInternalPathOwner.set(normalizedRelativePath, {
+          proposalId: proposal.id,
+          fileId: file.id,
+          proposal
+        });
+      }
+    });
+  });
 
   proposals.forEach((proposal, proposalIndex) => {
     const source = proposalSource(proposal);
@@ -101,6 +178,7 @@ export function buildReviewQueueItems(proposals: AgentChangeProposal[]): ReviewQ
         kind: file.kind,
         relativePath: file.relativePath,
         normalizedRelativePath,
+        createdAt: proposal.createdAt,
         updatedAt: proposal.updatedAt || proposal.createdAt,
         visibleInFileTree: true,
         duplicateFileIds: []
@@ -122,6 +200,18 @@ export function buildReviewQueueItems(proposals: AgentChangeProposal[]): ReviewQ
     if (item.source === "internal_agent" && externalPaths.has(item.normalizedRelativePath)) {
       item.visibleInFileTree = false;
       item.blockedReason = "external_drift_same_path";
+      continue;
+    }
+
+    const newestInternalOwner = newestInternalPathOwner.get(item.normalizedRelativePath);
+
+    if (
+      item.source === "internal_agent" &&
+      newestInternalOwner &&
+      newestInternalOwner.proposalId !== item.proposalId
+    ) {
+      item.visibleInFileTree = false;
+      item.blockedReason = "superseded_same_path";
       continue;
     }
 

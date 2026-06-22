@@ -112,4 +112,43 @@ describe("AssistantPendingProposals", () => {
     expect(accepted).toEqual(["first", "second"]);
     expect(rejected).toEqual(["first", "second"]);
   });
+
+  it("accepts only the queue-visible same-path proposal card", async () => {
+    const accepted: Array<{ proposalId: string; fileId: string }> = [];
+    const element = AssistantPendingProposals({
+      labels: appStrings.en.assistant,
+      proposals: [
+        proposal({
+          id: "older",
+          title: "Older edit",
+          runId: "run-older",
+          createdAt: "2026-06-21T10:00:00.000Z",
+          files: [editFile({ id: "older-file", relativePath: "doc.md" })]
+        }),
+        proposal({
+          id: "newer",
+          title: "Newer edit",
+          runId: "run-newer",
+          createdAt: "2026-06-21T10:01:00.000Z",
+          files: [editFile({ id: "newer-file", relativePath: "doc.md" })]
+        })
+      ],
+      onAcceptProposalFile: async (proposalId, fileId) => {
+        accepted.push({ proposalId, fileId });
+      },
+      onRejectProposalFile: async () => undefined
+    }) as ReactElement;
+
+    const [, cards] = element.props.children as [ReactElement, ReactElement[]];
+    const [, actions] = cards[0]!.props.children as [ReactElement, ReactElement];
+    const [acceptButton] = actions.props.children as [ReactElement, ReactElement];
+
+    expect(cards).toHaveLength(1);
+
+    acceptButton.props.onClick();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(accepted).toEqual([{ proposalId: "newer", fileId: "newer-file" }]);
+  });
 });

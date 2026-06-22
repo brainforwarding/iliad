@@ -136,10 +136,27 @@ describe("anchored edit instructions", () => {
     expect(local).toContain("Do not include a ```diff block with anchored edits.");
     // Rewrites keep the pinned FULL_REPLACEMENT path.
     expect(local).toContain("FULL_REPLACEMENT:");
+    expect(local).toContain("DELETE_DOCUMENT:");
+    expect(local).toContain("Do not use FULL_REPLACEMENT with an empty markdown block to delete a file.");
   });
 
   it("never mentions the anchored transport on the remote read-only path", () => {
     expect(instructions(providerRequest({ runProfile: "remote_read_only" }))).not.toContain("<<<<<<< SEARCH");
+    expect(instructions(providerRequest({ runProfile: "remote_read_only" }))).not.toContain("DELETE_DOCUMENT:");
+  });
+
+  it("lets Codex desktop delete Markdown files only by explicit request", () => {
+    const local = codexDeveloperInstructions(providerRequest(), true);
+
+    expect(local).toContain("Delete Markdown files only when the user explicitly asks");
+    expect(local).toContain("Do not rename files in this version.");
+    expect(local).not.toContain("Do not delete or rename files in this version.");
+  });
+
+  it("keeps Codex remote read-only from deleting files", () => {
+    expect(codexDeveloperInstructions(providerRequest({ runProfile: "remote_read_only" }), true)).toContain(
+      "Do not edit files, create files, delete files, rename files"
+    );
   });
 });
 

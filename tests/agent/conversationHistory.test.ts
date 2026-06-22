@@ -219,6 +219,10 @@ describe("generated summary sanitation", () => {
       ok: false,
       reason: "marker"
     });
+    expect(sanitizeGeneratedConversationSummary("DELETE_DOCUMENT: notes/archive.md", 5_000)).toEqual({
+      ok: false,
+      reason: "marker"
+    });
   });
 
   it("rejects oversized output instead of truncating", () => {

@@ -67,7 +67,7 @@ function externalProposal(overrides: Partial<AgentChangeProposal> = {}) {
 describe("review queue", () => {
   it("keeps external filesystem proposals out of internal assistant proposal groups", () => {
     const internal = proposal({ id: "internal" });
-    const external = externalProposal({ id: "external" });
+    const external = externalProposal({ id: "external", files: [editFile({ relativePath: "external.md" })] });
 
     expect(internalReviewProposals([internal, external]).map((item) => item.id)).toEqual(["internal"]);
   });
@@ -91,16 +91,18 @@ describe("review queue", () => {
     });
   });
 
-  it("keeps different-run same-path proposals separately reachable but shows one file-tree target", () => {
+  it("supersedes older same-path internal proposals with the newest proposal", () => {
     const newer = proposal({
       id: "newer",
       runId: "run-newer",
-      updatedAt: "2026-06-21T10:02:00.000Z"
+      createdAt: "2026-06-21T10:02:00.000Z",
+      updatedAt: "2026-06-21T11:00:00.000Z"
     });
     const older = proposal({
       id: "older",
       runId: "run-older",
-      updatedAt: "2026-06-21T10:01:00.000Z"
+      createdAt: "2026-06-21T10:01:00.000Z",
+      updatedAt: "2026-06-21T12:00:00.000Z"
     });
 
     const summary = buildReviewQueueSummary([older, newer]);
@@ -108,6 +110,46 @@ describe("review queue", () => {
     expect(summary.internalItems).toHaveLength(2);
     expect(summary.visibleItems).toHaveLength(1);
     expect(summary.firstTarget).toEqual({ proposalId: "newer", fileId: "edit-file" });
+    expect(summary.internalItems.find((item) => item.proposalId === "older")?.blockedReason).toBe(
+      "superseded_same_path"
+    );
+  });
+
+  it("does not resurrect an older same-path proposal after the newest proposal is terminal", () => {
+    const newer = proposal({
+      id: "newer",
+      runId: "run-newer",
+      createdAt: "2026-06-21T10:02:00.000Z",
+      status: "applied",
+      files: [
+        editFile({
+          status: "applied",
+          hunks: [
+            {
+              id: "hunk-1",
+              status: "applied",
+              anchorLine: 1,
+              oldStartLine: 1,
+              oldLines: ["old"],
+              newLines: ["new"]
+            }
+          ]
+        })
+      ]
+    });
+    const older = proposal({
+      id: "older",
+      runId: "run-older",
+      createdAt: "2026-06-21T10:01:00.000Z"
+    });
+
+    const summary = buildReviewQueueSummary([older, newer]);
+
+    expect(summary.internalItems).toHaveLength(1);
+    expect(summary.internalItems[0]?.proposalId).toBe("older");
+    expect(summary.internalItems[0]?.blockedReason).toBe("superseded_same_path");
+    expect(summary.visibleItems).toHaveLength(0);
+    expect(internalReviewProposals([older, newer])).toEqual([]);
   });
 
   it("lets external filesystem review own a mixed-source same-path file-tree target", () => {
@@ -156,6 +198,36 @@ describe("review queue", () => {
         kind: "edit_file",
         normalizedRelativePath: "doc.md"
       })
+    ]);
+  });
+
+  it("filters assistant proposals to queue-visible files and grouped duplicates", () => {
+    const mixed = proposal({
+      id: "mixed",
+      runId: "run-mixed",
+      createdAt: "2026-06-21T10:02:00.000Z",
+      files: [
+        editFile({ id: "first", relativePath: "visible.md" }),
+        editFile({ id: "duplicate", relativePath: "visible.md" }),
+        editFile({ id: "other", relativePath: "other.md" })
+      ]
+    });
+    const newerOther = proposal({
+      id: "newer-other",
+      runId: "run-newer-other",
+      createdAt: "2026-06-21T10:03:00.000Z",
+      files: [editFile({ id: "newer-other-file", relativePath: "other.md" })]
+    });
+
+    const visible = internalReviewProposals([mixed, newerOther]);
+
+    expect(visible).toHaveLength(2);
+    expect(visible.find((item) => item.id === "mixed")?.files.map((file) => file.id)).toEqual([
+      "first",
+      "duplicate"
+    ]);
+    expect(visible.find((item) => item.id === "newer-other")?.files.map((file) => file.id)).toEqual([
+      "newer-other-file"
     ]);
   });
 });

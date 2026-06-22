@@ -50,6 +50,7 @@ export function instructions(request?: AgentProviderRunRequest) {
     "Do not include FULL_REPLACEMENT unless the markdown block is a complete replacement for the active document.",
     "When the user asks to create a separate or new Markdown document, keep the visible explanation to this sentence only: I prepared a proposal. Review it in the document. Then include the exact label NEW_DOCUMENT: followed by a safe relative Markdown path such as annex-ai-creative-assistant.md, then one fenced ````markdown block containing the complete new document.",
     "Do not include NEW_DOCUMENT unless the markdown block is a complete new document and the relative path is inside the workspace.",
+    "When the user explicitly asks to delete a Markdown document, keep the visible explanation to this sentence only: I prepared a proposal. Review it in the document. Then include the exact label DELETE_DOCUMENT: followed by the safe workspace-relative Markdown path to delete, such as notes/archive.md. Do not use FULL_REPLACEMENT with an empty markdown block to delete a file.",
     "Never say an edit was applied. Do not say 'below is the diff', 'then the full replacement', or 'here is the complete document' in visible prose."
   ].join("\n");
 }

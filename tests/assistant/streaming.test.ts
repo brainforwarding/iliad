@@ -19,6 +19,7 @@ describe("visibleStreamingText", () => {
     expect(visibleStreamingText("Listo.\nFULL_REPLACEMENT: x")).toBe("Listo.\n");
     expect(visibleStreamingText("Listo.\nFull_Replacement: x")).toBe("Listo.\n");
     expect(visibleStreamingText("Listo.\nNEW_DOCUMENT: a.md")).toBe("Listo.\n");
+    expect(visibleStreamingText("Listo.\nDELETE_DOCUMENT: a.md")).toBe("Listo.\n");
     expect(visibleStreamingText("Listo.\n<<<<<<< SEARCH\nold")).toBe("Listo.\n");
     expect(visibleStreamingText("Listo.\n<<<<<<< search")).toBe("Listo.\n");
     expect(visibleStreamingText("```diff\n-a")).toBe("");
@@ -29,6 +30,7 @@ describe("visibleStreamingText", () => {
     expect(visibleStreamingText("Listo.\n``")).toBe("Listo.\n");
     expect(visibleStreamingText("Listo.\n```di")).toBe("Listo.\n");
     expect(visibleStreamingText("Listo.\nNEW_")).toBe("Listo.\n");
+    expect(visibleStreamingText("Listo.\nDELETE_")).toBe("Listo.\n");
     expect(visibleStreamingText("Listo.\n<<<<")).toBe("Listo.\n");
     // A complete word that is not a marker prefix stays visible.
     expect(visibleStreamingText("Listo. FULL STOP")).toBe("Listo. FULL STOP");

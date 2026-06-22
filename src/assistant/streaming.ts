@@ -20,7 +20,7 @@ export function applyTextDelta(state: StreamingTextState, event: Pick<AgentTextR
 
 // Case-insensitive, mirroring proposalDrafts' /gi parsing: a case-variant
 // marker the parser would honor must also stop the visible stream.
-const streamCutMarkers = ["```diff", "full_replacement:", "new_document:", "<<<<<<< search"];
+const streamCutMarkers = ["```diff", "full_replacement:", "new_document:", "delete_document:", "<<<<<<< search"];
 
 /**
  * The prose shown while streaming: everything before the first proposal

@@ -26,6 +26,7 @@ import {
 import { AgentContextManifestStore } from "./contextManifestStore.js";
 import { createAgentDocumentTools } from "./documentTools.js";
 import { prepareExplicitDocumentContext, preparedRunRequest } from "./documentContext.js";
+import { unifiedDiff } from "./diff.js";
 import {
   compactionInputTokenCap,
   compactionStaleTokens,
@@ -1595,12 +1596,13 @@ const controller = new AbortController();
     draftFileChanges: AgentDraftFileChange[];
     source: AgentProposalSource;
   }) {
+    const hydratedDraftFileChanges = await this.hydrateDeleteDrafts(request, draftFileChanges);
     const proposal = buildMarkdownChangeProposal({
       request,
       responseId,
       model,
       source,
-      draftFileChanges
+      draftFileChanges: hydratedDraftFileChanges
     });
 
     if (!proposal) {
@@ -1616,6 +1618,7 @@ const controller = new AbortController();
       model,
       mode: request.mode,
       details: {
+        proposalId: savedProposal.id,
         proposalCount: 1,
         fileCount: savedProposal.files.length,
         editFileCount: savedProposal.files.filter((file) => file.kind === "edit_file").length,
@@ -1625,6 +1628,38 @@ const controller = new AbortController();
     });
 
     return [savedProposal];
+  }
+
+  private async hydrateDeleteDrafts(request: AgentRunRequest, draftFileChanges: AgentDraftFileChange[]) {
+    const hydratedDrafts: AgentDraftFileChange[] = [];
+
+    for (const draft of draftFileChanges) {
+      if (draft.kind !== "delete_file") {
+        hydratedDrafts.push(draft);
+        continue;
+      }
+
+      const absolutePath = path.join(request.workspaceRoot, draft.relativePath);
+      ensureMarkdownFile(request.workspaceRoot, absolutePath);
+      ensureVisibleWorkspacePath(request.workspaceRoot, path.dirname(absolutePath));
+      const stats = await lstat(absolutePath);
+
+      if (!stats.isFile() || stats.isSymbolicLink()) {
+        throw new Error("Only regular Markdown files can be deleted here.");
+      }
+
+      const baseContent = draft.baseContent || (await readMarkdownFile(request.workspaceRoot, absolutePath));
+      const baseHash = draft.baseHash || hashMarkdown(baseContent);
+
+      hydratedDrafts.push({
+        ...draft,
+        baseHash,
+        baseContent,
+        unifiedDiff: draft.unifiedDiff || unifiedDiff(baseContent, "", draft.relativePath)
+      });
+    }
+
+    return hydratedDrafts;
   }
 
   private logExternalCaptureInfo(

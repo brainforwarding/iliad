@@ -59,12 +59,14 @@ export async function captureMarkdownSnapshot(request: AgentRunRequest): Promise
     const relativePathResult = normalizeWorkspaceRelativeMarkdownPath(workspaceRoot, request.activeFile.relativePath);
 
     if (relativePathResult.ok && !(await isExistingUnsafePath(workspaceRoot, relativePathResult.value))) {
+      const existingEntry = files.get(relativePathResult.value);
+
       files.set(relativePathResult.value, {
         absolutePath: path.join(workspaceRoot, relativePathResult.value),
         relativePath: relativePathResult.value,
         content: request.activeFile.content,
         baseHash: request.activeFile.baseHash,
-        existed: true
+        existed: existingEntry?.existed ?? false
       });
     }
   }
@@ -266,10 +268,24 @@ function reconcileDiskDrafts(
   const drafts: DraftWithSource[] = [];
 
   for (const [relativePath, preFile] of preSnapshot.files) {
+    if (!preFile.existed) {
+      continue;
+    }
+
     const postFile = postSnapshot.files.get(relativePath);
 
     if (!postFile) {
-      unsupportedNotes.add(`Codex removed ${relativePath}, which is not supported. The original file was restored when possible.`);
+      drafts.push({
+        source: "disk",
+        draft: {
+          kind: "delete_file",
+          relativePath,
+          baseHash: preFile.baseHash,
+          baseContent: preFile.content,
+          summary: `Delete ${relativePath}`,
+          unifiedDiff: unifiedDiff(preFile.content, "", relativePath)
+        }
+      });
       continue;
     }
 
@@ -292,7 +308,7 @@ function reconcileDiskDrafts(
   }
 
   for (const [relativePath, postFile] of postSnapshot.files) {
-    if (preSnapshot.files.has(relativePath)) {
+    if (preSnapshot.files.get(relativePath)?.existed) {
       continue;
     }
 

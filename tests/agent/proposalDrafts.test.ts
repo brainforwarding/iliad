@@ -208,6 +208,51 @@ describe("parseProposalDrafts (anchored transport)", () => {
     expect(parsed.drafts[1].relativePath).toBe("annex.md");
   });
 
+  it("turns DELETE_DOCUMENT into a delete draft without using an empty edit", () => {
+    const text = ["I prepared a proposal. Review it in the document.", "DELETE_DOCUMENT: teaching/workshop-plan.md"].join(
+      "\n"
+    );
+    const parsed = parseProposalDrafts(runRequest(), text);
+
+    expect(parsed.anchoredEditFailed).toBe(false);
+    expect(parsed.drafts).toEqual([
+      expect.objectContaining({
+        kind: "delete_file",
+        relativePath: "teaching/workshop-plan.md",
+        baseHash: "",
+        baseContent: ""
+      })
+    ]);
+  });
+
+  it("ignores unsafe DELETE_DOCUMENT paths", () => {
+    const parsed = parseProposalDrafts(
+      runRequest(),
+      ["DELETE_DOCUMENT: ../outside.md", "DELETE_DOCUMENT: .hidden.md", "DELETE_DOCUMENT: notes.txt"].join("\n")
+    );
+
+    expect(parsed).toEqual({ drafts: [], anchoredEditFailed: false });
+  });
+
+  it("ignores an empty FULL_REPLACEMENT and keeps an explicit delete draft", () => {
+    const text = [
+      "I prepared a proposal. Review it in the document.",
+      "FULL_REPLACEMENT:",
+      "```markdown",
+      "```",
+      "DELETE_DOCUMENT: doc.md"
+    ].join("\n");
+    const parsed = parseProposalDrafts(runRequest(), text);
+
+    expect(parsed.anchoredEditFailed).toBe(false);
+    expect(parsed.drafts).toEqual([
+      expect.objectContaining({
+        kind: "delete_file",
+        relativePath: "doc.md"
+      })
+    ]);
+  });
+
   it("flags failure with no draft when SEARCH does not apply", () => {
     const parsed = parseProposalDrafts(runRequest(), ["Listo.", anchoredBlock("missing text", "x")].join("\n"));
 
@@ -277,5 +322,11 @@ describe("sanitizeLegacyAssistantText (anchored transport)", () => {
     const text = ["Plain explanation.", anchoredBlock("alpha line", "beta line")].join("\n");
 
     expect(sanitizeLegacyAssistantText(text, false, "en", false)).toBe("Plain explanation.");
+  });
+
+  it("strips DELETE_DOCUMENT markers from visible text", () => {
+    const text = ["I prepared a proposal. Review it in the document.", "DELETE_DOCUMENT: doc.md"].join("\n");
+
+    expect(sanitizeLegacyAssistantText(text, true, "en")).toBe("I prepared a proposal. Review it in the document.");
   });
 });

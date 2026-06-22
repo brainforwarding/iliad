@@ -1041,7 +1041,8 @@ export default function App() {
         fileId: item.fileId,
         source: item.source,
         kind: item.kind,
-        relativePath: item.relativePath
+        relativePath: item.relativePath,
+        duplicateFileIds: item.duplicateFileIds
       }))
     });
     markEditorNavigationDuringRun();
@@ -1049,7 +1050,9 @@ export default function App() {
 
     try {
       for (const item of items) {
-        await applyAgentProposalFile(item.proposalId, item.fileId);
+        for (const fileId of [item.fileId, ...item.duplicateFileIds]) {
+          await applyAgentProposalFile(item.proposalId, fileId);
+        }
       }
 
       setNotice(strings.assistant.status.applied);
@@ -1079,7 +1082,8 @@ export default function App() {
         fileId: item.fileId,
         source: item.source,
         kind: item.kind,
-        relativePath: item.relativePath
+        relativePath: item.relativePath,
+        duplicateFileIds: item.duplicateFileIds
       }))
     });
     markEditorNavigationDuringRun();
@@ -1087,7 +1091,9 @@ export default function App() {
 
     try {
       for (const item of items) {
-        await rejectAgentProposalFile(item.proposalId, item.fileId);
+        for (const fileId of [item.fileId, ...item.duplicateFileIds]) {
+          await rejectAgentProposalFile(item.proposalId, fileId);
+        }
       }
 
       setNotice(strings.assistant.status.discarded);

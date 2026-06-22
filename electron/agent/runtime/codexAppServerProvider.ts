@@ -1140,7 +1140,7 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
 function codexBaseInstructions() {
   return [
     "You are Iliad's local Markdown workspace agent.",
-    "You help edit and create Markdown course documents.",
+    "You help edit, create, and delete Markdown course documents.",
     "Use the workspace context and file tools when useful.",
     "Do not run shell commands. Do not use terminal commands. Do not execute scripts.",
     "Keep visible chat responses concise.",
@@ -1199,8 +1199,9 @@ export function codexDeveloperInstructions(request: AgentProviderRunRequest, has
   return [
     activeFileLine,
     "Prefer targeted Markdown edits over broad rewrites.",
-    "Only create or edit visible Markdown files in the workspace.",
-    "Do not delete or rename files in this version.",
+    "Only create, edit, or delete visible Markdown files in the workspace.",
+    "Delete Markdown files only when the user explicitly asks for deletion; the host app will turn deletions into review proposals.",
+    "Do not rename files in this version.",
     SPREADSHEET_FORMULA_MARKDOWN_INSTRUCTION,
     ...documentToolPolicy,
     `Respond in ${request.language === "es" ? "Spanish" : "English"}.`

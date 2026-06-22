@@ -60,6 +60,7 @@ describe("OpenAI provider helpers", () => {
       "Reviewing context Checking the active document"
     );
     expect(sanitizeThinkingSummary("```markdown\nsecret\n```")).toBe("");
+    expect(sanitizeThinkingSummary("DELETE_DOCUMENT: notes/archive.md")).toBe("");
     expect(sanitizeThinkingSummary("raw reasoning_text delta")).toBe("");
 
     const request = providerRequest({
@@ -257,6 +258,7 @@ describe("OpenAI provider helpers", () => {
     expect(result.proposalSource).toBeUndefined();
     expect(requestBodies[1].instructions).toContain("read-only Telegram Remote Chat");
     expect(requestBodies[1].instructions).not.toContain("FULL_REPLACEMENT");
+    expect(requestBodies[1].instructions).not.toContain("DELETE_DOCUMENT");
   });
 
   it("sends the expected Responses request body shape", async () => {
@@ -302,6 +304,7 @@ describe("OpenAI provider helpers", () => {
     });
     expect(requestBodies[0].instructions).toContain("You are Iliad's local Markdown writing assistant.");
     expect(requestBodies[0].instructions).toContain("FULL_REPLACEMENT:");
+    expect(requestBodies[0].instructions).toContain("DELETE_DOCUMENT:");
     expect(requestBodies[0].input).toContain("Respond in Spanish.");
     expect(requestBodies[0].input).toContain("Mode: deep.");
     expect(requestBodies[0].input).toContain("Active file: brief.md");

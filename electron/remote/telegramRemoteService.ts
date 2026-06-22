@@ -578,7 +578,7 @@ function remoteHistoryRequestKey(requestId: string) {
 }
 
 function containsProposalMarker(text: string) {
-  return /\b(?:FULL_REPLACEMENT|NEW_DOCUMENT)\s*:|^<{7} SEARCH[ \t]*$/im.test(text);
+  return /\b(?:FULL_REPLACEMENT|NEW_DOCUMENT|DELETE_DOCUMENT)\s*:|^<{7} SEARCH[ \t]*$/im.test(text);
 }
 
 function isNoContextAnswer(text: string) {

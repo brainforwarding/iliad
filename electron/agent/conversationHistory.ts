@@ -222,7 +222,7 @@ export function sanitizeGeneratedConversationSummary(
   }
 
   // The Telegram proposal-marker guard, verbatim (fail closed on transport leakage).
-  if (/\b(?:FULL_REPLACEMENT|NEW_DOCUMENT)\s*:|^<{7} SEARCH[ \t]*$/im.test(text)) {
+  if (/\b(?:FULL_REPLACEMENT|NEW_DOCUMENT|DELETE_DOCUMENT)\s*:|^<{7} SEARCH[ \t]*$/im.test(text)) {
     return { ok: false, reason: "marker" };
   }
 

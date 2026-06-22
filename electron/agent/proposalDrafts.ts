@@ -1,3 +1,5 @@
+import path from "node:path";
+import { markdownExtensions } from "../fs/pathSafety.js";
 import { unifiedDiff } from "./diff.js";
 import type { AgentDraftFileChange, AgentRunRequest } from "./types.js";
 
@@ -18,11 +20,44 @@ function extractNewDocument(text: string) {
   };
 }
 
+function extractDeleteDocuments(text: string): LegacyDeleteMarker[] {
+  const matches = [...text.matchAll(/DELETE_DOCUMENT:\s*([^\n]+)/gi)];
+  const markers: LegacyDeleteMarker[] = [];
+
+  for (const match of matches) {
+    if (match.index === undefined) {
+      continue;
+    }
+
+    const relativePath = normalizeDeleteDocumentPath(match[1] ?? "");
+
+    if (!relativePath) {
+      continue;
+    }
+
+    const end = match.index + match[0].length;
+
+    markers.push({
+      start: match.index,
+      end: end + newlineLength(text, end),
+      relativePath
+    });
+  }
+
+  return markers;
+}
+
 interface LegacyMarkdownBlock {
   start: number;
   end: number;
   path?: string;
   content: string;
+}
+
+interface LegacyDeleteMarker {
+  start: number;
+  end: number;
+  relativePath: string;
 }
 
 // Anchored-edit transport (ADR-0019): Aider-style SEARCH/REPLACE blocks.
@@ -190,10 +225,11 @@ function nextTransportLabelIndex(text: string, from: number) {
   const rest = text.slice(from);
   const fullReplacement = rest.search(/FULL_REPLACEMENT:/i);
   const newDocument = rest.search(/NEW_DOCUMENT:\s*[^\n]+/i);
+  const deleteDocument = rest.search(/DELETE_DOCUMENT:\s*[^\n]+/i);
   // Anchored blocks are a section boundary too: a NEW_DOCUMENT fence scan must
   // never swallow a trailing anchored block whose body contains ``` fences.
   const anchored = rest.search(/^<{7} search[ \t]*$/im);
-  const candidates = [fullReplacement, newDocument, anchored].filter((index) => index >= 0);
+  const candidates = [fullReplacement, newDocument, deleteDocument, anchored].filter((index) => index >= 0);
 
   return candidates.length > 0 ? from + Math.min(...candidates) : null;
 }
@@ -239,6 +275,7 @@ function hasLegacyProposalTransport(text: string) {
   return Boolean(
     findLegacyMarkdownBlock(text, "FULL_REPLACEMENT") ??
       findLegacyMarkdownBlock(text, "NEW_DOCUMENT") ??
+      (extractDeleteDocuments(text).length > 0 ? true : null) ??
       (parseAnchoredEditBlocks(text).length > 0 ? true : null)
   );
 }
@@ -247,9 +284,10 @@ function stripLegacyTransport(text: string, stripDiffBlocks: boolean) {
   const ranges = [
     findLegacyMarkdownBlock(text, "FULL_REPLACEMENT"),
     findLegacyMarkdownBlock(text, "NEW_DOCUMENT"),
+    ...extractDeleteDocuments(text),
     ...parseAnchoredEditBlocks(text)
   ]
-    .filter((range): range is LegacyMarkdownBlock | AnchoredEditBlock => range !== null)
+    .filter((range): range is LegacyMarkdownBlock | LegacyDeleteMarker | AnchoredEditBlock => range !== null)
     .sort((a, b) => b.start - a.start);
   let clean = text;
 
@@ -289,7 +327,7 @@ function draftEditFromResponse(request: AgentRunRequest, text: string): AgentDra
   const activeFile = request.activeFile;
   const replacement = extractFullReplacement(text);
 
-  if (!activeFile || replacement === null || replacement === activeFile.content) {
+  if (!activeFile || replacement === null || replacement === "" || replacement === activeFile.content) {
     return null;
   }
 
@@ -302,6 +340,17 @@ function draftEditFromResponse(request: AgentRunRequest, text: string): AgentDra
     summary: extractSummary(text),
     unifiedDiff: unifiedDiff(activeFile.content, replacement, activeFile.relativePath)
   };
+}
+
+function draftDeletesFromResponse(text: string): AgentDraftFileChange[] {
+  return extractDeleteDocuments(text).map((marker) => ({
+    kind: "delete_file",
+    relativePath: marker.relativePath,
+    baseHash: "",
+    baseContent: "",
+    summary: `Delete ${marker.relativePath}`,
+    unifiedDiff: ""
+  }));
 }
 
 function draftCreateFromResponse(text: string): AgentDraftFileChange | null {
@@ -318,6 +367,32 @@ function draftCreateFromResponse(text: string): AgentDraftFileChange | null {
     summary: extractSummary(text),
     unifiedDiff: unifiedDiff("", newDocument.content, newDocument.relativePath)
   };
+}
+
+function normalizeDeleteDocumentPath(rawPath: string) {
+  const stripped = rawPath.trim().replace(/^["']|["']$/g, "");
+
+  if (!stripped || stripped.includes("\\") || path.posix.isAbsolute(stripped)) {
+    return null;
+  }
+
+  const normalized = path.posix.normalize(stripped);
+
+  if (normalized !== stripped || normalized === "." || normalized === ".." || normalized.startsWith("../")) {
+    return null;
+  }
+
+  const segments = normalized.split("/");
+
+  if (segments.some((segment) => !segment || segment === "." || segment === ".." || segment.startsWith("."))) {
+    return null;
+  }
+
+  if (!markdownExtensions.has(path.extname(normalized).toLowerCase())) {
+    return null;
+  }
+
+  return normalized;
 }
 
 function draftAnchoredEditFromResponse(
@@ -368,11 +443,14 @@ export function parseProposalDrafts(request: AgentRunRequest, rawText: string): 
   const text = rawText.replace(/\r\n/g, "\n");
   const fullReplacementEdit = draftEditFromResponse(request, text);
   const createDraft = draftCreateFromResponse(text);
+  const deleteDrafts = draftDeletesFromResponse(text);
 
   // Precedence: a parseable FULL_REPLACEMENT wins; anchored blocks are ignored.
   if (extractFullReplacement(text) !== null) {
     return {
-      drafts: [fullReplacementEdit, createDraft].filter((draft): draft is AgentDraftFileChange => draft !== null),
+      drafts: [fullReplacementEdit, createDraft, ...deleteDrafts].filter(
+        (draft): draft is AgentDraftFileChange => draft !== null
+      ),
       anchoredEditFailed: false
     };
   }
@@ -380,7 +458,9 @@ export function parseProposalDrafts(request: AgentRunRequest, rawText: string): 
   const anchored = draftAnchoredEditFromResponse(request, text);
 
   return {
-    drafts: [anchored.draft, createDraft].filter((draft): draft is AgentDraftFileChange => draft !== null),
+    drafts: [anchored.draft, createDraft, ...deleteDrafts].filter(
+      (draft): draft is AgentDraftFileChange => draft !== null
+    ),
     anchoredEditFailed: anchored.failed
   };
 }
