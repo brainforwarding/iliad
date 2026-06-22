@@ -236,40 +236,27 @@ This script checks:
 If this script fails, fix the build output or regenerate the metadata. Do not
 publish and hope the updater can recover.
 
-Important naming rule: upload the exact filenames referenced by
-`latest-mac.yml`. GitHub release assets may contain spaces, but the updater only
-uses the filenames in `latest-mac.yml`. If additional copies are created for
-human convenience, they are extra assets; they do not replace the
-metadata-referenced files unless `latest-mac.yml` is refreshed and verified
-again.
+Important naming rule: upload only the exact filenames referenced by
+`latest-mac.yml`, plus `latest-mac.yml` itself. Electron Builder writes the
+source artifacts with spaces, such as `Iliad MD-X.Y.Z-mac-arm64.dmg`, but GitHub
+normalizes uploaded asset names with spaces into dotted names. Uploading both
+the source artifacts and the metadata-named copies creates duplicate-looking
+assets, such as `Iliad.MD-X.Y.Z-mac-arm64.dmg` and
+`Iliad-MD-X.Y.Z-mac-arm64.dmg`. The updater uses the hyphenated filenames in
+`latest-mac.yml`, so those are the only public release assets to upload.
 
 ## GitHub Release
-
-Create optional dot-separated copies of the artifacts for human-facing links:
-
-```bash
-cp "release/Iliad MD-X.Y.Z-mac-arm64.dmg" "release/Iliad.MD-X.Y.Z-mac-arm64.dmg"
-cp "release/Iliad MD-X.Y.Z-mac-arm64.zip" "release/Iliad.MD-X.Y.Z-mac-arm64.zip"
-shasum -a 256 "release/Iliad.MD-X.Y.Z-mac-arm64.dmg" \
-              "release/Iliad.MD-X.Y.Z-mac-arm64.zip"
-```
 
 Create the public release against the public-safe commit. Include the updater
 metadata and the exact generated filenames referenced by that metadata:
 
 ```bash
 gh release create "vX.Y.Z" \
-  "release/Iliad MD-X.Y.Z-mac-arm64.dmg" \
-  "release/Iliad MD-X.Y.Z-mac-arm64.zip" \
-  "release/Iliad MD-X.Y.Z-mac-arm64.dmg.blockmap" \
-  "release/Iliad MD-X.Y.Z-mac-arm64.zip.blockmap" \
   "release/Iliad-MD-X.Y.Z-mac-arm64.dmg" \
   "release/Iliad-MD-X.Y.Z-mac-arm64.zip" \
   "release/Iliad-MD-X.Y.Z-mac-arm64.dmg.blockmap" \
   "release/Iliad-MD-X.Y.Z-mac-arm64.zip.blockmap" \
   "release/latest-mac.yml" \
-  "release/Iliad.MD-X.Y.Z-mac-arm64.dmg" \
-  "release/Iliad.MD-X.Y.Z-mac-arm64.zip" \
   --repo brainforwarding/iliad \
   --target PUBLIC_SAFE_COMMIT_SHA \
   --title "Iliad MD X.Y.Z" \
