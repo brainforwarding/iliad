@@ -1,7 +1,7 @@
 {
   "name": "iliad",
   "productName": "Iliad MD",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "private": true,
   "description": "A local-first Markdown writing workspace.",
   "license": "MIT",
