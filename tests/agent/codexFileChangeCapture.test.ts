@@ -55,4 +55,41 @@ describe("Codex file change capture", () => {
     expect(result.unsupportedNotes).toEqual([]);
     expect(await readFile(filePath, "utf8")).toBe("# Delete Me\n\nOriginal text.\n");
   });
+
+  it("does not show unsupported Codex delete notes when disk reconciliation recovers the delete", async () => {
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "iliad-codex-capture-"));
+    tempDirs.push(workspaceRoot);
+    const filePath = path.join(workspaceRoot, "delete-me.md");
+    await writeFile(filePath, "# Delete Me\n\nOriginal text.\n", "utf8");
+
+    const snapshot = await captureMarkdownSnapshot(runRequest(workspaceRoot));
+    await rm(filePath);
+    const unsupportedNotes = new Set<string>();
+    const result = await convertAndReconcileCodexFileChanges({
+      snapshot,
+      fileChanges: new Map([
+        [
+          "delete-me.md",
+          [
+            {
+              path: "delete-me.md",
+              kind: { type: "delete" },
+              diff: ""
+            }
+          ]
+        ]
+      ]),
+      unsupportedNotes
+    });
+
+    expect(result.draftFileChanges).toEqual([
+      expect.objectContaining({
+        kind: "delete_file",
+        relativePath: "delete-me.md"
+      })
+    ]);
+    expect(result.sourceCounts.skipped).toBe(1);
+    expect(result.unsupportedNotes).toEqual([]);
+    expect(await readFile(filePath, "utf8")).toBe("# Delete Me\n\nOriginal text.\n");
+  });
 });

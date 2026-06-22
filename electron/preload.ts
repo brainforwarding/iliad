@@ -71,6 +71,9 @@ const api = {
   searchMarkdownContent: (request: MarkdownContentSearchRequest) =>
     ipcRenderer.invoke("file:search-markdown-content", request),
   openUrl: (url: string) => ipcRenderer.invoke("shell:open-url", url),
+  diagnostics: {
+    log: (request: unknown) => ipcRenderer.invoke("diagnostics:log", request)
+  },
   updates: {
     check: () => ipcRenderer.invoke("updates:check"),
     consumePendingCheckRequest: () => ipcRenderer.invoke("updates:consume-pending-check-request"),

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   editorReviewActionLabelsForMode,
+  externalActiveFileAutoSelectionDecision,
   externalReviewTargetForActiveFile,
   rejectProposalWithoutSaving,
   reviewTargetAfterActiveFileChange,
@@ -144,6 +145,36 @@ describe("useAgentProposals actions", () => {
   it("does not recover unrelated or non-external active-file targets", () => {
     expect(externalReviewTargetForActiveFile([externalEditProposal()], "/workspace", "other.md")).toBeNull();
     expect(externalReviewTargetForActiveFile([proposal()], "/workspace", "novel/lighthouse.md")).toBeNull();
+  });
+
+  it("only auto-selects external active-file reviews when no review is already active", () => {
+    expect(
+      externalActiveFileAutoSelectionDecision({
+        hasActiveReview: false,
+        alreadyReviewingFile: false
+      })
+    ).toBe("allow");
+    expect(
+      externalActiveFileAutoSelectionDecision({
+        hasActiveReview: true,
+        alreadyReviewingFile: false
+      })
+    ).toBe("block_different_target");
+    expect(
+      externalActiveFileAutoSelectionDecision({
+        hasActiveReview: true,
+        alreadyReviewingFile: true
+      })
+    ).toBe("noop_same_target");
+  });
+
+  it("blocks active-file recovery while a different created or deleted review item is selected", () => {
+    expect(
+      externalActiveFileAutoSelectionDecision({
+        hasActiveReview: true,
+        alreadyReviewingFile: false
+      })
+    ).toBe("block_different_target");
   });
 
   it("clears a stale pending delete review when active file navigation moves elsewhere", () => {

@@ -41,6 +41,27 @@ function createVisualMarkdownState(doc: string, anchor: number) {
   });
 }
 
+function createBlockedVisualMarkdownState(doc: string, blockedLineRanges: Array<{ from: number; to: number }>) {
+  return EditorState.create({
+    doc,
+    selection: { anchor: 0 },
+    extensions: [
+      visualMarkdown({
+        documentPath: "/ws/doc.md",
+        blockedLineRanges,
+        initialEditorFocused: false,
+        labels: {
+          markdownImage: "image",
+          youtubeVideo: "video",
+          markTaskIncomplete: "incomplete",
+          markTaskComplete: "complete"
+        },
+        onOpenLink: () => undefined
+      })
+    ]
+  });
+}
+
 function classDecorations(state: EditorState, className: string) {
   return collectDecorations(state).filter((entry) => (entry.value.spec as { class?: string }).class === className);
 }
@@ -169,6 +190,15 @@ describe("visual Markdown inline ranges", () => {
 
     expect(widgetDecorations(state)).toHaveLength(0);
     expect(classDecorations(state, "cm-md-strong")).toMatchObject([{ from: 4, to: 8 }]);
+  });
+
+  it("does not decorate review-blocked Markdown source lines", () => {
+    const state = createBlockedVisualMarkdownState("# Title\n\n- item\n> quote\n| A | B |", [{ from: 1, to: 5 }]);
+    const decorations = collectDecorations(state);
+
+    expect(decorations.some(({ value }) => ((value.spec as { class?: string }).class ?? "").includes("cm-md-heading-line"))).toBe(false);
+    expect(decorations.some(({ value }) => ((value.spec as { class?: string }).class ?? "").includes("cm-md-list-line"))).toBe(false);
+    expect(widgetDecorations(state)).toHaveLength(0);
   });
 
   it("updates active-line emphasis immediately when the closing marker is typed", () => {

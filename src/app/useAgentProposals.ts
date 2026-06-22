@@ -16,6 +16,8 @@ import type { AgentApi, AgentChangeProposal, FileTreeNode, WorkspaceInfo } from 
 
 export type { ReviewTarget };
 
+type ProposalFile = AgentChangeProposal["files"][number];
+
 interface UseAgentProposalsOptions {
   activeFile: FileTreeNode | null;
   documentText: string;
@@ -71,6 +73,26 @@ function isExternalFilesystemProposal(proposal: AgentChangeProposal | undefined 
 
 export function shouldFlushBeforeSelectingReviewTarget(proposal: AgentChangeProposal | undefined | null) {
   return !isExternalFilesystemProposal(proposal);
+}
+
+export type ExternalActiveFileAutoSelectionDecision = "allow" | "noop_same_target" | "block_different_target";
+
+export function externalActiveFileAutoSelectionDecision({
+  hasActiveReview,
+  alreadyReviewingFile
+}: {
+  hasActiveReview: boolean;
+  alreadyReviewingFile: boolean;
+}): ExternalActiveFileAutoSelectionDecision {
+  if (alreadyReviewingFile) {
+    return "noop_same_target";
+  }
+
+  if (hasActiveReview) {
+    return "block_different_target";
+  }
+
+  return "allow";
 }
 
 export function externalReviewTargetForActiveFile(
@@ -132,6 +154,45 @@ export function reviewTargetAfterActiveFileChange({
   return currentTarget;
 }
 
+function reviewTargetLogDetails(target: ReviewTarget | null, proposals: AgentChangeProposal[]) {
+  if (!target) {
+    return {};
+  }
+
+  const proposal = proposals.find((candidate) => candidate.id === target.proposalId);
+  const file = proposal?.files.find((candidate) => candidate.id === target.fileId);
+
+  return {
+    targetProposalId: target.proposalId,
+    targetFileId: target.fileId,
+    targetKind: file?.kind ?? null,
+    targetRel: file?.relativePath ?? null
+  };
+}
+
+function reviewFileLogDetails(file: ProposalFile | undefined | null) {
+  return {
+    targetKind: file?.kind ?? null,
+    targetRel: file?.relativePath ?? null
+  };
+}
+
+function activeFileClearReason(activeRelativePath: string | undefined | null, file: ProposalFile | undefined) {
+  if (!file) {
+    return "missing_target_file";
+  }
+
+  if (file.kind === "create_file") {
+    return "active_file_changed_from_create_target";
+  }
+
+  if (!sameRelativePath(activeRelativePath ?? "", file.relativePath)) {
+    return "active_file_mismatch";
+  }
+
+  return "unknown";
+}
+
 export function editorReviewActionLabelsForMode(
   mode: EditorReviewState["mode"],
   reviewToolbar: AppStrings["editor"]["reviewToolbar"]
@@ -181,6 +242,7 @@ export function useAgentProposals({
   const [reviewActionKey, setReviewActionKey] = useState<string | null>(null);
   const workspacePathRef = useRef<string | null>(null);
   const activeFilePathRef = useRef<string | null>(null);
+  const activeFileRelativePathRef = useRef<string | null>(null);
   const reviewActionKeyRef = useRef<string | null>(null);
   workspacePathRef.current = workspace?.path ?? null;
 
@@ -190,8 +252,11 @@ export function useAgentProposals({
 
   useEffect(() => {
     const previousPath = activeFilePathRef.current;
+    const previousActiveRel = activeFileRelativePathRef.current;
     const currentPath = activeFile?.path ?? null;
+    const activeRel = activeFile?.relativePath ?? null;
     activeFilePathRef.current = currentPath;
+    activeFileRelativePathRef.current = activeRel;
 
     if (previousPath === currentPath) {
       return;
@@ -200,20 +265,27 @@ export function useAgentProposals({
     logReviewNavigation("active_file_changed", {
       previousPath,
       currentPath,
-      activeRelativePath: activeFile?.relativePath ?? null
+      previousActiveRel,
+      activeRel,
+      activeRelativePath: activeRel
     });
 
     setAgentReviewTarget((current) => {
+      const proposal = agentProposals.find((candidate) => candidate.id === current?.proposalId);
+      const file = proposal?.files.find((candidate) => candidate.id === current?.fileId);
       const next = reviewTargetAfterActiveFileChange({
-        activeRelativePath: activeFile?.relativePath,
+        activeRelativePath: activeRel,
         currentTarget: current,
         proposals: agentProposals
       });
 
       if (current && !next) {
         logReviewNavigation("active_file_cleared_review_target", {
-          activeRelativePath: activeFile?.relativePath ?? null,
-          target: current
+          activeRel,
+          activeRelativePath: activeRel,
+          clearReason: activeFileClearReason(activeRel, file),
+          target: current,
+          ...reviewTargetLogDetails(current, agentProposals)
         });
       }
 
@@ -571,6 +643,8 @@ export function useAgentProposals({
 
       logReviewNavigation("select_target_start", {
         target,
+        ...reviewTargetLogDetails(target, agentProposals),
+        activeRel: activeFile?.relativePath ?? null,
         activeRelativePath: activeFile?.relativePath ?? null,
         workspacePath: workspace?.path ?? null
       });
@@ -590,8 +664,10 @@ export function useAgentProposals({
       if (!proposal || !file || proposal.workspaceRoot !== workspace?.path) {
         logReviewNavigation("select_target_invalid", {
           target,
+          ...reviewTargetLogDetails(target, proposals),
           hasProposal: Boolean(proposal),
           hasFile: Boolean(file),
+          workspaceMatches: proposal?.workspaceRoot === workspace?.path,
           proposalWorkspaceRoot: proposal?.workspaceRoot ?? null,
           workspacePath: workspace?.path ?? null
         });
@@ -602,6 +678,7 @@ export function useAgentProposals({
       if (shouldFlushBeforeSelectingReviewTarget(proposal)) {
         logReviewNavigation("select_target_flush_save", {
           target,
+          ...reviewFileLogDetails(file),
           fileKind: file.kind,
           relativePath: file.relativePath
         });
@@ -614,6 +691,7 @@ export function useAgentProposals({
         if (!node) {
           logReviewNavigation("select_target_missing_edit_node", {
             target,
+            ...reviewFileLogDetails(file),
             relativePath: file.relativePath
           });
           setError(strings.assistant.fileChanged);
@@ -623,6 +701,12 @@ export function useAgentProposals({
         if (!sameRelativePath(activeFile?.relativePath ?? "", file.relativePath)) {
           logReviewNavigation("select_target_open_edit_node", {
             target,
+            ...reviewFileLogDetails(file),
+            activeRel: activeFile?.relativePath ?? null,
+            nodeRel: node.relativePath,
+            nodeKind: node.kind,
+            nodeFound: true,
+            openedNode: true,
             fromRelativePath: activeFile?.relativePath ?? null,
             toRelativePath: file.relativePath,
             nodePath: node.path
@@ -632,6 +716,7 @@ export function useAgentProposals({
           if (result.kind !== "markdown") {
             logReviewNavigation("select_target_open_edit_node_failed", {
               target,
+              ...reviewFileLogDetails(file),
               resultKind: result.kind
             });
             setError(strings.assistant.fileChanged);
@@ -641,6 +726,9 @@ export function useAgentProposals({
 
         logReviewNavigation("select_target_reveal_edit", {
           target,
+          ...reviewFileLogDetails(file),
+          revealPath: node.path,
+          nodeRel: node.relativePath,
           nodePath: node.path,
           relativePath: file.relativePath
         });
@@ -654,7 +742,13 @@ export function useAgentProposals({
         }
         logReviewNavigation("select_target_reveal_create", {
           target,
+          ...reviewFileLogDetails(file),
           nodePath: node?.path ?? null,
+          nodeRel: node?.relativePath ?? null,
+          nodeKind: node?.kind ?? null,
+          nodeFound: Boolean(node),
+          revealPath: node?.path ?? pendingFileTreePath(file.relativePath),
+          revealRel: file.relativePath,
           relativePath: file.relativePath
         });
         requestReviewReveal?.(node?.path ?? pendingFileTreePath(file.relativePath));
@@ -666,6 +760,12 @@ export function useAgentProposals({
         if (node && !sameRelativePath(activeFile?.relativePath ?? "", file.relativePath)) {
           logReviewNavigation("select_target_open_delete_node", {
             target,
+            ...reviewFileLogDetails(file),
+            activeRel: activeFile?.relativePath ?? null,
+            nodeRel: node.relativePath,
+            nodeKind: node.kind,
+            nodeFound: true,
+            openedNode: true,
             fromRelativePath: activeFile?.relativePath ?? null,
             toRelativePath: file.relativePath,
             nodePath: node.path
@@ -675,6 +775,7 @@ export function useAgentProposals({
           if (result.kind !== "markdown") {
             logReviewNavigation("select_target_open_delete_node_failed", {
               target,
+              ...reviewFileLogDetails(file),
               resultKind: result.kind
             });
             setError(strings.assistant.fileChanged);
@@ -686,11 +787,21 @@ export function useAgentProposals({
           setSelectedTreePath(null);
         }
 
+        logReviewNavigation("select_target_reveal_delete", {
+          target,
+          ...reviewFileLogDetails(file),
+          nodeFound: Boolean(node),
+          nodeRel: node?.relativePath ?? null,
+          nodeKind: node?.kind ?? null,
+          revealPath: node ? node.path : pendingFileTreePath(file.relativePath),
+          revealRel: file.relativePath
+        });
         requestReviewReveal?.(node ? node.path : pendingFileTreePath(file.relativePath));
       }
 
       logReviewNavigation("select_target_set", {
         target,
+        ...reviewFileLogDetails(file),
         fileKind: file.kind,
         relativePath: file.relativePath
       });
@@ -722,6 +833,14 @@ export function useAgentProposals({
         const file = proposal?.files.find((candidate) => candidate.id === current.fileId);
 
         if (file?.kind === "create_file") {
+          logReviewNavigation("normal_navigation_cleared_review_target", {
+            activeRel: activeFile?.relativePath ?? null,
+            clearReason: "normal_navigation_from_create_target",
+            nodeRel: node.relativePath,
+            nodeKind: node.kind,
+            target: current,
+            ...reviewTargetLogDetails(current, agentProposals)
+          });
           return null;
         }
 
@@ -729,13 +848,21 @@ export function useAgentProposals({
           (file?.kind === "edit_file" || file?.kind === "delete_file") &&
           !sameRelativePath(node.relativePath, file.relativePath)
         ) {
+          logReviewNavigation("normal_navigation_cleared_review_target", {
+            activeRel: activeFile?.relativePath ?? null,
+            clearReason: "normal_navigation_file_mismatch",
+            nodeRel: node.relativePath,
+            nodeKind: node.kind,
+            target: current,
+            ...reviewTargetLogDetails(current, agentProposals)
+          });
           return null;
         }
 
         return current;
       });
     },
-    [agentProposals]
+    [activeFile?.relativePath, agentProposals]
   );
 
   useEffect(() => {
@@ -755,6 +882,14 @@ export function useAgentProposals({
     const file = proposal?.files.find((candidate) => candidate.id === agentReviewTarget.fileId);
 
     if (!proposal || !file || proposal.workspaceRoot !== workspace?.path) {
+      logReviewNavigation("proposal_state_cleared_review_target", {
+        target: agentReviewTarget,
+        ...reviewTargetLogDetails(agentReviewTarget, agentProposals),
+        hasProposal: Boolean(proposal),
+        hasFile: Boolean(file),
+        workspaceMatches: proposal?.workspaceRoot === workspace?.path,
+        clearReason: !proposal ? "missing_proposal" : !file ? "missing_file" : "workspace_mismatch"
+      });
       setAgentReviewTarget(null);
     }
   }, [agentProposals, agentReviewTarget, workspace?.path]);

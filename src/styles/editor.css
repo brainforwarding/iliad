@@ -516,6 +516,8 @@
   border-radius: 2px;
   background-color: var(--diff-del-soft);
   color: var(--diff-del-ink);
+  text-decoration: line-through;
+  text-decoration-color: var(--diff-del-line);
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
@@ -559,6 +561,49 @@
   background-color: var(--diff-ins-strong);
 }
 
+.cm-ai-review-source-line {
+  font: inherit;
+  letter-spacing: 0;
+  text-decoration: inherit;
+}
+
+.cm-ai-review-source-heading {
+  font-family: var(--editor-heading-font);
+  font-weight: 700;
+  line-height: 1.16;
+}
+
+.cm-ai-review-source-heading-1 {
+  font-size: var(--serif-h1);
+}
+
+.cm-ai-review-source-heading-2 {
+  font-size: var(--serif-h2);
+}
+
+.cm-ai-review-source-heading-3 {
+  font-size: var(--serif-h3);
+}
+
+.cm-ai-review-source-heading-4,
+.cm-ai-review-source-heading-5,
+.cm-ai-review-source-heading-6 {
+  font-size: var(--serif-h4);
+}
+
+.cm-ai-review-source-blockquote {
+  padding-left: 18px !important;
+  border-left: 3px solid currentColor;
+}
+
+.cm-ai-review-source-list {
+  padding-left: 18px !important;
+}
+
+.cm-ai-review-source-empty {
+  min-height: 1.35em;
+}
+
 .cm-ai-review-inserted-block,
 .cm-ai-review-controls {
   box-sizing: border-box;
@@ -567,114 +612,28 @@
   padding: 0;
 }
 
-.cm-ai-review-rendered-host {
-  padding: 2px 0;
-  color: var(--diff-ins-ink);
-}
-
-.cm-ai-review-inserted-block.is-active .cm-ai-review-rendered-host {
-  color: var(--diff-ins-ink);
-}
-
-.cm-ai-review-rendered-host.is-source {
+.cm-ai-review-source-block {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
   padding: 1px 0;
+  color: var(--diff-ins-ink);
 }
 
-.cm-ai-review-source {
+.cm-ai-review-source-row {
   display: block;
   box-sizing: border-box;
   width: 100%;
   margin: 0;
-  padding-left: 0;
   white-space: pre-wrap;
-}
-
-.cm-ai-review-source.is-list-source {
-  padding-left: 18px;
 }
 
 .cm-ai-review-inline-source {
   white-space: pre-wrap;
 }
 
-.cm-ai-review-rendered {
-  font: inherit;
-}
-
-.cm-ai-review-rendered-host:not(.is-source) .cm-ai-review-rendered :is(p, li, h1, h2, h3, h4, blockquote, td, th) {
-  border-radius: 2px;
-  background-color: var(--diff-ins-soft);
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-}
-
-.cm-ai-review-inserted-block.is-active
-  .cm-ai-review-rendered-host:not(.is-source)
-  .cm-ai-review-rendered
-  :is(p, li, h1, h2, h3, h4, blockquote, td, th) {
-  background-color: var(--diff-ins-strong);
-}
-
-.cm-ai-review-rendered > :first-child {
-  margin-top: 0;
-}
-
-.cm-ai-review-rendered > :last-child {
-  margin-bottom: 0;
-}
-
-.cm-ai-review-rendered h1,
-.cm-ai-review-rendered h2,
-.cm-ai-review-rendered h3,
-.cm-ai-review-rendered h4 {
-  margin: 0.5em 0 0.25em;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
-.cm-ai-review-rendered p,
-.cm-ai-review-rendered blockquote,
-.cm-ai-review-rendered table {
-  margin: 0.4em 0;
-}
-
-.cm-ai-review-rendered ul,
-.cm-ai-review-rendered ol {
-  margin: 0.15em 0;
-  padding-inline-start: 1.25em;
-}
-
-.cm-ai-review-rendered li {
-  margin: 0;
-}
-
-.cm-ai-review-rendered li > p {
-  margin: 0;
-}
-
-.cm-ai-review-rendered li + li {
-  margin-top: 0.1em;
-}
-
-.cm-ai-review-rendered code {
-  font-family: var(--font-mono);
-  font-size: 0.92em;
-}
-
-.cm-ai-review-rendered .katex-display {
-  margin: 0.4em 0;
-  overflow-x: auto;
-}
-
-.cm-ai-review-rendered-fallback {
-  margin: 0;
-  padding: 1px 0;
-  background-color: var(--diff-ins-soft);
-  color: var(--diff-ins-ink);
-  font: inherit;
-  white-space: pre-wrap;
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
+.cm-ai-review-inline-source.cm-ai-review-source-heading {
+  display: inline;
 }
 
 .cm-ai-review-actions {

@@ -18,7 +18,11 @@ import {
   useDocumentPersistence,
   type SaveStatus
 } from "./app/useDocumentPersistence";
-import { externalReviewTargetForActiveFile, useAgentProposals } from "./app/useAgentProposals";
+import {
+  externalActiveFileAutoSelectionDecision,
+  externalReviewTargetForActiveFile,
+  useAgentProposals
+} from "./app/useAgentProposals";
 import { useSelectionComments } from "./app/useSelectionComments";
 import { useWorkspace } from "./app/useWorkspace";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
@@ -230,6 +234,10 @@ export default function App() {
     logReviewNavigation("navigation_mark_during_run", { runId });
     editorNavigationDuringRunRef.current = { runId, changed: true };
   }, []);
+  const requestReviewReveal = useCallback((path: string) => {
+    logReviewNavigation("file_tree_reveal_requested", { revealPath: path });
+    setReviewRevealPath(path);
+  }, []);
   const handleRunningAssistantRunChange = useCallback((runId: string | null) => {
     logReviewNavigation("running_run_changed", { runId });
     runningAssistantRunIdRef.current = runId;
@@ -323,12 +331,18 @@ export default function App() {
     setError,
     setNotice,
     setSelectedTreePath,
-    requestReviewReveal: setReviewRevealPath,
+    requestReviewReveal,
     onReviewNavigation: markEditorNavigationDuringRun,
     strings,
     tree,
     workspace
   });
+  const activeReviewRef = useRef(activeReview);
+
+  useEffect(() => {
+    activeReviewRef.current = activeReview;
+  }, [activeReview]);
+
   const reviewQueue = useMemo(() => buildReviewQueueSummary(agentProposals), [agentProposals]);
   const pendingTreeChanges = useMemo(
     () => pendingFileTreeChangesFromQueue(reviewQueue.items),
@@ -559,6 +573,7 @@ export default function App() {
     (target: Parameters<typeof selectAgentReviewTarget>[0]) => {
       logReviewNavigation("manual_review_target_change", {
         target,
+        activeRel: activeFile?.relativePath ?? null,
         activeRelativePath: activeFile?.relativePath ?? null,
         selectedTreePath
       });
@@ -734,23 +749,48 @@ export default function App() {
             ? externalReviewTargetForActiveFile([result.proposal], workspace.path, activeFile.relativePath)
             : null;
         if (target) {
+          const latestActiveReview = activeReviewRef.current;
           const alreadyReviewingFile =
-            activeReview?.proposal.id === target.proposalId && activeReview.file.id === target.fileId;
+            latestActiveReview?.proposal.id === target.proposalId && latestActiveReview.file.id === target.fileId;
+          const targetFile = result.proposal.files.find((file) => file.id === target.fileId);
+          const autoSelectDecision = externalActiveFileAutoSelectionDecision({
+            hasActiveReview: Boolean(latestActiveReview),
+            alreadyReviewingFile
+          });
 
           logReviewNavigation("external_capture_active_file_target", {
             target,
+            targetProposalId: target.proposalId,
+            targetFileId: target.fileId,
+            targetKind: targetFile?.kind ?? null,
+            targetRel: targetFile?.relativePath ?? null,
             alreadyReviewingFile,
+            autoSelectDecision,
+            hasActiveReview: Boolean(latestActiveReview),
+            activeRel: activeFile?.relativePath ?? null,
             activeRelativePath: activeFile?.relativePath ?? null
           });
 
-          if (!alreadyReviewingFile) {
+          if (autoSelectDecision === "allow") {
             await selectAgentReviewTarget(target);
+          } else if (autoSelectDecision === "block_different_target") {
+            logReviewNavigation("external_capture_active_file_target_suppressed", {
+              target,
+              targetProposalId: target.proposalId,
+              targetFileId: target.fileId,
+              targetKind: targetFile?.kind ?? null,
+              targetRel: targetFile?.relativePath ?? null,
+              autoSelectDecision,
+              activeReviewProposalId: latestActiveReview?.proposal.id ?? null,
+              activeReviewFileId: latestActiveReview?.file.id ?? null,
+              activeReviewRel: latestActiveReview?.file.relativePath ?? null,
+              activeReviewKind: latestActiveReview?.file.kind ?? null,
+              activeRel: activeFile?.relativePath ?? null,
+              activeRelativePath: activeFile?.relativePath ?? null
+            });
           }
         }
 
-        if (result.unsupportedNotes.length > 0) {
-          setNotice(strings.assistant.externalCapture.proposalReadyWithNotes(result.unsupportedNotes.length));
-        }
       } else if (result.status === "git_baseline_changed") {
         setNotice(strings.assistant.externalCapture.gitBaselineChanged);
       } else if (result.status === "unsafe") {
@@ -806,7 +846,6 @@ export default function App() {
     clearExternalCaptureAutoFinishTimer,
     externalCapture,
     externalCaptureBusy,
-    activeReview,
     activeFile,
     agentProposals,
     clearDocument,
@@ -2085,6 +2124,8 @@ export default function App() {
               updateChecking={updateChecking}
               onOpenNode={(node) => {
                 logReviewNavigation("file_tree_open_node", {
+                  nodeRel: node.relativePath,
+                  nodeKind: node.kind,
                   relativePath: node.relativePath,
                   path: node.path,
                   kind: node.kind
@@ -2095,14 +2136,18 @@ export default function App() {
               }}
               onOpenPendingChange={(target) => {
                 logReviewNavigation("file_tree_open_pending_change", {
-                  proposalId: target.proposalId,
-                  fileId: target.fileId,
+                  targetProposalId: target.proposalId,
+                  targetFileId: target.fileId,
+                  targetKind: target.kind,
+                  targetRel: target.relativePath,
+                  activeRel: activeFile?.relativePath ?? null,
                   kind: target.kind,
                   relativePath: target.relativePath
                 });
                 return handleManualReviewTargetChange({ proposalId: target.proposalId, fileId: target.fileId });
               }}
               onRevealComplete={(path) => {
+                logReviewNavigation("file_tree_reveal_completed", { revealPath: path });
                 if (reviewRevealPath === path) {
                   setReviewRevealPath(null);
                 }
@@ -2110,6 +2155,12 @@ export default function App() {
                 if (revealFolderPath === path) {
                   setRevealFolderPath(null);
                 }
+              }}
+              onRevealFailed={(path, reason) => {
+                logReviewNavigation("file_tree_reveal_failed", {
+                  revealPath: path,
+                  clearReason: reason
+                });
               }}
               onCreateFile={createMarkdownFileWithNavigation}
               onCreateFolder={createFolder}

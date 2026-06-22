@@ -1038,6 +1038,14 @@ export interface IliadApi {
   moveToTrash: (workspaceRoot: string, filePath: string) => Promise<void>;
   searchMarkdownContent: (request: MarkdownContentSearchRequest) => Promise<MarkdownContentSearchResponse>;
   openUrl: (url: string) => Promise<void>;
+  diagnostics?: {
+    log: (request: {
+      level?: "debug" | "info" | "warn" | "error";
+      area?: "app" | "workspace" | "agent" | "provider" | "review";
+      event: string;
+      details?: Record<string, string | number | boolean | null>;
+    }) => Promise<void>;
+  };
   updates: UpdatesApi;
   openExternalFile: (workspaceRoot: string, filePath: string) => Promise<string>;
   revealInFinder: (workspaceRoot: string, filePath: string) => Promise<void>;

@@ -635,6 +635,16 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
         itemType: "fileChange",
         changeCount: conversion.sourceCounts.protocol
       });
+      if (conversion.sourceCounts.skipped > 0) {
+        emitPhase({
+          phase: "file_changes_captured",
+          method: "protocol",
+          status: "skipped",
+          responseId: turnId || threadId,
+          itemType: "fileChange",
+          changeCount: conversion.sourceCounts.skipped
+        });
+      }
       emitPhase({
         phase: "file_changes_captured",
         method: "disk",
@@ -1295,17 +1305,9 @@ export function codexFinalAssistantText({
   notes: string[];
 }) {
   if (draftCount > 0) {
-    const proposalText =
-      language === "es"
-        ? "Preparé una propuesta. Revísala en el documento."
-        : "I prepared a proposal. Review it in the document.";
-    const uniqueNotes = [...new Set(notes)].filter(Boolean);
-
-    if (uniqueNotes.length === 0) {
-      return proposalText;
-    }
-
-    return `${proposalText}\n\n${language === "es" ? "Nota:" : "Note:"} ${uniqueNotes[0]}`;
+    return language === "es"
+      ? "Preparé una propuesta. Revísala en el documento."
+      : "I prepared a proposal. Review it in the document.";
   }
 
   if (rawText) {

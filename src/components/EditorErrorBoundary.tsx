@@ -1,4 +1,4 @@
-import { Component, type ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode } from "react";
 import { ClipMark } from "./ClipMark";
 
 interface EditorErrorBoundaryProps {
@@ -38,8 +38,19 @@ export class EditorErrorBoundary extends Component<EditorErrorBoundaryProps, Edi
     return null;
   }
 
-  componentDidCatch(error: Error) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("Editor crashed.", error);
+    void window.iliad.diagnostics?.log({
+      level: "error",
+      area: "app",
+      event: "renderer.editor_crashed",
+      details: {
+        errorName: error.name,
+        errorMessage: error.message,
+        editorResetId: this.props.resetKey,
+        componentStack: errorInfo.componentStack ?? null
+      }
+    });
   }
 
   render() {

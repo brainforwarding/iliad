@@ -134,6 +134,11 @@ function buildDecorations(
 
     const active = isActiveLine(state, lineNumber, editorFocused, editorInteracted);
     const reviewBlocked = lineIsBlocked(lineNumber, options.blockedLineRanges);
+
+    if (reviewBlocked) {
+      continue;
+    }
+
     const displayMathBlock = displayMathBlocks.get(lineNumber);
     const insideDisplayMathBlock = displayMathLineBlocks.get(lineNumber);
     const tableLine = tableLines.get(lineNumber);
@@ -145,10 +150,6 @@ function buildDecorations(
     );
 
     const headingMatch = addBlockLineDecorations(ranges, line.from, text);
-
-    if (reviewBlocked) {
-      continue;
-    }
 
     if (displayMathBlock) {
       const displayMathBlocked = Array.from(

@@ -1095,6 +1095,63 @@ describe("Codex app-server runtime provider", () => {
     expect(await readFile(docPath, "utf8")).toBe("Old intro\nBody\n");
   });
 
+  it("keeps recovered unsupported delete notes out of chat and in diagnostics", async () => {
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "iliad-codex-provider-delete-note-"));
+    tempDirs.push(workspaceRoot);
+    const docPath = path.join(workspaceRoot, "doc.md");
+    await writeFile(docPath, "Delete me\n", "utf8");
+    const client = new FakeCodexClient();
+    const diagnosticEvents: unknown[] = [];
+    const provider = new CodexAppServerRuntimeProvider({
+      client: client as any,
+      model: "gpt-5.5"
+    });
+
+    const promise = provider.startRun({
+      request: runRequest(workspaceRoot, { activeFile: null }),
+      signal: new AbortController().signal,
+      onDiagnosticEvent: (event) => diagnosticEvents.push(event)
+    });
+
+    await client.waitForTurnStart();
+    await rm(docPath);
+    client.emitNotification("item/completed", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: fileChangeItem("file-change-1", [
+        {
+          path: "doc.md",
+          kind: { type: "delete", move_path: null },
+          diff: ""
+        }
+      ])
+    });
+    completeTurn(client);
+
+    const result = await promise;
+
+    expect(result.text).toBe("I prepared a proposal. Review it in the document.");
+    expect(result.text).not.toContain("Codex");
+    expect(result.text).not.toContain("Note:");
+    expect(result.draftFileChanges).toHaveLength(1);
+    expect(result.draftFileChanges[0]).toMatchObject({
+      kind: "delete_file",
+      relativePath: "doc.md",
+      baseContent: "Delete me\n"
+    });
+    expect(diagnosticEvents).toContainEqual(
+      expect.objectContaining({
+        event: "provider.phase",
+        phase: "file_changes_captured",
+        method: "protocol",
+        status: "skipped",
+        itemType: "fileChange",
+        changeCount: 1
+      })
+    );
+    expect(await readFile(docPath, "utf8")).toBe("Delete me\n");
+  });
+
   it("captures direct existing Markdown disk edits without fileChange events and restores the file", async () => {
     const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "iliad-codex-provider-disk-edit-"));
     tempDirs.push(workspaceRoot);

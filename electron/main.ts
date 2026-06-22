@@ -3,6 +3,7 @@ import path from "node:path";
 import { registerAgentIpc } from "./ipc/agent.js";
 import { registerAutocompleteIpc } from "./ipc/autocomplete.js";
 import { registerAssetIpc, registerAssetProtocol } from "./ipc/assets.js";
+import { registerDiagnosticsIpc } from "./ipc/diagnostics.js";
 import { registerFileIpc } from "./ipc/files.js";
 import { registerRemoteIpc } from "./ipc/remote.js";
 import { registerSearchIpc } from "./ipc/search.js";
@@ -16,6 +17,7 @@ import { parseLaunchWorkspacePath } from "./launch/argv.js";
 import { canonicalizeWorkspaceDirectory, type WorkspaceInfo } from "./launch/workspace.js";
 import { AgentService } from "./agent/agentService.js";
 import { AgentChatHistoryStore } from "./agent/chatHistoryStore.js";
+import { createDiagnosticsLogger } from "./diagnostics/logger.js";
 import { RemoteRelayClient } from "./remote/remoteRelayClient.js";
 import { TelegramRemoteService } from "./remote/telegramRemoteService.js";
 import { UpdateService } from "./updates/updateService.js";
@@ -239,6 +241,8 @@ app.whenReady().then(async () => {
     }
   });
   const userDataPath = app.getPath("userData");
+  const diagnosticsLogger = createDiagnosticsLogger(userDataPath);
+  registerDiagnosticsIpc({ logger: diagnosticsLogger });
   const chatHistoryStore = new AgentChatHistoryStore(userDataPath);
   const agentService = new AgentService(userDataPath, { chatHistoryStore });
   const remoteService = new TelegramRemoteService({

@@ -176,6 +176,7 @@ export async function convertAndReconcileCodexFileChanges({
 
   const postSnapshot = await captureDiskMarkdownSnapshot(snapshot.workspaceRoot);
   const diskDrafts = reconcileDiskDrafts(snapshot, postSnapshot, unsupportedNotes);
+  removeRecoveredUnsupportedNotes(unsupportedNotes, diskDrafts);
   appendUnrecoveredProtocolErrors(notes, protocolErrors, diskDrafts);
   const mergedDrafts = mergeDraftsByPath(protocolDrafts, diskDrafts, notes);
   const restoredCount = await restoreCapturedDiskChanges(snapshot, mergedDrafts.map(({ draft }) => draft), unsupportedNotes);
@@ -340,6 +341,14 @@ function appendUnrecoveredProtocolErrors(
     }
 
     notes.push(error.message);
+  }
+}
+
+function removeRecoveredUnsupportedNotes(unsupportedNotes: Set<string>, diskDrafts: DraftWithSource[]) {
+  for (const { draft } of diskDrafts) {
+    if (draft.kind === "delete_file") {
+      unsupportedNotes.delete(`Codex delete for ${draft.relativePath} is not supported.`);
+    }
   }
 }
 

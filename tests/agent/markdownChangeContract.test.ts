@@ -189,4 +189,35 @@ describe("Markdown change contract", () => {
       })
     ).toBe("I prepared a proposal. Review it in the document.");
   });
+
+  it("does not append deterministic notes when a proposal exists", () => {
+    expect(
+      codexFinalAssistantText({
+        language: "en",
+        rawText: "Changed files.",
+        draftCount: 1,
+        notes: ["Codex protocol and disk changes disagreed for doc.md; using the disk change."]
+      })
+    ).toBe("I prepared a proposal. Review it in the document.");
+
+    expect(
+      codexFinalAssistantText({
+        language: "es",
+        rawText: "Archivos cambiados.",
+        draftCount: 1,
+        notes: ["Codex delete for doc.md is not supported."]
+      })
+    ).toBe("Preparé una propuesta. Revísala en el documento.");
+  });
+
+  it("uses deterministic notes only as the fallback when no proposal or text exists", () => {
+    expect(
+      codexFinalAssistantText({
+        language: "en",
+        rawText: "",
+        draftCount: 0,
+        notes: ["No reviewable Markdown changes were produced."]
+      })
+    ).toBe("No reviewable Markdown changes were produced.");
+  });
 });

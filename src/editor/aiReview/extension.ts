@@ -1,8 +1,5 @@
 import { StateField, type EditorState, type Range } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
-import { createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { ReviewMarkdown } from "../../components/markdown/ReviewMarkdown";
 import type { DisplayReviewHunk } from "./diff";
 import { intralineTokenDiff, type IntralineRange } from "./intralineDiff";
 
@@ -11,22 +8,35 @@ interface ReviewExtensionOptions {
   hunks: DisplayReviewHunk[];
   activeHunkId: string | null;
   createLineCount: number;
-  renderInsertedAsSource?: boolean;
   onAcceptHunk?: (hunkId: string) => void;
   onRejectHunk?: (hunkId: string) => void;
-  onOpenLink?: (href: string) => void | Promise<void>;
   labels: {
     acceptChange?: string;
     rejectChange?: string;
   };
 }
 
-// React roots mounted inside inserted-block widgets, keyed by their DOM node so
-// they can be unmounted in WidgetType.destroy().
-const insertedRoots = new WeakMap<HTMLElement, Root>();
+export function reviewSourceLineClasses(line: string) {
+  const classes = ["cm-ai-review-source-line"];
+  const headingMatch = /^(#{1,6})\s+/.exec(line);
 
-function isListSourceLine(line: string) {
-  return /^\s*([-*+]|\d+\.)\s+/.test(line);
+  if (headingMatch) {
+    classes.push("cm-ai-review-source-heading", `cm-ai-review-source-heading-${headingMatch[1].length}`);
+  }
+
+  if (/^\s*>\s?/.test(line)) {
+    classes.push("cm-ai-review-source-blockquote");
+  }
+
+  if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
+    classes.push("cm-ai-review-source-list");
+  }
+
+  if (/^\s*$/.test(line)) {
+    classes.push("cm-ai-review-source-empty");
+  }
+
+  return classes.join(" ");
 }
 
 class InsertedTextWidget extends WidgetType {
@@ -34,14 +44,12 @@ class InsertedTextWidget extends WidgetType {
 
   constructor(
     private readonly lines: string[],
-    private readonly changedRanges: IntralineRange[],
+    private readonly changedRangesByLine: IntralineRange[][],
     private readonly hunkId: string,
     private readonly active: boolean,
     private readonly onAcceptHunk: ((hunkId: string) => void) | undefined,
     private readonly onRejectHunk: ((hunkId: string) => void) | undefined,
-    private readonly labels: ReviewExtensionOptions["labels"],
-    private readonly onOpenLink: ((href: string) => void | Promise<void>) | undefined,
-    private readonly renderAsSource: boolean
+    private readonly labels: ReviewExtensionOptions["labels"]
   ) {
     super();
     this.text = lines.join("\n");
@@ -51,11 +59,9 @@ class InsertedTextWidget extends WidgetType {
     return (
       this.hunkId === other.hunkId &&
       this.active === other.active &&
-      sameRanges(this.changedRanges, other.changedRanges) &&
+      sameLineRanges(this.changedRangesByLine, other.changedRangesByLine) &&
       this.onAcceptHunk === other.onAcceptHunk &&
       this.onRejectHunk === other.onRejectHunk &&
-      this.onOpenLink === other.onOpenLink &&
-      this.renderAsSource === other.renderAsSource &&
       this.labels.acceptChange === other.labels.acceptChange &&
       this.labels.rejectChange === other.labels.rejectChange &&
       this.text === other.text
@@ -68,22 +74,23 @@ class InsertedTextWidget extends WidgetType {
     wrapper.dataset.hunkId = this.hunkId;
 
     const content = document.createElement("div");
-    content.className = "cm-ai-review-rendered-host";
+    content.className = "cm-ai-review-source-block";
     wrapper.append(content);
 
-    if (this.renderAsSource) {
-      content.classList.add("is-source");
-      const source = document.createElement("span");
-      source.className = `cm-ai-review-source${this.lines.some(isListSourceLine) ? " is-list-source" : ""}`;
+    for (let index = 0; index < this.lines.length; index += 1) {
+      const row = document.createElement("div");
+      row.className = `cm-ai-review-source-row ${reviewSourceLineClasses(this.lines[index])}`;
+
       const sourceText = document.createElement("span");
       sourceText.className = `cm-ai-review-line-inserted${this.active ? " is-active" : ""}`;
-      appendSourceParts(sourceText, this.text, this.changedRanges, "cm-ai-review-inserted-token");
-      source.append(sourceText);
-      content.append(source);
-    } else {
-      const root = createRoot(content);
-      root.render(createElement(ReviewMarkdown, { text: this.text, onOpenLink: this.onOpenLink }));
-      insertedRoots.set(wrapper, root);
+      appendSourceParts(sourceText, this.lines[index], this.changedRangesByLine[index] ?? [], "cm-ai-review-inserted-token");
+
+      if (this.lines[index].length === 0) {
+        sourceText.append(document.createTextNode("\u00a0"));
+      }
+
+      row.append(sourceText);
+      content.append(row);
     }
 
     if (this.onAcceptHunk && this.onRejectHunk) {
@@ -91,16 +98,6 @@ class InsertedTextWidget extends WidgetType {
     }
 
     return wrapper;
-  }
-
-  destroy(dom: HTMLElement) {
-    const root = insertedRoots.get(dom);
-
-    if (root) {
-      insertedRoots.delete(dom);
-      // Defer so we never unmount during CodeMirror's own update/render cycle.
-      queueMicrotask(() => root.unmount());
-    }
   }
 
   ignoreEvent(event: Event) {
@@ -131,8 +128,30 @@ class SourceLineWidget extends WidgetType {
 
   toDOM() {
     const wrapper = document.createElement("span");
-    wrapper.className = `cm-ai-review-inline-source ${this.baseClassName}${this.active ? " is-active" : ""}`;
+    wrapper.className = `cm-ai-review-inline-source ${reviewSourceLineClasses(this.text)} ${this.baseClassName}${
+      this.active ? " is-active" : ""
+    }`;
     appendSourceParts(wrapper, this.text, this.changedRanges, this.changedClassName);
+    return wrapper;
+  }
+}
+
+class EmptyChangedLineWidget extends WidgetType {
+  constructor(
+    private readonly className: string,
+    private readonly active: boolean
+  ) {
+    super();
+  }
+
+  eq(other: EmptyChangedLineWidget) {
+    return this.className === other.className && this.active === other.active;
+  }
+
+  toDOM() {
+    const wrapper = document.createElement("span");
+    wrapper.className = `${this.className}${this.active ? " is-active" : ""}`;
+    wrapper.textContent = "\u00a0";
     return wrapper;
   }
 }
@@ -228,23 +247,15 @@ function hunkLineDiffs(hunk: DisplayReviewHunk): LineIntralineDiff[] {
   return Array.from({ length: count }, (_, index) => intralineTokenDiff(hunk.oldLines[index] ?? "", hunk.newLines[index] ?? ""));
 }
 
-function insertedTextRanges(hunk: DisplayReviewHunk, lineDiffs: LineIntralineDiff[]) {
-  const ranges: IntralineRange[] = [];
-  let offset = 0;
-
-  for (let index = 0; index < hunk.newLines.length; index += 1) {
-    for (const range of lineDiffs[index]?.newRanges ?? []) {
-      ranges.push({ from: offset + range.from, to: offset + range.to });
-    }
-
-    offset += hunk.newLines[index].length + (index < hunk.newLines.length - 1 ? 1 : 0);
-  }
-
-  return ranges;
+function insertedLineRanges(hunk: DisplayReviewHunk, lineDiffs: LineIntralineDiff[]) {
+  return hunk.newLines.map((line, index) => {
+    const ranges = lineDiffs[index]?.newRanges ?? [];
+    return ranges.length > 0 ? ranges : [{ from: 0, to: line.length }];
+  });
 }
 
-function collapsedSourceLine(hunk: DisplayReviewHunk, lineDiffs: LineIntralineDiff[], renderInsertedAsSource: boolean) {
-  if (!renderInsertedAsSource || hunk.oldLines.length !== 1 || hunk.newLines.length !== 1) {
+function collapsedSourceLine(hunk: DisplayReviewHunk, lineDiffs: LineIntralineDiff[]) {
+  if (hunk.oldLines.length !== 1 || hunk.newLines.length !== 1) {
     return null;
   }
 
@@ -303,6 +314,29 @@ function sameRanges(left: IntralineRange[], right: IntralineRange[]) {
   return left.length === right.length && left.every((range, index) => range.from === right[index].from && range.to === right[index].to);
 }
 
+function sameLineRanges(left: IntralineRange[][], right: IntralineRange[][]) {
+  return left.length === right.length && left.every((ranges, index) => sameRanges(ranges, right[index] ?? []));
+}
+
+function addChangedLineDecoration(
+  ranges: Range<Decoration>[],
+  line: { from: number; to: number },
+  className: string,
+  active = false
+) {
+  if (line.from < line.to) {
+    ranges.push(Decoration.mark({ class: `${className}${active ? " is-active" : ""}` }).range(line.from, line.to));
+    return;
+  }
+
+  ranges.push(
+    Decoration.widget({
+      widget: new EmptyChangedLineWidget(className, active),
+      side: 1
+    }).range(line.from)
+  );
+}
+
 function buildDecorations(state: EditorState, options: ReviewExtensionOptions): DecorationSet {
   const ranges: Range<Decoration>[] = [];
 
@@ -310,7 +344,9 @@ function buildDecorations(state: EditorState, options: ReviewExtensionOptions): 
     const className = options.mode === "create_file" ? "cm-ai-review-line-inserted" : "cm-ai-review-line-removed";
 
     for (let lineNumber = 1; lineNumber <= Math.max(1, options.createLineCount); lineNumber += 1) {
-      ranges.push(Decoration.line({ class: className }).range(lineAt(state, lineNumber).from));
+      const line = lineAt(state, lineNumber);
+      ranges.push(Decoration.line({ class: reviewSourceLineClasses(line.text) }).range(line.from));
+      addChangedLineDecoration(ranges, line, className);
     }
 
     return Decoration.set(ranges, true);
@@ -319,21 +355,22 @@ function buildDecorations(state: EditorState, options: ReviewExtensionOptions): 
   for (const hunk of options.hunks) {
     const active = hunk.id === options.activeHunkId;
     const lineDiffs = hunkLineDiffs(hunk);
-    const collapsed = collapsedSourceLine(hunk, lineDiffs, Boolean(options.renderInsertedAsSource));
+    const collapsed = collapsedSourceLine(hunk, lineDiffs);
 
     if (collapsed) {
       const line = lineAt(state, hunk.displayOldStartLine);
-      ranges.push(
-        Decoration.replace({
-          widget: new SourceLineWidget(
-            collapsed.text,
-            collapsed.ranges,
-            collapsed.kind === "insert" ? "cm-ai-review-inserted-token" : "cm-ai-review-removed-token",
-            collapsed.kind === "insert" ? "cm-ai-review-line-inserted" : "cm-ai-review-line-removed",
-            active
-          )
-        }).range(line.from, line.to)
+      const widget = new SourceLineWidget(
+        collapsed.text,
+        collapsed.ranges,
+        collapsed.kind === "insert" ? "cm-ai-review-inserted-token" : "cm-ai-review-removed-token",
+        collapsed.kind === "insert" ? "cm-ai-review-line-inserted" : "cm-ai-review-line-removed",
+        active
       );
+      if (line.from < line.to) {
+        ranges.push(Decoration.replace({ widget }).range(line.from, line.to));
+      } else {
+        ranges.push(Decoration.widget({ widget, side: 1 }).range(line.from));
+      }
       ranges.push(
         Decoration.widget({
           widget: new HunkControlsWidget(hunk.id, active, options.onAcceptHunk, options.onRejectHunk, options.labels),
@@ -347,12 +384,10 @@ function buildDecorations(state: EditorState, options: ReviewExtensionOptions): 
     if (hunk.oldLines.length > 0) {
       for (let lineNumber = hunk.displayOldStartLine; lineNumber <= hunk.displayOldEndLine; lineNumber += 1) {
         const line = lineAt(state, lineNumber);
+        const hunkLineIndex = lineNumber - hunk.displayOldStartLine;
+        ranges.push(Decoration.line({ class: reviewSourceLineClasses(hunk.oldLines[hunkLineIndex] ?? line.text) }).range(line.from));
 
-        if (line.from < line.to) {
-          ranges.push(Decoration.mark({ class: `cm-ai-review-line-removed${active ? " is-active" : ""}` }).range(line.from, line.to));
-        } else {
-          ranges.push(Decoration.line({ class: `cm-ai-review-line-removed${active ? " is-active" : ""}` }).range(line.from));
-        }
+        addChangedLineDecoration(ranges, line, "cm-ai-review-line-removed", active);
       }
 
       for (let index = 0; index < hunk.oldLines.length; index += 1) {
@@ -376,14 +411,12 @@ function buildDecorations(state: EditorState, options: ReviewExtensionOptions): 
         Decoration.widget({
           widget: new InsertedTextWidget(
             hunk.newLines,
-            insertedTextRanges(hunk, lineDiffs),
+            insertedLineRanges(hunk, lineDiffs),
             hunk.id,
             active,
             options.onAcceptHunk,
             options.onRejectHunk,
-            options.labels,
-            options.onOpenLink,
-            Boolean(options.renderInsertedAsSource)
+            options.labels
           ),
           side: hunk.displayAnchorLine <= 0 ? -1 : 1,
           block: true

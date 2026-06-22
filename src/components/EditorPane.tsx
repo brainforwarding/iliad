@@ -5,6 +5,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { markdownLineCount, reviewBlockedLineRanges } from "../editor/aiReview/blockedRanges";
 import { aiReviewExtension } from "../editor/aiReview/extension";
 import { reviewHunksForDisplay, type DisplayReviewHunk } from "../editor/aiReview/diff";
 import type { EditorReviewState } from "../editor/aiReview/types";
@@ -530,8 +531,14 @@ export function EditorPane({
     [tightenReviewHunk]
   );
   const blockedLineRanges = useMemo(
-    () => (review?.mode === "edit_file" ? editReviewDisplay?.changedLineRanges : tightenChangedLineRanges),
-    [editReviewDisplay?.changedLineRanges, review?.mode, tightenChangedLineRanges]
+    () =>
+      reviewBlockedLineRanges({
+        mode: review?.mode,
+        currentContent: review?.currentContent ?? value,
+        editChangedLineRanges: editReviewDisplay?.changedLineRanges,
+        tightenChangedLineRanges
+      }),
+    [editReviewDisplay?.changedLineRanges, review?.currentContent, review?.mode, tightenChangedLineRanges, value]
   );
 
   useEffect(() => {
@@ -848,8 +855,6 @@ export function EditorPane({
             createLineCount: 0,
             onAcceptHunk: review.hideHunkActions || review.actionBusy ? undefined : review.onAcceptHunk,
             onRejectHunk: review.hideHunkActions || review.actionBusy ? undefined : review.onRejectHunk,
-            onOpenLink,
-            renderInsertedAsSource: true,
             labels: {
               acceptChange: review.labels.acceptChange,
               rejectChange: review.labels.rejectChange
@@ -863,10 +868,8 @@ export function EditorPane({
             hunks: [tightenReviewHunk],
             activeHunkId: "tighten-inline-review",
             createLineCount: 0,
-            renderInsertedAsSource: true,
             onAcceptHunk: handleAcceptTightenReview,
             onRejectHunk: handleRejectTightenReview,
-            onOpenLink,
             labels: {
               acceptChange: labels.reviewToolbar.acceptChange,
               rejectChange: labels.reviewToolbar.rejectChange
@@ -883,7 +886,7 @@ export function EditorPane({
             mode: review.mode,
             hunks: [],
             activeHunkId: null,
-            createLineCount: Math.max(1, review.currentContent.split(/\r\n|\r|\n/).length),
+            createLineCount: markdownLineCount(review.currentContent),
             labels: {}
           })
         );

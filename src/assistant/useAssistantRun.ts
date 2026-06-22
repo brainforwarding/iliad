@@ -1535,7 +1535,10 @@ export function useAssistantRun({
 
       logReviewNavigation("assistant_run_initial_review_target", {
         runId: id,
+        proposalCount: result.proposals.length,
         proposalIds: result.proposals.map((proposal) => proposal.id),
+        runActiveRel: runActiveRelativePath,
+        currentActiveRel: currentActiveRelativePath,
         runActiveRelativePath,
         currentActiveRelativePath,
         navigationChangedDuringRun,

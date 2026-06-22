@@ -1,7 +1,7 @@
 import { EditorState } from "@codemirror/state";
 import { EditorView, type Decoration, type DecorationSet } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
-import { aiReviewExtension } from "../../src/editor/aiReview/extension";
+import { aiReviewExtension, reviewSourceLineClasses } from "../../src/editor/aiReview/extension";
 import type { DisplayReviewHunk } from "../../src/editor/aiReview/diff";
 
 function createReviewState(
@@ -10,7 +10,6 @@ function createReviewState(
   options: {
     mode?: "edit_file" | "create_file" | "delete_file";
     createLineCount?: number;
-    renderInsertedAsSource?: boolean;
   } = {}
 ) {
   return EditorState.create({
@@ -21,7 +20,6 @@ function createReviewState(
         hunks,
         activeHunkId: null,
         createLineCount: options.createLineCount ?? 0,
-        renderInsertedAsSource: options.renderInsertedAsSource,
         labels: {}
       })
     ]
@@ -44,8 +42,23 @@ function collectDecorations(state: EditorState) {
   return decorations;
 }
 
+function decorationClass(value: Decoration) {
+  return (value.spec as { class?: string }).class ?? "";
+}
+
+function hasDecorationClass(value: Decoration, className: string) {
+  return decorationClass(value).split(/\s+/).includes(className);
+}
+
 describe("ai review extension", () => {
-  it("keeps removed-line decorations when a removed blank line has no text range", () => {
+  it("classifies review source Markdown without hiding syntax", () => {
+    expect(reviewSourceLineClasses("# Title")).toContain("cm-ai-review-source-heading-1");
+    expect(reviewSourceLineClasses("## Section")).toContain("cm-ai-review-source-heading-2");
+    expect(reviewSourceLineClasses("- item")).toContain("cm-ai-review-source-list");
+    expect(reviewSourceLineClasses("> quote")).toContain("cm-ai-review-source-blockquote");
+  });
+
+  it("keeps a removed-line marker when a removed blank line has no text range", () => {
     const blankLineRemoval: DisplayReviewHunk = {
       id: "hunk-1",
       status: "pending",
@@ -62,17 +75,11 @@ describe("ai review extension", () => {
     const state = createReviewState("alpha\n\nomega", [blankLineRemoval]);
     const decorations = collectDecorations(state);
 
-    expect(decorations).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          from: 6,
-          to: 6,
-          value: expect.objectContaining({
-            spec: expect.objectContaining({ class: "cm-ai-review-line-removed" })
-          })
-        })
-      ])
-    );
+    const emptyLineMarker = decorations.find(({ from, to, value }) => from === 6 && to === 6 && value.spec.widget);
+
+    expect(emptyLineMarker?.value.spec.widget).toMatchObject({
+      className: "cm-ai-review-line-removed"
+    });
     expect(decorations.some(({ value }) => value.spec.class === "cm-ai-review-removed-token")).toBe(false);
   });
 
@@ -91,7 +98,7 @@ describe("ai review extension", () => {
       displayAnchorLine: 1
     };
 
-    const decorations = collectDecorations(createReviewState(oldLine, [hunk], { renderInsertedAsSource: true }));
+    const decorations = collectDecorations(createReviewState(oldLine, [hunk]));
     const collapsedSource = decorations.find(({ from, to, value }) => from === 0 && to === oldLine.length && value.spec.widget);
 
     expect(collapsedSource?.value.spec.widget).toMatchObject({
@@ -105,18 +112,138 @@ describe("ai review extension", () => {
     expect(decorations.some(({ value }) => value.spec.class === "cm-ai-review-removed-token")).toBe(false);
   });
 
-  it("renders delete-file review content as removed lines only", () => {
-    const state = createReviewState("alpha\nbeta", [], {
-      mode: "delete_file",
-      createLineCount: 2
+  it("keeps collapsed replacements as replacement widgets without line decorations", () => {
+    const oldLine = "# Workshop Plan";
+    const newLine = "# Better Workshop Plan";
+    const hunk: DisplayReviewHunk = {
+      id: "hunk-1",
+      status: "pending",
+      anchorLine: 1,
+      oldStartLine: 1,
+      oldLines: [oldLine],
+      newLines: [newLine],
+      displayOldStartLine: 1,
+      displayOldEndLine: 1,
+      displayAnchorLine: 1
+    };
+
+    const decorations = collectDecorations(createReviewState(oldLine, [hunk]));
+    const collapsedSource = decorations.find(({ from, to, value }) => from === 0 && to === oldLine.length && value.spec.widget);
+    const sourceLineDecoration = decorations.find(
+      ({ from, to, value }) => from === 0 && to === 0 && hasDecorationClass(value, "cm-ai-review-source-line")
+    );
+
+    expect(collapsedSource?.value.spec.widget).toMatchObject({
+      baseClassName: "cm-ai-review-line-inserted",
+      text: newLine
+    });
+    expect(sourceLineDecoration).toBeUndefined();
+  });
+
+  it("renders collapsed insertions on blank source lines without replacement decorations", () => {
+    const hunk: DisplayReviewHunk = {
+      id: "hunk-1",
+      status: "pending",
+      anchorLine: 1,
+      oldStartLine: 1,
+      oldLines: [""],
+      newLines: ["Inserted line"],
+      displayOldStartLine: 1,
+      displayOldEndLine: 1,
+      displayAnchorLine: 1
+    };
+
+    const decorations = collectDecorations(createReviewState("\nNext line", [hunk]));
+    const insertedWidget = decorations.find(({ from, to, value }) => from === 0 && to === 0 && value.spec.widget);
+
+    expect(insertedWidget?.value.spec.widget).toMatchObject({
+      baseClassName: "cm-ai-review-line-inserted",
+      text: "Inserted line"
+    });
+  });
+
+  it("renders create-file review headings as source-visible inserted Markdown", () => {
+    const state = createReviewState("# Title\n\nBody", [], {
+      mode: "create_file",
+      createLineCount: 3
     });
     const decorations = collectDecorations(state);
-    const removedLines = decorations.filter(({ value }) => value.spec.class === "cm-ai-review-line-removed");
 
-    expect(removedLines.map(({ from, to }) => ({ from, to }))).toEqual([
-      { from: 0, to: 0 },
-      { from: 6, to: 6 }
-    ]);
+    expect(decorations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: 0,
+          to: 0,
+          value: expect.objectContaining({
+            spec: expect.objectContaining({
+              class: expect.stringContaining("cm-ai-review-source-heading-1")
+            })
+          })
+        }),
+        expect.objectContaining({
+          from: 0,
+          to: "# Title".length,
+          value: expect.objectContaining({
+            spec: expect.objectContaining({ class: "cm-ai-review-line-inserted" })
+          })
+        })
+      ])
+    );
+    expect(decorations.some(({ value }) => hasDecorationClass(value, "cm-md-heading-line"))).toBe(false);
+  });
+
+  it("renders delete-file review headings as source-visible removed Markdown", () => {
+    const state = createReviewState("# Title\n\nBody", [], {
+      mode: "delete_file",
+      createLineCount: 3
+    });
+    const decorations = collectDecorations(state);
+
+    expect(decorations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: 0,
+          to: 0,
+          value: expect.objectContaining({
+            spec: expect.objectContaining({
+              class: expect.stringContaining("cm-ai-review-source-heading-1")
+            })
+          })
+        }),
+        expect.objectContaining({
+          from: 0,
+          to: "# Title".length,
+          value: expect.objectContaining({
+            spec: expect.objectContaining({ class: "cm-ai-review-line-removed" })
+          })
+        })
+      ])
+    );
     expect(decorations.some(({ value }) => value.spec.class === "cm-ai-review-line-inserted")).toBe(false);
+  });
+
+  it("renders edit-file inserted headings as per-line source rows", () => {
+    const hunk: DisplayReviewHunk = {
+      id: "hunk-1",
+      status: "pending",
+      anchorLine: 1,
+      oldStartLine: 1,
+      oldLines: [],
+      newLines: ["# Added title", "- Added item"],
+      displayOldStartLine: 1,
+      displayOldEndLine: 0,
+      displayAnchorLine: 0
+    };
+
+    const decorations = collectDecorations(createReviewState("Body", [hunk]));
+    const widget = decorations.find(({ value }) => value.spec.widget)?.value.spec.widget;
+
+    expect(widget).toMatchObject({
+      lines: ["# Added title", "- Added item"],
+      changedRangesByLine: [
+        [{ from: 0, to: "# Added title".length }],
+        [{ from: 0, to: "- Added item".length }]
+      ]
+    });
   });
 });

@@ -386,8 +386,6 @@ export const appStrings = {
         cancel: "Stop",
         started: "Watching for external Markdown changes.",
         proposalReady: "External changes are ready for review.",
-        proposalReadyWithNotes: (count: number) =>
-          count === 1 ? "External changes are ready; 1 unsupported change was restored." : `External changes are ready; ${count} unsupported changes were restored.`,
         noChanges: "No external Markdown changes detected.",
         unsupportedRestored: "Unsupported external changes were restored.",
         gitBaselineChanged: "External Git changes were accepted outside Iliad.",
@@ -951,10 +949,6 @@ export const appStrings = {
         cancel: "Detener",
         started: "Observando cambios Markdown externos.",
         proposalReady: "Los cambios externos están listos para revisar.",
-        proposalReadyWithNotes: (count: number) =>
-          count === 1
-            ? "Los cambios externos están listos; se restauró 1 cambio no compatible."
-            : `Los cambios externos están listos; se restauraron ${count} cambios no compatibles.`,
         noChanges: "No se detectaron cambios Markdown externos.",
         unsupportedRestored: "Se restauraron cambios externos no compatibles.",
         gitBaselineChanged: "Git aceptó cambios externos fuera de Iliad.",

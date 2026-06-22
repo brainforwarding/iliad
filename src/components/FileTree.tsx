@@ -89,6 +89,7 @@ interface FileTreeProps {
   renamingPath: string | null;
   revealPath?: string | null;
   onRevealComplete?: (path: string) => void;
+  onRevealFailed?: (path: string, reason: "missing_ancestors" | "missing_row") => void;
   onOpenNode: (node: FileTreeNode) => void;
   onOpenPendingChange: (target: PendingFileTreeChange) => void | Promise<void>;
   onCreateFile: () => void;
@@ -1082,6 +1083,7 @@ export function FileTree({
   renamingPath,
   revealPath,
   onRevealComplete,
+  onRevealFailed,
   onOpenNode,
   onOpenPendingChange,
   onCreateFile,
@@ -1532,6 +1534,7 @@ export function FileTree({
     const ancestorPaths = fileTreeRevealAncestorPaths(displayNodes, revealPath);
 
     if (!ancestorPaths) {
+      onRevealFailed?.(revealPath, "missing_ancestors");
       return;
     }
 
@@ -1554,6 +1557,7 @@ export function FileTree({
       const row = rowRefs.current.get(revealPath);
 
       if (!row) {
+        onRevealFailed?.(revealPath, "missing_row");
         return;
       }
 
@@ -1562,7 +1566,7 @@ export function FileTree({
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [displayNodes, onRevealComplete, revealPath]);
+  }, [displayNodes, onRevealComplete, onRevealFailed, revealPath]);
 
   const registerRow = useCallback((path: string, element: HTMLDivElement | null) => {
     if (element) {
