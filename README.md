@@ -48,6 +48,24 @@ The in-app settings flow stores credentials locally in Electron app data, not in
 the workspace Markdown files. Codex account state is owned by Codex; Iliad
 renders only account metadata.
 
+### Writing autocomplete
+
+Enable Autocomplete in the topbar's Writing assists menu. Add a Gemini API key
+in assistant settings to use Gemini 3.8 Flash with low thinking. For development,
+`GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is also supported. Google bills this API
+separately. The chat model is independent; without a Gemini key, autocomplete
+uses the existing Codex connection or explicitly enabled OpenAI fallback.
+
+- Ctrl+Space: short phrase.
+- Cmd/Ctrl+Enter: sentence.
+- Cmd/Ctrl+Shift+Enter: paragraph.
+- Tab: accept the suggestion; Option/Alt+Right: accept one word.
+- Escape: dismiss or cancel. Repeat a length shortcut for another suggestion.
+
+Automatic suggestions wait for a 450 ms pause at a word boundary. Typing along
+with a suggestion keeps its remaining words visible. See the
+[research and follow-up design](docs/research/writing-autocomplete-2026-09.md).
+
 ## Local CLI Development
 
 To test the desktop CLI workflow locally, build and link the package, then invoke `iliad` from the folder you want to open:

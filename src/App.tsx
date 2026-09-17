@@ -1579,6 +1579,10 @@ export default function App() {
       return undefined;
     }
 
+    if (status.provider === "gemini-api") {
+      return strings.writingAssists.autocompleteGemini;
+    }
+
     if (status.provider === "codex-app-server") {
       return status.model
         ? `${strings.writingAssists.autocompleteCodex} · ${status.model}`

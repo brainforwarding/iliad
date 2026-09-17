@@ -107,6 +107,9 @@ describe("Codex account settings copy", () => {
     const html = renderToStaticMarkup(
       createElement(AssistantSettings, {
         apiKeyDraft: "",
+        geminiApiKeyDraft: "",
+        onGeminiApiKeyDraftChange: () => undefined,
+        onSaveGeminiApiKey: async () => undefined,
         codex,
         labels: appStrings.es.assistant,
         mode: "balanced",
@@ -158,6 +161,9 @@ describe("Codex account settings copy", () => {
     const html = renderToStaticMarkup(
       createElement(AssistantSettings, {
         apiKeyDraft: "",
+        geminiApiKeyDraft: "",
+        onGeminiApiKeyDraftChange: () => undefined,
+        onSaveGeminiApiKey: async () => undefined,
         codex,
         labels: appStrings.en.assistant,
         mode: "balanced",
@@ -240,6 +246,9 @@ describe("Codex account settings copy", () => {
     const html = renderToStaticMarkup(
       createElement(AssistantSettings, {
         apiKeyDraft: "",
+        geminiApiKeyDraft: "",
+        onGeminiApiKeyDraftChange: () => undefined,
+        onSaveGeminiApiKey: async () => undefined,
         codex,
         labels: appStrings.en.assistant,
         mode: "balanced",
@@ -626,6 +635,9 @@ function renderSettings(
   return renderToStaticMarkup(
     createElement(AssistantSettings, {
       apiKeyDraft: overrides.apiKeyDraft ?? "",
+      geminiApiKeyDraft: "",
+      onGeminiApiKeyDraftChange: () => undefined,
+      onSaveGeminiApiKey: async () => undefined,
       codex,
       labels: appStrings.en.assistant,
       mode: "balanced",

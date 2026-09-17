@@ -18,7 +18,8 @@ describe("agent autocomplete helpers", () => {
     expect(AUTOCOMPLETE_API_MODEL).toBe("gpt-5.4-mini");
     expect(AUTOCOMPLETE_TIMEOUT_MS).toBe(18000);
     expect(autocompleteMaxOutputTokens()).toBe(48);
-    expect(autocompleteMaxOutputTokens("paragraph")).toBe(140);
+    expect(autocompleteMaxOutputTokens("paragraph")).toBe(180);
+    expect(autocompleteMaxOutputTokens("sentence")).toBe(80);
   });
 
   it("builds bounded fill-in-the-middle input without chat framing", () => {
@@ -79,6 +80,14 @@ describe("agent autocomplete helpers", () => {
         suggestionKind: "paragraph"
       })
     ).toBe("");
+  });
+
+  it("spaces the next sentence and finishes an incomplete thought before expanding it", () => {
+    expect(cleanAutocompleteOutput("She waited.", { prefix: "The door opened.", suffix: "", suggestionKind: "sentence" }))
+      .toBe(" She waited.");
+    expect(cleanAutocompleteOutput("quiet. She waited.", { prefix: "The room was", suffix: "", suggestionKind: "paragraph" }))
+      .toBe(" quiet. She waited.");
+    expect(autocompleteInstructions("es", "sentence")).toContain("Conserva el idioma del texto");
   });
 
   it("maps provider errors to autocomplete reasons", () => {

@@ -122,6 +122,14 @@
   white-space: nowrap;
 }
 
+.writing-assist-shortcuts {
+  margin: 4px 8px 8px;
+  color: var(--muted-3);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  white-space: normal;
+}
+
 .writing-assist-switch {
   position: relative;
   display: inline-block;

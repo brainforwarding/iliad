@@ -248,7 +248,7 @@ function normalizeAutocompleteTrigger(value: unknown): IdeaAutocompleteTrigger {
 }
 
 function normalizeAutocompleteSuggestionKind(value: unknown): IdeaAutocompleteSuggestionKind {
-  return value === "paragraph" ? "paragraph" : "inline";
+  return value === "paragraph" || value === "sentence" ? value : "inline";
 }
 
 function sanitizeString(value: unknown, maxChars: number) {

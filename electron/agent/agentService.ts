@@ -55,6 +55,7 @@ import type {
   AgentRuntimeProviderMetadata
 } from "./runtime/provider.js";
 import { AgentSettingsStore } from "./settingsStore.js";
+import { AUTOCOMPLETE_GEMINI_MODEL, generateGeminiAutocomplete } from "./geminiAutocomplete.js";
 import {
   AUTOCOMPLETE_API_MODEL,
   AUTOCOMPLETE_CODEX_MODEL_PREFERENCES,
@@ -429,6 +430,22 @@ export class AgentService {
   }
 
   async autocompleteIdea(request: IdeaAutocompleteTextRequest): Promise<string> {
+    const geminiApiKey = await this.settingsStore.getGeminiApiKey();
+    if (geminiApiKey) {
+      const startedAt = Date.now();
+      try {
+        const text = await generateGeminiAutocomplete(geminiApiKey, request);
+        this.diagnostics.info({ area: "provider", event: "autocomplete.gemini.completed",
+          model: AUTOCOMPLETE_GEMINI_MODEL, durationMs: Date.now() - startedAt,
+          details: { suggestionKind: request.suggestionKind, outputTextChars: text.length } });
+        return text;
+      } catch (error) {
+        this.diagnostics.info({ area: "provider", event: "autocomplete.gemini.failed",
+          model: AUTOCOMPLETE_GEMINI_MODEL, durationMs: Date.now() - startedAt,
+          errorCode: normalizeAgentError(error, { wasCanceled: request.signal.aborted }).code });
+        throw error;
+      }
+    }
     const providerSelection = await this.selectWritingAssistTextProviders(request.allowApiFallback);
 
     if ("error" in providerSelection) {
@@ -506,9 +523,10 @@ export class AgentService {
   }
 
   async writingAssistStatus(request: { autocompleteApiFallbackEnabled: boolean }) {
-    const [settings, apiKey, codexStatus] = await Promise.all([
+    const [settings, apiKey, geminiApiKey, codexStatus] = await Promise.all([
       this.settingsStore.snapshot(),
       this.settingsStore.getApiKey(),
+      this.settingsStore.getGeminiApiKey(),
       this.codexStatus().catch(() => null)
     ]);
     const codexAvailable = Boolean(codexStatus?.available && codexStatus.connected);
@@ -520,11 +538,11 @@ export class AgentService {
         provider: "local" as const
       },
       autocomplete: {
-        available: codexAvailable || (request.autocompleteApiFallbackEnabled && apiFallbackAvailable),
-        provider: codexAvailable ? ("codex-app-server" as const) : request.autocompleteApiFallbackEnabled && apiFallbackAvailable ? ("openai-api" as const) : null,
+        available: Boolean(geminiApiKey) || codexAvailable || (request.autocompleteApiFallbackEnabled && apiFallbackAvailable),
+        provider: geminiApiKey ? ("gemini-api" as const) : codexAvailable ? ("codex-app-server" as const) : request.autocompleteApiFallbackEnabled && apiFallbackAvailable ? ("openai-api" as const) : null,
         apiFallbackAvailable,
         apiFallbackEnabled: request.autocompleteApiFallbackEnabled,
-        model: codexAvailable
+        model: geminiApiKey ? AUTOCOMPLETE_GEMINI_MODEL : codexAvailable
           ? this.preferredAutocompleteCodexModel()
           : request.autocompleteApiFallbackEnabled && apiFallbackAvailable
             ? AUTOCOMPLETE_API_MODEL

@@ -8,6 +8,7 @@ interface WritingAssistsMenuLabels {
   autocomplete: string;
   apiFallback: string;
   correctorUnavailable: string;
+  autocompleteShortcuts: string;
 }
 
 interface WritingAssistsMenuProps {
@@ -103,6 +104,7 @@ export function WritingAssistsMenu({
             note={autocompleteNote}
             onToggle={() => onSetAutocompleteEnabled((enabled) => !enabled)}
           />
+          {autocompleteEnabled ? <p className="writing-assist-shortcuts">{labels.autocompleteShortcuts}</p> : null}
           {showApiFallback ? (
             <SwitchRow
               label={labels.apiFallback}

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   applySharedAutocompleteCooldown,
+  autocompleteWordPrefix,
+  consumeAutocompleteSuggestion,
   autocompleteSuggestionKindForTrigger,
   autocompleteCooldownMsForFailure,
   ideaAutocompleteFallbackManualKey,
@@ -18,7 +20,23 @@ describe("idea autocomplete extension helpers", () => {
   });
 
   it("uses a writing-friendly idle delay before requesting completions", () => {
-    expect(ideaAutocompleteDebounceMs).toBe(900);
+    expect(ideaAutocompleteDebounceMs).toBe(450);
+  });
+
+  it("accepts one word with its spacing, including paragraph breaks and accented prose", () => {
+    expect(autocompleteWordPrefix("\n\nDespués, siguió escribiendo.")).toBe("\n\nDespués, ");
+    expect(autocompleteWordPrefix(" a quiet room.")).toBe(" a ");
+    expect(autocompleteWordPrefix("fin.")).toBe("fin.");
+  });
+
+  it("keeps the ghost remainder only for matching typing at the same cursor", () => {
+    const suggestion = { requestId: "r", from: 5, insert: " quiet room.", prefix: "A very", suffix: "" };
+    expect(consumeAutocompleteSuggestion(suggestion, [{ from: 5, to: 5, insert: " qui" }], 9))
+      .toMatchObject({ from: 9, insert: "et room." });
+    expect(consumeAutocompleteSuggestion(suggestion, [{ from: 5, to: 5, insert: " loud" }], 10)).toBeNull();
+    expect(consumeAutocompleteSuggestion(suggestion, [{ from: 4, to: 5, insert: " q" }], 6)).toBeNull();
+    expect(consumeAutocompleteSuggestion(suggestion, [{ from: 5, to: 5, insert: " q" }], 1)).toBeNull();
+    expect(consumeAutocompleteSuggestion(suggestion, [{ from: 5, to: 5, insert: " q" }, { from: 0, to: 0, insert: "x" }], 8)).toBeNull();
   });
 
   it("backs off longer for rate limits than transient provider failures", () => {
@@ -76,7 +94,7 @@ describe("idea autocomplete extension helpers", () => {
     ).toBe(false);
   });
 
-  it("chooses paragraph suggestions only for manual triggers at natural boundaries", () => {
+  it("keeps the manual sentence trigger predictable regardless of punctuation", () => {
     const paragraphEnd = "This paragraph has a complete idea.";
     const blankLine = "This paragraph has a complete idea.\n\n";
     const midSentence = "This paragraph has a complete";
@@ -85,7 +103,7 @@ describe("idea autocomplete extension helpers", () => {
     expect(isAutocompleteParagraphBoundary(blankLine, blankLine.length)).toBe(true);
     expect(isAutocompleteParagraphBoundary(midSentence, midSentence.length)).toBe(false);
     expect(autocompleteSuggestionKindForTrigger("automatic", paragraphEnd, paragraphEnd.length)).toBe("inline");
-    expect(autocompleteSuggestionKindForTrigger("manual", paragraphEnd, paragraphEnd.length)).toBe("paragraph");
-    expect(autocompleteSuggestionKindForTrigger("manual", midSentence, midSentence.length)).toBe("inline");
+    expect(autocompleteSuggestionKindForTrigger("manual", paragraphEnd, paragraphEnd.length)).toBe("sentence");
+    expect(autocompleteSuggestionKindForTrigger("manual", midSentence, midSentence.length)).toBe("sentence");
   });
 });

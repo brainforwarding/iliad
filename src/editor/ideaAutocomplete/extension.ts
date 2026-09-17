@@ -1,10 +1,11 @@
 import { Prec, StateEffect } from "@codemirror/state";
+import { isolateHistory } from "@codemirror/commands";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { buildAutocompleteContext, type BlockedLineRange } from "../writingAssistContext";
 import type { IdeaAutocompleteFailureReason, IdeaAutocompleteResult } from "../../types/iliad";
 
 export type IdeaAutocompleteTrigger = "automatic" | "manual";
-export type IdeaAutocompleteSuggestionKind = "inline" | "paragraph";
+export type IdeaAutocompleteSuggestionKind = "inline" | "sentence" | "paragraph";
 
 export interface IdeaAutocompleteRequestPayload {
   requestId: string;
@@ -50,9 +51,11 @@ interface ActiveSuggestion {
 }
 
 const refreshAutocompleteEffect = StateEffect.define<void>();
-export const ideaAutocompleteDebounceMs = 900;
+export const ideaAutocompleteDebounceMs = 450;
 export const ideaAutocompleteManualKey = "Mod-Enter";
 export const ideaAutocompleteFallbackManualKey = "Ctrl-Space";
+export const ideaAutocompleteParagraphKey = "Mod-Shift-Enter";
+export const ideaAutocompleteAcceptWordKey = "Alt-ArrowRight";
 const transientProviderCooldownMs = 15_000;
 const rateLimitCooldownMs = 60_000;
 let requestSequence = 0;
@@ -168,10 +171,28 @@ export function isAutocompleteParagraphBoundary(text: string, cursor: number) {
 
 export function autocompleteSuggestionKindForTrigger(
   trigger: IdeaAutocompleteTrigger,
-  text: string,
-  cursor: number
+  _text: string,
+  _cursor: number
 ): IdeaAutocompleteSuggestionKind {
-  return trigger === "manual" && isAutocompleteParagraphBoundary(text, cursor) ? "paragraph" : "inline";
+  return trigger === "manual" ? "sentence" : "inline";
+}
+
+export function autocompleteWordPrefix(text: string) {
+  return /^\s*\S+\s*/u.exec(text)?.[0] ?? text;
+}
+
+/** Only a pure insertion matching the ghost may consume it; edits elsewhere invalidate it. */
+export function consumeAutocompleteSuggestion(
+  suggestion: ActiveSuggestion,
+  changes: readonly { from: number; to: number; insert: string }[],
+  cursor: number
+): ActiveSuggestion | null {
+  if (changes.length !== 1) return null;
+  const change = changes[0];
+  if (change.from !== suggestion.from || change.to !== change.from || !change.insert ||
+      !suggestion.insert.startsWith(change.insert) || cursor !== change.from + change.insert.length) return null;
+  const remaining = suggestion.insert.slice(change.insert.length);
+  return remaining ? { ...suggestion, from: cursor, insert: remaining, prefix: suggestion.prefix + change.insert } : null;
 }
 
 class GhostTextWidget extends WidgetType {
@@ -222,6 +243,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
       private pendingAutomaticTrigger = false;
       private composing = false;
       private cooldownUntil = 0;
+      private automaticPausedUntil = 0;
       private dismissals: number[] = [];
 
       constructor(private readonly view: EditorView) {}
@@ -234,7 +256,21 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
 
         const meaningfulEdit = hasMeaningfulAutocompleteEdit(update.transactions);
 
+        if (this.suggestion && update.docChanged && !this.composing && this.view.hasFocus &&
+            update.state.selection.ranges.length === 1 && update.state.selection.main.empty &&
+            update.transactions.every((transaction) => !transaction.docChanged || transaction.isUserEvent("input.type"))) {
+          const changes: Array<{ from: number; to: number; insert: string }> = [];
+          update.changes.iterChanges((from, to, _fromB, _toB, insert) => changes.push({ from, to, insert: insert.toString() }));
+          const remaining = consumeAutocompleteSuggestion(this.suggestion, changes, update.state.selection.main.from);
+          if (remaining) {
+            this.suggestion = remaining;
+            this.decorations = buildDecorations(remaining);
+            return;
+          }
+        }
+
         if (update.docChanged || update.selectionSet || update.focusChanged) {
+          this.clearTimer();
           this.clearSuggestion();
         }
 
@@ -265,42 +301,55 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
 
       setComposing(composing: boolean) {
         this.composing = composing;
+        this.clearTimer();
         this.clearSuggestion();
         this.pendingAutomaticTrigger = false;
       }
 
-      accept() {
+      accept(wordOnly = false) {
         const selection = this.view.state.selection.main;
 
-        if (!this.suggestion || !selection.empty || selection.from !== this.suggestion.from) {
+        if (!this.suggestion || this.composing || this.view.state.selection.ranges.length !== 1 || !selection.empty || selection.from !== this.suggestion.from) {
           return false;
         }
 
-        const insert = this.suggestion.insert;
+        const original = this.suggestion;
+        const insert = wordOnly ? autocompleteWordPrefix(original.insert) : original.insert;
+        this.clearTimer();
         this.clearSuggestion();
         this.dismissedUntilEdit = true;
         this.acceptedSuggestionChange = true;
         this.view.dispatch({
           changes: { from: selection.from, insert },
-          selection: { anchor: selection.from + insert.length }
+          selection: { anchor: selection.from + insert.length },
+          annotations: isolateHistory.of("full"),
+          userEvent: "input.complete"
         });
+        if (insert.length < original.insert.length) {
+          this.suggestion = { ...original, from: selection.from + insert.length,
+            insert: original.insert.slice(insert.length), prefix: original.prefix + insert };
+          this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
+          this.setStatus({ state: "shown" });
+          return true;
+        }
         this.setStatus({ state: "idle" });
         return true;
       }
 
       dismiss() {
-        if (!this.suggestion) {
+        if (!this.suggestion && !this.inFlightRequestId && this.timer === null) {
           return false;
         }
 
         this.registerDismissal();
+        this.clearTimer();
         this.clearSuggestion();
         this.dismissedUntilEdit = true;
         this.setStatus({ state: "idle" });
         return true;
       }
 
-      triggerManual() {
+      triggerManual(kind: IdeaAutocompleteSuggestionKind = "sentence") {
         this.clearTimer();
         this.clearSuggestion();
         this.pendingAutomaticTrigger = false;
@@ -309,7 +358,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           return false;
         }
 
-        void this.requestSuggestion("manual");
+        void this.requestSuggestion("manual", kind);
         return true;
       }
 
@@ -322,7 +371,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
 
         this.timer = window.setTimeout(() => {
           this.timer = null;
-          void this.requestSuggestion(trigger);
+          if (this.canRequest(trigger)) void this.requestSuggestion(trigger);
         }, ideaAutocompleteDebounceMs);
       }
 
@@ -339,20 +388,20 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           return false;
         }
 
-        if (trigger === "automatic" && (!this.pendingAutomaticTrigger || this.dismissedUntilEdit)) {
+        if (trigger === "automatic" && (!this.pendingAutomaticTrigger || this.dismissedUntilEdit || Date.now() < this.automaticPausedUntil)) {
           return false;
         }
 
         const selection = this.view.state.selection.main;
 
-        if (!selection.empty || this.inFlightRequestId || this.suggestion) {
+        if (this.view.state.selection.ranges.length !== 1 || !selection.empty || this.inFlightRequestId || this.suggestion) {
           return false;
         }
 
         return true;
       }
 
-      private async requestSuggestion(trigger: IdeaAutocompleteTrigger) {
+      private async requestSuggestion(trigger: IdeaAutocompleteTrigger, requestedKind?: IdeaAutocompleteSuggestionKind) {
         const selection = this.view.state.selection.main;
 
         if (!selection.empty || !options.workspaceSessionId || !options.documentRelativePath) {
@@ -360,10 +409,12 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         }
 
         const text = this.view.state.doc.toString();
-        const suggestionKind = autocompleteSuggestionKindForTrigger(trigger, text, selection.from);
+        const suggestionKind = requestedKind ?? autocompleteSuggestionKindForTrigger(trigger, text, selection.from);
+        // Pause at word boundaries so a suggestion cannot split a word being typed.
+        if (trigger === "automatic" && /[\p{L}\p{N}]$/u.test(text.slice(0, selection.from))) return;
         const context = buildAutocompleteContext(text, selection.from, {
           minPrefixChars: trigger === "manual" ? 8 : 20,
-          includePreviousBlockOnEmptyPrefix: suggestionKind === "paragraph",
+          includePreviousBlockOnEmptyPrefix: trigger === "manual",
           includePreviousBlockOnShortPrefix: true,
           blockedLineRanges: options.blockedLineRanges
         });
@@ -417,7 +468,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           const latestSelection = this.view.state.selection.main;
           const latestContext = buildAutocompleteContext(this.view.state.doc.toString(), latestSelection.from, {
             minPrefixChars: trigger === "manual" ? 8 : 20,
-            includePreviousBlockOnEmptyPrefix: suggestionKind === "paragraph",
+            includePreviousBlockOnEmptyPrefix: trigger === "manual",
             includePreviousBlockOnShortPrefix: true,
             blockedLineRanges: options.blockedLineRanges
           });
@@ -443,9 +494,8 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
           this.setStatus({ state: "shown" });
         } catch {
-          if (this.inFlightRequestId === requestId) {
-            this.inFlightRequestId = null;
-          }
+          if (this.inFlightRequestId !== requestId) return;
+          this.inFlightRequestId = null;
 
           this.cooldownUntil = applySharedAutocompleteCooldown("provider");
           this.setStatus({ state: "failed", reason: "provider" });
@@ -489,7 +539,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         this.dismissals.push(now);
 
         if (this.dismissals.length >= 3) {
-          this.cooldownUntil = now + 5 * 60_000;
+          this.automaticPausedUntil = now + 5 * 60_000;
           this.dismissals = [];
         }
       }
@@ -520,6 +570,10 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           run: (view) => view.plugin(plugin)?.accept() ?? false
         },
         {
+          key: ideaAutocompleteAcceptWordKey,
+          run: (view) => view.plugin(plugin)?.accept(true) ?? false
+        },
+        {
           key: "Escape",
           run: (view) => view.plugin(plugin)?.dismiss() ?? false
         },
@@ -529,7 +583,11 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         },
         {
           key: ideaAutocompleteFallbackManualKey,
-          run: (view) => view.plugin(plugin)?.triggerManual() ?? false
+          run: (view) => view.plugin(plugin)?.triggerManual("inline") ?? false
+        },
+        {
+          key: ideaAutocompleteParagraphKey,
+          run: (view) => view.plugin(plugin)?.triggerManual("paragraph") ?? false
         }
       ])
     )

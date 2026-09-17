@@ -339,7 +339,7 @@ export function buildAutocompleteContext(
   }
 
   const maxPrefixChars = options.maxPrefixChars ?? 2500;
-  const maxSuffixChars = options.maxSuffixChars ?? 1200;
+  const maxSuffixChars = options.maxSuffixChars ?? 1000;
   const localStart = paragraphStart(text, position);
   const localPrefix = text.slice(localStart, position);
   const localPrefixChars = localPrefix.trim().length;

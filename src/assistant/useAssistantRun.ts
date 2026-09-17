@@ -256,6 +256,7 @@ export function useAssistantRun({
   const [settings, setSettings] = useState<AgentSettingsSnapshot | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [geminiApiKeyDraft, setGeminiApiKeyDraft] = useState("");
   const [modelDraft, setModelDraft] = useState("");
   const [mode, setMode] = useState<AgentMode>("balanced");
   const [entries, setEntries] = useState<AssistantEntry[]>([]);
@@ -880,6 +881,12 @@ export function useAssistantRun({
       { clearApiKeyDraft: true }
     );
   }, [apiKeyDraft, mode, modelDraft, persistSettings]);
+
+  const saveGeminiApiKey = useCallback(async () => {
+    if (!geminiApiKeyDraft.trim()) return;
+    await persistSettings({ geminiApiKey: geminiApiKeyDraft.trim() });
+    setGeminiApiKeyDraft("");
+  }, [geminiApiKeyDraft, persistSettings]);
 
   const changeAgentModel = useCallback(
     (value: string) => {
@@ -1709,6 +1716,9 @@ export function useAssistantRun({
     activeThreadId,
     activeThreadTitle,
     apiKeyDraft,
+    geminiApiKeyDraft,
+    setGeminiApiKeyDraft,
+    saveGeminiApiKey,
     ask,
     cancel,
     chatHistoryLoading,

@@ -6,6 +6,7 @@ export type AgentRunProfile = "desktop" | "remote_read_only";
 
 export interface AgentSettingsSnapshot {
   hasOpenAiApiKey: boolean;
+  hasGeminiApiKey?: boolean;
   model: AgentModelId;
   mode: AgentMode;
   runtimeProvider: AgentRuntimeProviderMetadata;
@@ -13,6 +14,7 @@ export interface AgentSettingsSnapshot {
 
 export interface AgentSettingsUpdate {
   openAiApiKey?: string;
+  geminiApiKey?: string;
   model?: string;
   mode?: AgentMode;
 }

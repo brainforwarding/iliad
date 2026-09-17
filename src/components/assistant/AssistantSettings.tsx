@@ -11,6 +11,9 @@ import type { AgentMode, AgentSettingsSnapshot, RemotePairedTelegramChat } from 
 
 interface AssistantSettingsProps {
   apiKeyDraft: string;
+  geminiApiKeyDraft: string;
+  onGeminiApiKeyDraftChange: (value: string) => void;
+  onSaveGeminiApiKey: () => Promise<void>;
   codex: CodexConnectionState;
   labels: AppStrings["assistant"];
   mode: AgentMode;
@@ -25,6 +28,9 @@ interface AssistantSettingsProps {
 
 export function AssistantSettings({
   apiKeyDraft,
+  geminiApiKeyDraft,
+  onGeminiApiKeyDraftChange,
+  onSaveGeminiApiKey,
   codex,
   labels,
   mode,
@@ -39,6 +45,9 @@ export function AssistantSettings({
   const hasSavedKey = Boolean(settings?.hasOpenAiApiKey);
   const hasApiKeyDraft = apiKeyDraft.trim().length > 0;
   const [editingKey, setEditingKey] = useState(false);
+  const [editingGeminiKey, setEditingGeminiKey] = useState(false);
+  const [geminiKeySaving, setGeminiKeySaving] = useState(false);
+  const [geminiKeySaveFailed, setGeminiKeySaveFailed] = useState(false);
   const [codexCodeCopyState, setCodexCodeCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const codexCodeCopyTimerRef = useRef<number | null>(null);
 
@@ -225,6 +234,46 @@ export function AssistantSettings({
               </button>
             ) : null}
           </div>
+        </div>
+
+        <div className="assistant-conn-card">
+          <div className="assistant-conn-top">
+            <span className="assistant-conn-name">{labels.geminiApiKey}</span>
+            {settings?.hasGeminiApiKey ? <span className="assistant-conn-status">{labels.apiKeySaved}</span> : null}
+          </div>
+          <span className="assistant-conn-role">{labels.geminiApiKeyRole}</span>
+          {!settings?.hasGeminiApiKey || editingGeminiKey ? (
+            <input
+              value={geminiApiKeyDraft}
+              type="password"
+              aria-label={labels.geminiApiKey}
+              placeholder="AIza…"
+              onChange={(event) => onGeminiApiKeyDraftChange(event.target.value)}
+            />
+          ) : null}
+          <div className="assistant-conn-actions">
+            {geminiApiKeyDraft.trim() ? (
+              <button type="button" disabled={geminiKeySaving} onClick={async () => {
+                setGeminiKeySaving(true);
+                setGeminiKeySaveFailed(false);
+                try {
+                  await onSaveGeminiApiKey();
+                  setEditingGeminiKey(false);
+                } catch {
+                  setGeminiKeySaveFailed(true);
+                } finally {
+                  setGeminiKeySaving(false);
+                }
+              }}>{labels.saveApiKey}</button>
+            ) : null}
+            {settings?.hasGeminiApiKey && !editingGeminiKey ? (
+              <button type="button" onClick={() => setEditingGeminiKey(true)}>{labels.changeKey}</button>
+            ) : null}
+            <button type="button" onClick={() => void window.iliad.openUrl("https://aistudio.google.com/apikey")}>
+              {labels.getApiKey}
+            </button>
+          </div>
+          {geminiKeySaveFailed ? <small role="alert">{labels.geminiKeySaveFailed}</small> : null}
         </div>
 
         {/* OpenAI API key route */}

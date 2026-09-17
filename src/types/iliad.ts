@@ -146,6 +146,7 @@ export interface AgentRuntimeProviderMetadata {
 
 export interface AgentSettingsSnapshot {
   hasOpenAiApiKey: boolean;
+  hasGeminiApiKey?: boolean;
   model: AgentModelId;
   mode: AgentMode;
   runtimeProvider: AgentRuntimeProviderMetadata;
@@ -153,6 +154,7 @@ export interface AgentSettingsSnapshot {
 
 export interface AgentSettingsUpdate {
   openAiApiKey?: string;
+  geminiApiKey?: string;
   model?: string;
   mode?: AgentMode;
 }
@@ -491,7 +493,7 @@ export interface IdeaAutocompleteRequest {
   documentTitle: string;
   nearbyHeadings: string[];
   trigger?: "automatic" | "manual";
-  suggestionKind?: "inline" | "paragraph";
+  suggestionKind?: "inline" | "sentence" | "paragraph";
   autocompleteApiFallbackEnabled: boolean;
 }
 
@@ -519,7 +521,7 @@ export interface WritingAssistStatus {
   };
   autocomplete: {
     available: boolean;
-    provider: "codex-app-server" | "openai-api" | null;
+    provider: "codex-app-server" | "openai-api" | "gemini-api" | null;
     apiFallbackAvailable: boolean;
     apiFallbackEnabled: boolean;
     model: AgentModelId | string | null;

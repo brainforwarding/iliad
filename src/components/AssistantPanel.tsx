@@ -104,6 +104,9 @@ export function AssistantPanel({
     activeThreadId,
     activeThreadTitle,
     apiKeyDraft,
+    geminiApiKeyDraft,
+    setGeminiApiKeyDraft,
+    saveGeminiApiKey,
     ask,
     cancel,
     chatHistoryLoading,
@@ -278,6 +281,9 @@ export function AssistantPanel({
         <AssistantPanelView title={labels.settings} backLabel={labels.history.back} onBack={() => setSettingsOpen(false)}>
           <AssistantSettings
             apiKeyDraft={apiKeyDraft}
+            geminiApiKeyDraft={geminiApiKeyDraft}
+            onGeminiApiKeyDraftChange={setGeminiApiKeyDraft}
+            onSaveGeminiApiKey={saveGeminiApiKey}
             codex={codex}
             labels={labels}
             mode={mode}

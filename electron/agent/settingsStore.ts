@@ -6,6 +6,7 @@ import type { AgentMode, AgentSettingsSnapshot, AgentSettingsUpdate } from "./ty
 
 interface StoredSettings {
   openAiApiKey?: string;
+  geminiApiKey?: string;
   model?: string;
   mode?: AgentMode;
 }
@@ -38,6 +39,7 @@ export class AgentSettingsStore {
 
     return {
       hasOpenAiApiKey: Boolean(settings.openAiApiKey || process.env.OPENAI_API_KEY),
+      hasGeminiApiKey: Boolean(settings.geminiApiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
       model: normalizeAgentModel(settings.model),
       mode: settings.mode || defaultMode,
       runtimeProvider: OPENAI_RESPONSES_PROVIDER_METADATA
@@ -47,6 +49,11 @@ export class AgentSettingsStore {
   async getApiKey() {
     const settings = await readStoredSettings(this.userDataPath);
     return settings.openAiApiKey || process.env.OPENAI_API_KEY || "";
+  }
+
+  async getGeminiApiKey() {
+    const settings = await readStoredSettings(this.userDataPath);
+    return settings.geminiApiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
   }
 
   async update(update: AgentSettingsUpdate): Promise<AgentSettingsSnapshot> {
@@ -62,6 +69,10 @@ export class AgentSettingsStore {
       if (trimmedKey) {
         next.openAiApiKey = trimmedKey;
       }
+    }
+
+    if (typeof update.geminiApiKey === "string") {
+      next.geminiApiKey = update.geminiApiKey.trim();
     }
 
     await writeStoredSettings(this.userDataPath, next);
