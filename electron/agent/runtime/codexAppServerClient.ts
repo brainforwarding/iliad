@@ -100,6 +100,7 @@ export class CodexAppServerClient {
   private readonly codexHome: string;
   private readonly serverRequestHandlers = new Set<CodexAppServerServerRequestHandler>();
   private readonly notificationHandlers = new Set<CodexAppServerNotificationHandler>();
+  private readonly closeListeners = new Set<() => void>();
   private transport: CodexAppServerTransport | null = null;
   private initializePromise: Promise<void> | null = null;
   private nextId = 1;
@@ -203,6 +204,38 @@ export class CodexAppServerClient {
 
   async startTurn<T = unknown>(params: unknown): Promise<T> {
     return this.sendCodexRequest<T>("turn/start", params);
+  }
+
+  async interruptTurn<T = unknown>(params: { threadId: string; turnId: string }): Promise<T> {
+    return this.sendCodexRequest<T>("turn/interrupt", params);
+  }
+
+  /**
+   * Kills the app-server process and rejects every pending request. The next
+   * request re-spawns the process. Used when a turn must stop and the server
+   * did not acknowledge the interrupt in time.
+   */
+  resetTransport() {
+    const transport = this.transport;
+    this.transport = null;
+    this.initializePromise = null;
+
+    if (transport) {
+      try {
+        transport.kill();
+      } catch {
+        // The exit handler below still rejects pending requests.
+      }
+    }
+
+    this.handleTransportClosed();
+  }
+
+  onClosed(listener: () => void) {
+    this.closeListeners.add(listener);
+    return () => {
+      this.closeListeners.delete(listener);
+    };
   }
 
   async sendCodexRequest<T = unknown>(method: string, params?: unknown): Promise<T> {
@@ -512,6 +545,14 @@ export class CodexAppServerClient {
 
     this.initializePromise = null;
     this.rejectAllPending(new CodexAppServerError("app_server_unavailable", "Codex app-server stopped."));
+
+    for (const listener of [...this.closeListeners]) {
+      try {
+        listener();
+      } catch {
+        // Close observers must not disrupt teardown.
+      }
+    }
   }
 
   private rejectAllPending(error: Error) {

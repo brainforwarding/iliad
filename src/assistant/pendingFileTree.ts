@@ -250,12 +250,13 @@ function sortDisplayNodes(nodes: FileTreeDisplayNode[]) {
   }
 }
 
-function collectRealPaths(nodes: FileTreeNode[], paths = new Set<string>()) {
+/** Real paths keyed by whether the entry is a folder. */
+function collectRealPaths(nodes: FileTreeNode[], paths = new Map<string, boolean>()) {
   for (const node of nodes) {
     const normalizedRelativePath = normalizeRelativePath(node.relativePath);
 
     if (normalizedRelativePath) {
-      paths.add(normalizedRelativePath);
+      paths.set(normalizedRelativePath, node.kind === "directory");
     }
 
     if (node.children) {
@@ -330,6 +331,12 @@ function insertPendingVirtual(nodes: FileTreeDisplayNode[], pendingTarget: Pendi
 
   if (
     container.some((node) => {
+      // A real folder that took the file's name does not stand in for the
+      // file: the change still needs its own row to be opened and acted on.
+      if (node.source === "real" && node.node.kind === "directory") {
+        return false;
+      }
+
       const nodeRelativePath = node.source === "real" ? normalizeRelativePath(node.node.relativePath) : node.relativePath;
       return nodeRelativePath === pendingTarget.normalizedRelativePath;
     })
@@ -373,9 +380,13 @@ export function buildFileTreeDisplayNodes(
 ): FileTreeDisplayNode[] {
   const realPaths = collectRealPaths(nodes);
   const pendingRealTargetsByPath = new Map<string, PendingFileTreeChange>();
+  // A file change only decorates a real *file* row. When a folder now holds
+  // the file's name (a file replaced by a directory outside Iliad), the
+  // change gets a virtual row of its own so it stays openable.
+  const attachedToRealFile = (change: PendingFileTreeChange) => realPaths.get(change.normalizedRelativePath) === false;
 
   for (const change of pendingChanges) {
-    if (realPaths.has(change.normalizedRelativePath)) {
+    if (attachedToRealFile(change)) {
       pendingRealTargetsByPath.set(change.normalizedRelativePath, change);
     }
   }
@@ -394,11 +405,7 @@ export function buildFileTreeDisplayNodes(
   const displayNodes = nodes.map(toDisplayNode);
 
   for (const change of pendingChanges) {
-    if (change.kind === "create_file" && !realPaths.has(change.normalizedRelativePath)) {
-      insertPendingVirtual(displayNodes, change);
-    }
-
-    if (change.kind === "delete_file" && !realPaths.has(change.normalizedRelativePath)) {
+    if ((change.kind === "create_file" || change.kind === "delete_file") && !attachedToRealFile(change)) {
       insertPendingVirtual(displayNodes, change);
     }
   }

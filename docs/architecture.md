@@ -55,9 +55,13 @@ electron/
       codexAppServerProvider.ts
       codexFileChangeCapture.ts
       codexPatchConversion.ts
+      codexRunJournal.ts
       openaiResponsesProvider.ts
       provider.ts
     transcription.ts
+  review/
+    externalReviewProjection.ts
+    workspaceBaseline.ts
   diagnostics/
     logger.ts
   fs/
@@ -320,6 +324,56 @@ The agent tool boundary is document-native:
 Assistant panel UI should stay minimal. Component extraction should preserve
 existing class names and layout unless a spec explicitly changes the UX.
 
+Codex runs write into the real workspace under a `workspace-write` sandbox.
+The provider snapshots visible Markdown before the turn, writes that snapshot
+to a recovery journal in `userData`, and restores every changed path after the
+turn on every exit: success, failure, cancel, timeout, or app-server loss.
+Cancel and timeout interrupt the turn and wait for its terminal notification
+(resetting the app-server if it stays silent) before restoring. Stale journals
+are recovered on the next workspace attach and become Codex proposals. See
+`specs/2026-09-01-workspace-baseline-review.md`.
+
+## Workspace Baseline and Outside Changes
+
+Iliad keeps one accepted Markdown state per open workspace, the baseline, in
+the main-process `WorkspaceBaselineService` (`electron/review/`). Disk is
+compared against it whenever the watcher reports Markdown activity, and the
+difference is the outside-change review ("changed outside Iliad") that the
+renderer shows through the same proposal UI as assistant edits.
+
+Rules that must hold:
+
+- The baseline is session-scoped: captured from disk when a window attaches to
+  the workspace, dropped shortly after the last window detaches.
+- Every Iliad-owned Markdown write updates the baseline inside the same
+  serialized operation that performs the write. Editor saves, proposal
+  application, and outside-review restores go through
+  `writeMarkdownIfUnchanged`, a compare-and-swap that checks path identity and
+  expected content immediately before writing. Structural file actions run
+  inside `runIliadMutation`, which defers reconciliation while in flight and
+  records the result.
+- Watcher hints are never dropped. Markers, the Codex lease, and in-flight
+  mutations defer reconciliation; they do not cancel it. `change` events on
+  known files refresh only those paths; renames, unknown filenames, and
+  watcher restarts trigger a full scan. Create and delete items need a second
+  observation before they are published.
+- Outside content stays on disk while the review is pending. Keep advances the
+  baseline; Restore writes the baseline back, or moves an outside-created file
+  to the system Trash.
+- The renderer subscribes (`agent:external-review-changed`) and pulls once
+  (`agent:get-external-review`); both carry a revision and older snapshots are
+  ignored. The renderer never drives the review lifecycle.
+
+Relevant files:
+
+- `electron/review/workspaceBaseline.ts`
+- `electron/review/externalReviewProjection.ts`
+- `electron/ipc/workspace.ts`
+- `electron/ipc/files.ts`
+- `electron/agent/agentService.ts`
+- `src/app/useAgentProposals.ts`
+- `src/app/useDocumentPersistence.ts`
+
 Relevant files:
 
 - `electron/agent/agentService.ts`
@@ -361,6 +415,28 @@ Style ownership:
 - Right-side assistant panel, transcript, proposal cards, and composer styles live in `assistant.css`.
 - Typography popover, tree context menu, toasts, and transient error text live in `popovers.css`.
 - Media queries live in `responsive.css` and stay last.
+
+## Editor Host
+
+`src/editor/CodeMirrorHost.tsx` mounts the CodeMirror `EditorView` for
+`EditorPane`. Iliad owns this host instead of using `@uiw/react-codemirror`.
+
+- The document is synced from React state synchronously, in a layout effect,
+  through `syncEditorDocument` (`src/editor/documentSync.ts`). The buffer must
+  match app state before paint and before any keystroke can land on an old
+  document; a deferred sync lets a keystroke autosave stale text over another
+  file or over a kept outside version.
+- Sync transactions carry the `externalDocumentChange` annotation and never
+  reach `onChange`; `onChange` fires only for edits made in the editor.
+- App extensions are reconfigured through one `Compartment`; the basic setup
+  (from `@uiw/codemirror-extensions-basic-setup`), `indentWithTab`, and the
+  host theme are fixed at mount.
+
+Why: the wrapper's 4.25.x "typing latch" (a 200-tick counter on a 1 ms
+`setInterval`) held external value updates for seconds under timer clamping or
+an occluded window, and every keystroke re-armed it. Live QA reproduced a
+permanently stale editor by typing one character and opening another file
+within the same second.
 
 ## Editor Scroll
 
@@ -464,10 +540,19 @@ Autosave is part of the writing model. Before opening another file, switching wo
 
 If a save fails, navigation/create/rename must stop. Do not swallow save errors and then move the user away from dirty content.
 
+Saves carry the hash of the text the editor last loaded or saved. When the file
+on disk no longer matches (an outside tool wrote it while the writer was
+typing), main refuses the write and the document enters conflict mode: the
+buffer stays editable, autosave is disarmed, and a banner offers Restore
+previous version (the writer's edits win and save normally) or Keep outside
+changes (confirmed, discards the buffer and reloads from disk). Last-writer-wins
+is never acceptable.
+
 Relevant files:
 
 - `src/app/useDocumentPersistence.ts`
 - `src/files/fileActions.ts`
+- `electron/review/workspaceBaseline.ts`
 
 ## Where New Features Go
 
@@ -479,12 +564,13 @@ Relevant files:
 - File tree traversal and path relocation helpers: `src/files/fileTree.ts` and `src/files/pathUtils.ts`.
 - User-facing file operations and save-before-action orchestration: `src/files/fileActions.ts`.
 - Reusable UI surfaces and popovers: `src/components/`.
-- CodeMirror setup and editor callbacks: `src/components/EditorPane.tsx`.
+- CodeMirror setup and editor callbacks: `src/components/EditorPane.tsx`; the `EditorView` host and document sync: `src/editor/CodeMirrorHost.tsx`, `src/editor/documentSync.ts`.
 - Editor-only helpers, image drop/paste, link path resolution, and visual Markdown behavior: `src/editor/`.
 - Visual Markdown feature rules and shared decoration helpers: `src/editor/visualMarkdown/`.
 - Electron file safety and workspace boundary rules: `electron/fs/pathSafety.ts`.
 - Electron filesystem operations: `electron/fs/fileOps.ts`.
 - Electron assistant provider, proposal storage, settings, and diagnostics: `electron/agent/` and `electron/diagnostics/`.
+- Workspace baseline, outside-change review, and the guarded Markdown write primitive: `electron/review/`.
 - IPC handler groups: `electron/ipc/`.
 - Window creation and app loading: `electron/window/createWindow.ts`.
 - Local display preferences: `src/preferences/`.

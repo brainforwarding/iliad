@@ -27,10 +27,16 @@ export interface MarkdownSnapshot {
   files: Map<string, MarkdownSnapshotEntry>;
 }
 
+export interface CodexRestoreOutcome {
+  restored: string[];
+  unrestored: Array<{ relativePath: string; reason: string }>;
+}
+
 export interface ConvertAndReconcileResult {
   draftFileChanges: AgentDraftFileChange[];
   notes: string[];
   unsupportedNotes: string[];
+  restore: CodexRestoreOutcome;
   sourceCounts: {
     protocol: number;
     disk: number;
@@ -179,19 +185,33 @@ export async function convertAndReconcileCodexFileChanges({
   removeRecoveredUnsupportedNotes(unsupportedNotes, diskDrafts);
   appendUnrecoveredProtocolErrors(notes, protocolErrors, diskDrafts);
   const mergedDrafts = mergeDraftsByPath(protocolDrafts, diskDrafts, notes);
-  const restoredCount = await restoreCapturedDiskChanges(snapshot, mergedDrafts.map(({ draft }) => draft), unsupportedNotes);
+  const restore = await restoreCapturedDiskChanges(snapshot, mergedDrafts.map(({ draft }) => draft), unsupportedNotes);
 
   return {
     draftFileChanges: mergedDrafts.map(({ draft }) => draft),
     notes,
     unsupportedNotes: [...unsupportedNotes],
+    restore,
     sourceCounts: {
       protocol: protocolCount,
       disk: diskDrafts.length,
-      restored: restoredCount,
+      restored: restore.restored.length,
       skipped: skippedCount
     }
   };
+}
+
+/**
+ * Restores the pre-run snapshot without protocol conversion. Used on every
+ * failure exit (cancel, timeout, transport loss, thread failure) and by
+ * journal recovery after a crash. Each path is validated and restored on its
+ * own; one bad path never blocks the others.
+ */
+export async function restoreSnapshotSafely(snapshot: MarkdownSnapshot): Promise<CodexRestoreOutcome & { drafts: AgentDraftFileChange[] }> {
+  const postSnapshot = await captureDiskMarkdownSnapshot(snapshot.workspaceRoot);
+  const drafts = reconcileDiskDrafts(snapshot, postSnapshot, new Set()).map(({ draft }) => draft);
+  const outcome = await restoreCapturedDiskChanges(snapshot, drafts, new Set());
+  return { ...outcome, drafts };
 }
 
 async function captureDiskMarkdownSnapshot(workspaceRoot: string): Promise<MarkdownSnapshot> {
@@ -382,93 +402,116 @@ async function restoreCapturedDiskChanges(
   snapshot: MarkdownSnapshot,
   drafts: AgentDraftFileChange[],
   unsupportedNotes: Set<string>
-) {
-  let restoredCount = 0;
-  const restoredPaths = new Set<string>();
+): Promise<CodexRestoreOutcome> {
+  const restored: string[] = [];
+  const unrestored: Array<{ relativePath: string; reason: string }> = [];
+  const seenPaths = new Set<string>();
 
   for (const draft of drafts) {
     const normalizedPath = normalizeWorkspaceRelativeMarkdownPath(snapshot.workspaceRoot, draft.relativePath);
 
     if (!normalizedPath.ok) {
-      throw new Error(normalizedPath.error);
+      unrestored.push({ relativePath: draft.relativePath, reason: normalizedPath.error });
+      continue;
     }
 
     const relativePath = normalizedPath.value;
+    seenPaths.add(relativePath);
     const absolutePath = path.join(snapshot.workspaceRoot, relativePath);
-    const current = await readCurrentMarkdownContent(snapshot.workspaceRoot, absolutePath);
 
-    if (current.status === "unsafe") {
-      throw new Error(`Codex changed ${relativePath}, but the current path is no longer a regular Markdown file.`);
-    }
+    try {
+      const current = await readCurrentMarkdownContent(snapshot.workspaceRoot, absolutePath);
 
-    if (draft.kind === "edit_file") {
-      if (current.status === "missing") {
+      if (current.status === "unsafe") {
+        unrestored.push({
+          relativePath,
+          reason: `Codex changed ${relativePath}, but the current path is no longer a regular Markdown file.`
+        });
         continue;
       }
 
-      if (current.content === draft.baseContent) {
+      if (draft.kind === "edit_file") {
+        if (current.status === "missing" || current.content === draft.baseContent) {
+          continue;
+        }
+
+        if (current.content !== draft.replacement) {
+          unrestored.push({
+            relativePath,
+            reason: `Codex changed ${relativePath}, but it changed again before Iliad could restore it.`
+          });
+          continue;
+        }
+
+        await writeFile(absolutePath, draft.baseContent, "utf8");
+        restored.push(relativePath);
         continue;
       }
 
-      if (current.content !== draft.replacement) {
-        throw new Error(`Codex changed ${relativePath}, but it changed again before Iliad could restore it.`);
+      if (draft.kind === "create_file") {
+        if (current.status === "missing") {
+          continue;
+        }
+
+        if (current.content !== draft.content) {
+          unrestored.push({
+            relativePath,
+            reason: `Codex created ${relativePath}, but it changed before Iliad could remove it for review.`
+          });
+          continue;
+        }
+
+        await rm(absolutePath, { force: true });
+        restored.push(relativePath);
+        continue;
       }
 
+      if (current.status === "readable") {
+        if (current.content !== draft.baseContent) {
+          unrestored.push({
+            relativePath,
+            reason: `Codex removed ${relativePath}, but it changed again before Iliad could restore it.`
+          });
+        }
+        continue;
+      }
+
+      await mkdir(path.dirname(absolutePath), { recursive: true });
       await writeFile(absolutePath, draft.baseContent, "utf8");
-      restoredPaths.add(relativePath);
-      restoredCount += 1;
-      continue;
+      restored.push(relativePath);
+    } catch (error) {
+      unrestored.push({ relativePath, reason: error instanceof Error ? error.message : String(error) });
     }
-
-    if (draft.kind === "create_file") {
-      if (current.status === "missing") {
-        continue;
-      }
-
-      if (current.content !== draft.content) {
-        throw new Error(`Codex created ${relativePath}, but it changed before Iliad could remove it for review.`);
-      }
-
-      await rm(absolutePath, { force: true });
-      restoredPaths.add(relativePath);
-      restoredCount += 1;
-      continue;
-    }
-
-    if (current.status === "readable") {
-      if (current.content === draft.baseContent) {
-        continue;
-      }
-
-      throw new Error(`Codex removed ${relativePath}, but it changed again before Iliad could restore it.`);
-    }
-
-    await mkdir(path.dirname(absolutePath), { recursive: true });
-    await writeFile(absolutePath, draft.baseContent, "utf8");
-    restoredPaths.add(relativePath);
-    restoredCount += 1;
   }
 
   for (const [relativePath, preFile] of snapshot.files) {
-    if (restoredPaths.has(relativePath)) {
+    if (seenPaths.has(relativePath) || !preFile.existed) {
       continue;
     }
 
-    const currentContent = await readCurrentMarkdownContent(snapshot.workspaceRoot, preFile.absolutePath);
+    try {
+      const currentContent = await readCurrentMarkdownContent(snapshot.workspaceRoot, preFile.absolutePath);
 
-    if (currentContent.status === "unsafe") {
-      throw new Error(`Codex removed ${relativePath}, but the current path is no longer safe to restore.`);
-    }
+      if (currentContent.status === "unsafe") {
+        unrestored.push({
+          relativePath,
+          reason: `Codex removed ${relativePath}, but the current path is no longer safe to restore.`
+        });
+        continue;
+      }
 
-    if (currentContent.status === "missing") {
-      await mkdir(path.dirname(preFile.absolutePath), { recursive: true });
-      await writeFile(preFile.absolutePath, preFile.content, "utf8");
-      unsupportedNotes.add(`Codex removed ${relativePath}, which is not supported. The original file was restored.`);
-      restoredCount += 1;
+      if (currentContent.status === "missing") {
+        await mkdir(path.dirname(preFile.absolutePath), { recursive: true });
+        await writeFile(preFile.absolutePath, preFile.content, "utf8");
+        unsupportedNotes.add(`Codex removed ${relativePath}, which is not supported. The original file was restored.`);
+        restored.push(relativePath);
+      }
+    } catch (error) {
+      unrestored.push({ relativePath, reason: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  return restoredCount;
+  return { restored, unrestored };
 }
 
 async function readCurrentMarkdownContent(workspaceRoot: string, absolutePath: string) {

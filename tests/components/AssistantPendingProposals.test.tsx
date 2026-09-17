@@ -60,6 +60,7 @@ describe("AssistantPendingProposals", () => {
               kind: "external_filesystem",
               baselineId: "baseline",
               snapshotId: "snapshot",
+              revision: 1,
               liveDisk: true,
               sessionScoped: true
             },

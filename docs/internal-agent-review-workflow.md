@@ -73,7 +73,7 @@ case:
 - no persisted internal proposals remain for that workspace unless the case is
   explicitly testing persistence;
 - no active assistant run artifacts remain;
-- no active external capture session remains;
+- no pending outside-change items remain in the workspace baseline;
 - no selected stale review target remains;
 - no pending file-tree markers remain;
 - watcher debounce is idle;
@@ -112,6 +112,10 @@ External filesystem review regression:
 - `Keep changes`, `Restore previous version`, `Keep file`, `Move to Trash`,
   `Confirm deletion`, `Restore file`, and `Restore all...` still work.
 - Internal assistant-owned writes do not become external review items.
+- Iliad renames, trashes, and creates do not become external review items.
+- Typing in the file an outside tool edits shows the conflict banner; Restore
+  keeps the typed text and saves it; Keep asks before discarding it.
+- Canceling a Codex run mid-write restores disk and shows no outside review.
 
 ## Live QA Matrix
 

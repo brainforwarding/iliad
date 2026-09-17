@@ -47,7 +47,7 @@ interface AssistantPanelProps {
   workspace: WorkspaceInfo;
   onProposalsChanged: (proposals: AgentChangeProposal[]) => void;
   onAcceptProposalFile: (proposalId: string, fileId: string) => Promise<void>;
-  onRejectProposalFile: (proposalId: string, fileId: string) => Promise<void>;
+  onRejectProposalFile: (proposalId: string, fileId: string) => Promise<unknown>;
   onReviewTargetChange: (target: ReviewTarget | null) => void | Promise<void>;
   onAutoReviewTargetChange?: (target: ReviewTarget | null) => void | Promise<void>;
   editorNavigationChangedDuringRun?: (runId: string) => boolean;

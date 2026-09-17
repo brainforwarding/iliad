@@ -189,9 +189,10 @@ export async function createMarkdownFile(workspaceRoot: string, directoryPath: s
   const fileName = normalizeMarkdownName(requestedName);
   const filePath = await uniquePath(directoryPath, fileName);
   ensureVisibleWorkspacePath(workspaceRoot, filePath);
-  await writeFile(filePath, `# ${path.basename(filePath, path.extname(filePath))}\n`, "utf8");
+  const content = `# ${path.basename(filePath, path.extname(filePath))}\n`;
+  await writeFile(filePath, content, "utf8");
 
-  return fileTreeNode(workspaceRoot, filePath, false);
+  return { ...fileTreeNode(workspaceRoot, filePath, false), content };
 }
 
 export async function createFolder(workspaceRoot: string, directoryPath: string, requestedName: string) {

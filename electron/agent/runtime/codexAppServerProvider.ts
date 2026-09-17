@@ -25,9 +25,13 @@ import {
 import {
   captureMarkdownSnapshot,
   convertAndReconcileCodexFileChanges,
+  restoreSnapshotSafely,
   type CodexCapturedFileChange,
-  type CodexCapturedFileChangeMap
+  type CodexCapturedFileChangeMap,
+  type CodexRestoreOutcome,
+  type MarkdownSnapshot
 } from "./codexFileChangeCapture.js";
+import type { CodexRunJournalStore } from "./codexRunJournal.js";
 import { tryAcquireWorkspaceMutationLease } from "../workspaceMutationLease.js";
 import {
   codexDocumentDynamicTools,
@@ -87,6 +91,11 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
     private readonly options: {
       client: CodexAppServerClient;
       model: string;
+      /** Durable pre-run snapshot so an Iliad crash mid-run stays recoverable. */
+      journal?: CodexRunJournalStore;
+      /** Called after the workspace has been restored so the baseline can reconcile. */
+      onWorkspaceRestored?: (workspaceRoot: string) => void;
+      interruptWaitMs?: number;
     }
   ) {}
 
@@ -241,6 +250,10 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
           responseId: threadId,
           failureCode
         });
+        if (failureCode === "request_timeout") {
+          // The server may have accepted a turn we cannot see. Stop it before restoring.
+          this.options.client.resetTransport?.();
+        }
         throw codexRuntimeError(
           codexCouldNotCompleteMessage(request.language, { code: failureCode }),
           true,
@@ -471,6 +484,71 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
       completionResolve = resolve;
       completionReject = reject;
     });
+    // Guard against unhandled rejections while nothing awaits the promise yet.
+    completion.catch(() => undefined);
+    let preRunSnapshot: MarkdownSnapshot | null = null;
+    let reconciled = false;
+    let terminating = false;
+    let terminationCode: "request_canceled" | "request_timeout" | null = null;
+    const client = this.options.client;
+    const interruptWaitMs = this.options.interruptWaitMs ?? 10_000;
+
+    // Cancel and timeout never drop the run on the floor: the turn is
+    // interrupted, its terminal notification awaited, and the app-server reset
+    // if it stays silent, so nothing can write after restore starts.
+    const terminate = async (code: "request_canceled" | "request_timeout") => {
+      if (terminating) {
+        return;
+      }
+
+      terminating = true;
+      terminationCode = code;
+      emitPhase({
+        phase: "turn_terminate",
+        method: "turn/interrupt",
+        status: code,
+        responseId: turnId || threadId,
+        failureCode: code
+      });
+
+      if (!(threadId && turnId)) {
+        // No turn to interrupt yet; the server may still be starting one we
+        // cannot address, so stop the process before restoring.
+        completionReject(terminationError(code));
+        client.resetTransport?.();
+        return;
+      }
+
+      if (typeof client.interruptTurn === "function") {
+        try {
+          await client.interruptTurn({ threadId, turnId });
+        } catch {
+          // Fall through to the reset path below.
+        }
+      }
+
+      const settled = await Promise.race([
+        completion.then(
+          () => true,
+          () => true
+        ),
+        sleep(interruptWaitMs).then(() => false)
+      ]);
+
+      if (!settled) {
+        emitPhase({
+          phase: "turn_terminate",
+          method: "reset_transport",
+          status: "forced",
+          responseId: turnId || threadId,
+          failureCode: code
+        });
+        // Settle with the termination code before the transport close handler
+        // can settle it with a generic app-server error.
+        completionReject(terminationError(code));
+        client.resetTransport?.();
+      }
+    };
     const completionTimeout = setTimeout(() => {
       emitPhase({
         phase: "turn_wait_timeout",
@@ -479,14 +557,21 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
         responseId: turnId || threadId,
         failureCode: "request_timeout"
       });
-      completionReject(
-        new AgentRuntimeError({
-          code: "request_timeout",
-          userMessage: "Codex took too long. Try again.",
-          retryable: true
-        })
-      );
+      void terminate("request_timeout");
     }, 300_000);
+    const removeClosedHandler =
+      typeof client.onClosed === "function"
+        ? client.onClosed(() => {
+            completionReject(
+              new AgentRuntimeError({
+                code: "provider_unavailable",
+                userMessage: "Codex app-server stopped before the turn finished.",
+                retryable: true,
+                detail: "app_server_closed"
+              })
+            );
+          })
+        : () => undefined;
 
     onDiagnosticEvent?.({
       event: "provider.request.started",
@@ -502,20 +587,18 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
       handleNotification(notification);
     });
     const abort = () => {
-      completionReject(
-        new AgentRuntimeError({
-          code: "request_canceled",
-          userMessage: "Canceled.",
-          retryable: false
-        })
-      );
+      void terminate("request_canceled");
     };
     signal.addEventListener("abort", abort, { once: true });
 
     try {
       throwIfAborted(signal);
       releaseWorkspaceRun = acquireWorkspaceRun(workspaceRunKey);
-      const preRunSnapshot = await captureMarkdownSnapshot(request);
+      preRunSnapshot = await captureMarkdownSnapshot(request);
+      if (request.runProfile !== "remote_read_only") {
+        await this.options.journal?.writeFromSnapshot(request.runId, preRunSnapshot);
+      }
+      throwIfAborted(signal);
       emitPhase({ phase: "thread_start", method: "thread/start", status: "started" });
       let threadResponse: Record<string, unknown>;
       try {
@@ -577,6 +660,10 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
           responseId: threadId,
           failureCode
         });
+        if (failureCode === "request_timeout") {
+          // The server may have accepted a turn we cannot see. Stop it before restoring.
+          this.options.client.resetTransport?.();
+        }
         throw codexRuntimeError(
           codexCouldNotCompleteMessage(request.language, { code: failureCode }),
           true,
@@ -602,6 +689,11 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
       }
 
       await completion;
+
+      if (terminationCode) {
+        throw terminationError(terminationCode);
+      }
+
       throwIfAborted(signal);
 
       if (commandEventObserved) {
@@ -626,6 +718,20 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
             ? error.message
             : "Codex changed files, but Iliad could not safely restore them for review.";
         throw codexRuntimeError(message, false, "file_change_restore_failed");
+      }
+      reconciled = true;
+      if (conversion.restore.unrestored.length > 0) {
+        const unrestoredPaths = new Set(conversion.restore.unrestored.map((entry) => entry.relativePath));
+        conversion.draftFileChanges = conversion.draftFileChanges.filter((draft) => !unrestoredPaths.has(draft.relativePath));
+        conversion.notes.push(unrestoredNote(conversion.restore));
+        emitPhase({
+          phase: "file_changes_restored",
+          method: "disk",
+          status: "unrestored",
+          responseId: turnId || threadId,
+          itemType: "fileChange",
+          changeCount: conversion.restore.unrestored.length
+        });
       }
       emitPhase({
         phase: "file_changes_captured",
@@ -696,20 +802,61 @@ export class CodexAppServerRuntimeProvider implements AgentRuntimeProvider {
         proposalSource: { kind: "codex_app_server" }
       };
     } catch (error) {
+      let failure = error;
+
+      // Every exit after the snapshot restores the workspace: cancel, timeout,
+      // transport loss, failed turn, or a conversion error. Restore happens
+      // while the lease is still held and before handlers detach.
+      if (preRunSnapshot && !reconciled) {
+        reconciled = true;
+        let outcome: CodexRestoreOutcome = { restored: [], unrestored: [] };
+
+        try {
+          outcome = await restoreSnapshotSafely(preRunSnapshot);
+        } catch (restoreError) {
+          outcome = {
+            restored: [],
+            unrestored: [{ relativePath: "*", reason: restoreError instanceof Error ? restoreError.message : String(restoreError) }]
+          };
+        }
+
+        emitPhase({
+          phase: "file_changes_restored",
+          method: "disk",
+          status: outcome.unrestored.length > 0 ? "unrestored" : "restored",
+          responseId: turnId || threadId,
+          itemType: "fileChange",
+          changeCount: outcome.restored.length
+        });
+
+        if (outcome.unrestored.length > 0) {
+          failure = withUnrestoredPaths(error, outcome);
+        }
+      }
+
       onDiagnosticEvent?.({
         event: "provider.request.completed",
         streaming: true,
         durationMs: Date.now() - startedAt,
         retryable: true,
         responseId: turnId || threadId,
-        errorCode: error instanceof AgentRuntimeError ? error.agentError.code : "codex_app_server_error"
+        errorCode: failure instanceof AgentRuntimeError ? failure.agentError.code : "codex_app_server_error"
       });
-      throw error;
+      throw failure;
     } finally {
       clearTimeout(completionTimeout);
       signal.removeEventListener("abort", abort);
+      removeClosedHandler();
       removeRequestHandler();
       removeNotificationHandler();
+      if (preRunSnapshot) {
+        try {
+          await this.options.journal?.remove(request.runId);
+        } catch {
+          // A stale journal is recovered on the next attach; never fail the run for it.
+        }
+        this.options.onWorkspaceRestored?.(workspaceRunKey);
+      }
       releaseWorkspaceRun?.();
       if (activeTurnRegistered) {
         activeCodexTurnKeys.delete(codexTurnKey(threadId, turnId));
@@ -1344,6 +1491,44 @@ function acquireWorkspaceRun(workspaceRoot: string) {
 
 function codexTurnKey(threadId: string, turnId: string) {
   return `${threadId}\u0000${turnId}`;
+}
+
+function terminationError(code: "request_canceled" | "request_timeout") {
+  return new AgentRuntimeError(
+    code === "request_canceled"
+      ? { code, userMessage: "Canceled.", retryable: false }
+      : { code, userMessage: "Codex took too long. Try again.", retryable: true }
+  );
+}
+
+function unrestoredNote(outcome: CodexRestoreOutcome) {
+  const paths = outcome.unrestored.map((entry) => entry.relativePath).join(", ");
+  return `Codex changed these files and Iliad could not restore them; they now appear as outside changes: ${paths}.`;
+}
+
+function withUnrestoredPaths(error: unknown, outcome: CodexRestoreOutcome) {
+  const note = unrestoredNote(outcome);
+
+  if (error instanceof AgentRuntimeError) {
+    return new AgentRuntimeError({
+      ...error.agentError,
+      userMessage: `${error.agentError.userMessage} ${note}`.trim()
+    });
+  }
+
+  return new AgentRuntimeError({
+    code: "provider_unavailable",
+    userMessage: note,
+    retryable: false,
+    detail: "file_change_restore_failed"
+  });
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
 }
 
 function codexRuntimeError(userMessage: string, retryable: boolean, detail?: string) {

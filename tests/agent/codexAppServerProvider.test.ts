@@ -1320,6 +1320,99 @@ describe("Codex app-server runtime provider", () => {
     expect(await readFile(docPath, "utf8")).toBe("Old intro\nBody\n");
   });
 
+  it("interrupts the turn on cancel, waits for the terminal notification, and restores disk", async () => {
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "iliad-codex-provider-cancel-"));
+    tempDirs.push(workspaceRoot);
+    const docPath = path.join(workspaceRoot, "doc.md");
+    await writeFile(docPath, "Old\n", "utf8");
+    const client = new FakeCodexClient();
+    const provider = new CodexAppServerRuntimeProvider({ client: client as any, model: "gpt-5.5" });
+    const controller = new AbortController();
+
+    const promise = provider.startRun({ request: runRequest(workspaceRoot, { activeFile: null }), signal: controller.signal });
+    await client.waitForTurnStart();
+    await writeFile(docPath, "Codex wrote this\n", "utf8");
+    await writeFile(path.join(workspaceRoot, "extra.md"), "New file\n", "utf8");
+    controller.abort();
+
+    await expect(promise).rejects.toMatchObject({ agentError: { code: "request_canceled" } });
+    expect(client.interruptCalls).toEqual([{ threadId: "thread-1", turnId: "turn-1" }]);
+    expect(client.resetCount).toBe(0);
+    expect(await readFile(docPath, "utf8")).toBe("Old\n");
+    await expect(readFile(path.join(workspaceRoot, "extra.md"), "utf8")).rejects.toThrow();
+  });
+
+  it("resets the app-server when the interrupt is not acknowledged, then restores disk", async () => {
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "iliad-codex-provider-cancel-silent-"));
+    tempDirs.push(workspaceRoot);
+    const docPath = path.join(workspaceRoot, "doc.md");
+    await writeFile(docPath, "Old\n", "utf8");
+    const client = new FakeCodexClient();
+    client.interruptBehavior = "silent";
+    const provider = new CodexAppServerRuntimeProvider({ client: client as any, model: "gpt-5.5", interruptWaitMs: 20 });
+    const controller = new AbortController();
+
+    const promise = provider.startRun({ request: runRequest(workspaceRoot, { activeFile: null }), signal: controller.signal });
+    await client.waitForTurnStart();
+    await writeFile(docPath, "Codex wrote this\n", "utf8");
+    controller.abort();
+
+    await expect(promise).rejects.toMatchObject({ agentError: { code: "request_canceled" } });
+    expect(client.resetCount).toBe(1);
+    expect(await readFile(docPath, "utf8")).toBe("Old\n");
+  });
+
+  it("fails promptly and restores disk when the app-server transport closes mid-turn", async () => {
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "iliad-codex-provider-close-"));
+    tempDirs.push(workspaceRoot);
+    const docPath = path.join(workspaceRoot, "doc.md");
+    await writeFile(docPath, "Old\n", "utf8");
+    const client = new FakeCodexClient();
+    const provider = new CodexAppServerRuntimeProvider({ client: client as any, model: "gpt-5.5" });
+
+    const promise = provider.startRun({
+      request: runRequest(workspaceRoot, { activeFile: null }),
+      signal: new AbortController().signal
+    });
+    await client.waitForTurnStart();
+    await writeFile(docPath, "Codex wrote this\n", "utf8");
+    client.closeTransport();
+
+    await expect(promise).rejects.toMatchObject({ agentError: { code: "provider_unavailable", detail: "app_server_closed" } });
+    expect(await readFile(docPath, "utf8")).toBe("Old\n");
+  });
+
+  it("writes a recovery journal for the turn and removes it after restore", async () => {
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "iliad-codex-provider-journal-"));
+    const userData = await mkdtemp(path.join(os.tmpdir(), "iliad-codex-provider-journal-userdata-"));
+    tempDirs.push(workspaceRoot, userData);
+    await writeFile(path.join(workspaceRoot, "doc.md"), "Old\n", "utf8");
+    const { CodexRunJournalStore } = await import("../../electron/agent/runtime/codexRunJournal");
+    const journal = new CodexRunJournalStore(userData);
+    const client = new FakeCodexClient();
+    const restoredRoots: string[] = [];
+    const provider = new CodexAppServerRuntimeProvider({
+      client: client as any,
+      model: "gpt-5.5",
+      journal,
+      onWorkspaceRestored: (root) => restoredRoots.push(root)
+    });
+
+    const promise = provider.startRun({
+      request: runRequest(workspaceRoot, { activeFile: null }),
+      signal: new AbortController().signal
+    });
+    await client.waitForTurnStart();
+    const during = await journal.listForWorkspace(workspaceRoot);
+    expect(during).toHaveLength(1);
+    expect(during[0]?.files).toEqual([{ relativePath: "doc.md", hash: expect.any(String), content: "Old\n" }]);
+
+    completeTurn(client);
+    await promise;
+    expect(await journal.listForWorkspace(workspaceRoot)).toHaveLength(0);
+    expect(restoredRoots).toEqual([path.resolve(workspaceRoot)]);
+  });
+
   it("blocks concurrent Codex runs in the same workspace", async () => {
     const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "iliad-codex-provider-concurrent-"));
     tempDirs.push(workspaceRoot);
@@ -1740,6 +1833,41 @@ class FakeCodexClient {
   responses: unknown[] = [];
   threadError: Error | null = null;
   turnError: Error | null = null;
+  interruptCalls: Array<{ threadId: string; turnId: string }> = [];
+  interruptBehavior: "complete" | "silent" = "complete";
+  resetCount = 0;
+  private closeListeners = new Set<() => void>();
+
+  async interruptTurn(params: { threadId: string; turnId: string }) {
+    this.interruptCalls.push(params);
+
+    if (this.interruptBehavior === "complete") {
+      setTimeout(() => {
+        this.emitNotification("turn/completed", {
+          threadId: params.threadId,
+          turn: { id: params.turnId, status: "interrupted" }
+        });
+      }, 0);
+    }
+
+    return {};
+  }
+
+  resetTransport() {
+    this.resetCount += 1;
+    this.closeTransport();
+  }
+
+  onClosed(listener: () => void) {
+    this.closeListeners.add(listener);
+    return () => this.closeListeners.delete(listener);
+  }
+
+  closeTransport() {
+    for (const listener of [...this.closeListeners]) {
+      listener();
+    }
+  }
   private threadStartCount = 0;
   private turnStartCount = 0;
   private serverRequestHandlers = new Set<CodexAppServerServerRequestHandler>();

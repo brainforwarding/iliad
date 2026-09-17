@@ -68,7 +68,7 @@ Do not put new feature logic back into the old hotspot files. Use the owner modu
 - Document navigation (Back/Forward) history: `src/app/useDocumentHistory.ts`.
 - App-language strings and persistence: `src/i18n/`.
 - Reusable UI surfaces and popovers: `src/components/`.
-- CodeMirror setup and editor callbacks: `src/components/EditorPane.tsx`.
+- CodeMirror setup and editor callbacks: `src/components/EditorPane.tsx`; the `EditorView` host and document sync live in `src/editor/CodeMirrorHost.tsx` and `src/editor/documentSync.ts`.
 - Editor-only helpers, image drop/paste, path resolution, and visual Markdown behavior: `src/editor/`.
 - Visual Markdown rules and shared decoration helpers: `src/editor/visualMarkdown/`.
 - Electron filesystem safety and operations: `electron/fs/`.
@@ -96,6 +96,7 @@ The renderer persists the last workspace and editor typography (`editorFontSize`
 - `docs/agent-vision.md` — the Markdown-first product boundary for agent work. Read before changing agent, context, proposal, or runtime architecture.
 - `docs/architecture.md` — stable product and code decisions. **Read this before making non-trivial changes.** If a change intentionally alters one of those decisions, update the doc in the same change.
 - `specs/` — dated, per-change plans (one file per change). Look here for the rationale behind recent UI/UX moves.
+- `docs/backlog.md` — known gaps and follow-ups deferred during a change, each with where it came from. Add to it when you leave something out on purpose.
 
 ## Product constraints to respect
 

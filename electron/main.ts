@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, protocol, session, type MenuItemConstructorOptions } from "electron";
+import { app, BrowserWindow, Menu, protocol, session, shell, type MenuItemConstructorOptions } from "electron";
 import path from "node:path";
 import { registerAgentIpc } from "./ipc/agent.js";
 import { registerAutocompleteIpc } from "./ipc/autocomplete.js";
@@ -18,6 +18,7 @@ import { canonicalizeWorkspaceDirectory, type WorkspaceInfo } from "./launch/wor
 import { AgentService } from "./agent/agentService.js";
 import { AgentChatHistoryStore } from "./agent/chatHistoryStore.js";
 import { createDiagnosticsLogger } from "./diagnostics/logger.js";
+import { WorkspaceBaselineService } from "./review/workspaceBaseline.js";
 import { RemoteRelayClient } from "./remote/remoteRelayClient.js";
 import { TelegramRemoteService } from "./remote/telegramRemoteService.js";
 import { UpdateService } from "./updates/updateService.js";
@@ -218,13 +219,21 @@ app.whenReady().then(async () => {
   installApplicationMenu();
   installYouTubeEmbedHeaders(session.defaultSession.webRequest);
   registerAssetProtocol();
+  const userDataPath = app.getPath("userData");
+  const diagnosticsLogger = createDiagnosticsLogger(userDataPath);
+  const baselineService = new WorkspaceBaselineService({
+    trashItem: (absolutePath) => shell.trashItem(absolutePath),
+    onLog: (event, details) => diagnosticsLogger.info({ area: "agent", event, details })
+  });
   registerWorkspaceIpc({
     getLaunchWorkspace: (webContentsId) => windowManager.getLaunchWorkspace(webContentsId),
     getWindowWorkspace: (webContentsId) => windowManager.getWindowWorkspace(webContentsId),
-    setWindowWorkspace: (webContentsId, workspace) => windowManager.setWindowWorkspace(webContentsId, workspace)
+    setWindowWorkspace: (webContentsId, workspace) => windowManager.setWindowWorkspace(webContentsId, workspace),
+    baselineService
   });
   registerFileIpc({
-    getWindowWorkspace: (webContentsId) => windowManager.getWindowWorkspace(webContentsId)
+    getWindowWorkspace: (webContentsId) => windowManager.getWindowWorkspace(webContentsId),
+    baselineService
   });
   registerSearchIpc();
   registerShellIpc();
@@ -240,11 +249,9 @@ app.whenReady().then(async () => {
       return workspace.path;
     }
   });
-  const userDataPath = app.getPath("userData");
-  const diagnosticsLogger = createDiagnosticsLogger(userDataPath);
   registerDiagnosticsIpc({ logger: diagnosticsLogger });
   const chatHistoryStore = new AgentChatHistoryStore(userDataPath);
-  const agentService = new AgentService(userDataPath, { chatHistoryStore });
+  const agentService = new AgentService(userDataPath, { chatHistoryStore, baselineService });
   const remoteService = new TelegramRemoteService({
     userDataPath,
     agentService,
@@ -343,6 +350,7 @@ app.whenReady().then(async () => {
 
   app.on("before-quit", () => {
     remoteRelayClient.dispose();
+    baselineService.dispose();
   });
 });
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildFileTreeDisplayNodes,
   buildPendingFileTreeChanges,
+  displayNodeRelativePath,
   pendingFileTreePath,
   sameRelativePath,
   type FileTreeDisplayNode
@@ -189,6 +190,22 @@ describe("pending file tree display nodes", () => {
     expect(folder?.source === "real" ? folder.hasPendingDescendant : false).toBe(true);
     expect(file?.source).toBe("real");
     expect(file?.source === "real" ? file.pendingTarget?.fileId : null).toBe("edit-s2");
+  });
+
+  it("gives a delete its own row when a real folder now holds the file's name", () => {
+    const tree = [fileNode("doc.md", "directory", [fileNode("doc.md/inner.md")])];
+    const changes = buildPendingFileTreeChanges([
+      proposal({ id: "proposal-delete", files: [deleteFile({ id: "delete-doc", relativePath: "doc.md" })] })
+    ]);
+
+    const displayTree = buildFileTreeDisplayNodes(tree, changes);
+    const rows = displayTree.filter((node) => displayNodeRelativePath(node) === "doc.md");
+
+    expect(rows.map((node) => node.source).sort()).toEqual(["pending-delete", "real"]);
+    const folder = rows.find((node) => node.source === "real");
+    expect(folder?.source === "real" ? folder.pendingTarget : "attached").toBeUndefined();
+    const ghost = rows.find((node) => node.source === "pending-delete");
+    expect(ghost?.source === "pending-delete" ? ghost.pendingTarget.fileId : null).toBe("delete-doc");
   });
 
   it("inserts a virtual create file under an existing folder", () => {

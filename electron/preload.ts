@@ -4,11 +4,30 @@ import type { MarkdownContentSearchRequest } from "./fs/contentSearch.js";
 
 let workspaceReadRequestId = 0;
 
+const REMOTE_METHOD_PREFIX = /^Error invoking remote method '[^']*': (?:Error: )?/;
+
+/**
+ * `ipcRenderer.invoke` wraps a handler's error message as
+ * "Error invoking remote method 'channel': Error: <message>". The renderer
+ * shows messages to the writer verbatim, so unwrap them here, once.
+ */
+function invoke(channel: string, ...args: unknown[]): Promise<any> {
+  return ipcRenderer.invoke(channel, ...args).catch((error: unknown) => {
+    if (error instanceof Error && REMOTE_METHOD_PREFIX.test(error.message)) {
+      const unwrapped = new Error(error.message.replace(REMOTE_METHOD_PREFIX, ""));
+      unwrapped.name = error.name;
+      throw unwrapped;
+    }
+
+    throw error;
+  });
+}
+
 const api = {
-  getLaunchWorkspace: () => ipcRenderer.invoke("workspace:get-launch-workspace"),
-  openWorkspaceDialog: (language?: string) => ipcRenderer.invoke("workspace:open-dialog", language),
+  getLaunchWorkspace: () => invoke("workspace:get-launch-workspace"),
+  openWorkspaceDialog: (language?: string) => invoke("workspace:open-dialog", language),
   readDirectory: (workspaceRoot: string) =>
-    ipcRenderer.invoke("workspace:read-directory", {
+    invoke("workspace:read-directory", {
       workspaceRoot,
       requestId: ++workspaceReadRequestId
     }),
@@ -19,6 +38,7 @@ const api = {
       treeChanged?: boolean;
       markdownChanged?: boolean;
       changedMarkdownPaths?: string[];
+      watcherDegraded?: boolean;
     }) => void
   ) => {
     const handler = (_event: IpcRendererEvent, payload: unknown) => {
@@ -37,46 +57,47 @@ const api = {
           changedMarkdownPaths:
             "changedMarkdownPaths" in payload && Array.isArray(payload.changedMarkdownPaths)
               ? payload.changedMarkdownPaths.filter((item): item is string => typeof item === "string")
-              : []
+              : [],
+          watcherDegraded: "watcherDegraded" in payload && payload.watcherDegraded === true
         });
       }
     };
 
     ipcRenderer.on("workspace:changed", handler);
-    void ipcRenderer.invoke("workspace:watch", workspaceRoot).catch(() => {
+    void invoke("workspace:watch", workspaceRoot).catch(() => {
       ipcRenderer.removeListener("workspace:changed", handler);
     });
 
     return () => {
       ipcRenderer.removeListener("workspace:changed", handler);
-      void ipcRenderer.invoke("workspace:unwatch");
+      void invoke("workspace:unwatch");
     };
   },
   readMarkdown: (workspaceRoot: string, filePath: string) =>
-    ipcRenderer.invoke("file:read-markdown", workspaceRoot, filePath),
-  writeMarkdown: (workspaceRoot: string, filePath: string, content: string) =>
-    ipcRenderer.invoke("file:write-markdown", workspaceRoot, filePath, content),
+    invoke("file:read-markdown", workspaceRoot, filePath),
+  writeMarkdown: (workspaceRoot: string, filePath: string, content: string, expected?: unknown) =>
+    invoke("file:write-markdown", workspaceRoot, filePath, content, expected),
   createMarkdown: (workspaceRoot: string, directoryPath: string, requestedName: string) =>
-    ipcRenderer.invoke("file:create-markdown", workspaceRoot, directoryPath, requestedName),
+    invoke("file:create-markdown", workspaceRoot, directoryPath, requestedName),
   createFolder: (workspaceRoot: string, directoryPath: string, requestedName: string) =>
-    ipcRenderer.invoke("folder:create", workspaceRoot, directoryPath, requestedName),
+    invoke("folder:create", workspaceRoot, directoryPath, requestedName),
   renamePath: (workspaceRoot: string, filePath: string, requestedName: string) =>
-    ipcRenderer.invoke("file:rename", workspaceRoot, filePath, requestedName),
+    invoke("file:rename", workspaceRoot, filePath, requestedName),
   movePath: (workspaceRoot: string, sourcePath: string, targetDirectoryPath: string) =>
-    ipcRenderer.invoke("file:move", workspaceRoot, sourcePath, targetDirectoryPath),
+    invoke("file:move", workspaceRoot, sourcePath, targetDirectoryPath),
   duplicatePath: (workspaceRoot: string, filePath: string) =>
-    ipcRenderer.invoke("file:duplicate", workspaceRoot, filePath),
+    invoke("file:duplicate", workspaceRoot, filePath),
   moveToTrash: (workspaceRoot: string, filePath: string) =>
-    ipcRenderer.invoke("file:trash", workspaceRoot, filePath),
+    invoke("file:trash", workspaceRoot, filePath),
   searchMarkdownContent: (request: MarkdownContentSearchRequest) =>
-    ipcRenderer.invoke("file:search-markdown-content", request),
-  openUrl: (url: string) => ipcRenderer.invoke("shell:open-url", url),
+    invoke("file:search-markdown-content", request),
+  openUrl: (url: string) => invoke("shell:open-url", url),
   diagnostics: {
-    log: (request: unknown) => ipcRenderer.invoke("diagnostics:log", request)
+    log: (request: unknown) => invoke("diagnostics:log", request)
   },
   updates: {
-    check: () => ipcRenderer.invoke("updates:check"),
-    consumePendingCheckRequest: () => ipcRenderer.invoke("updates:consume-pending-check-request"),
+    check: () => invoke("updates:check"),
+    consumePendingCheckRequest: () => invoke("updates:consume-pending-check-request"),
     onCheckRequested: (listener: () => void) => {
       const handler = () => listener();
 
@@ -88,30 +109,30 @@ const api = {
     }
   },
   openExternalFile: (workspaceRoot: string, filePath: string) =>
-    ipcRenderer.invoke("file:open-external", workspaceRoot, filePath),
+    invoke("file:open-external", workspaceRoot, filePath),
   revealInFinder: (workspaceRoot: string, filePath: string) =>
-    ipcRenderer.invoke("file:reveal", workspaceRoot, filePath),
+    invoke("file:reveal", workspaceRoot, filePath),
   saveImageAsset: (request: {
     workspaceRoot: string;
     documentPath: string;
     dataUrl: string;
     originalName?: string;
-  }) => ipcRenderer.invoke("asset:save-image", request),
+  }) => invoke("asset:save-image", request),
   referenceImageAsset: (request: {
     workspaceRoot: string;
     documentPath: string;
     imagePath: string;
-  }) => ipcRenderer.invoke("asset:reference-image", request),
+  }) => invoke("asset:reference-image", request),
   referenceImageAssetByRelativePath: (request: {
     workspaceSessionId: string;
     documentPath: string;
     imageRelativePath: string;
-  }) => ipcRenderer.invoke("asset:reference-image-relative", request),
+  }) => invoke("asset:reference-image-relative", request),
   pathForFile: (file: File) => webUtils.getPathForFile(file),
   listMarkdownContextDocuments: (workspaceSessionId: string) =>
-    ipcRenderer.invoke("agent:list-markdown-context-documents", workspaceSessionId),
+    invoke("agent:list-markdown-context-documents", workspaceSessionId),
   normalizeContextDrop: (workspaceSessionId: string, absolutePath: string) =>
-    ipcRenderer.invoke("agent:normalize-context-drop", workspaceSessionId, absolutePath),
+    invoke("agent:normalize-context-drop", workspaceSessionId, absolutePath),
   assetUrl: (absolutePath: string) => `iliad-file://local/${encodeURIComponent(absolutePath)}`,
   tightenSelection: (request: {
     requestId: string;
@@ -120,9 +141,9 @@ const api = {
     selection?: { from: number; to: number };
     instruction?: string;
     language: string;
-  }) => ipcRenderer.invoke("tighten:run", request),
+  }) => invoke("tighten:run", request),
   cancelTighten: (requestId: string) => {
-    void ipcRenderer.invoke("tighten:cancel", requestId);
+    void invoke("tighten:cancel", requestId);
   },
   autocompleteIdea: (request: {
     requestId: string;
@@ -138,43 +159,43 @@ const api = {
     trigger?: "automatic" | "manual";
     suggestionKind?: "inline" | "paragraph";
     autocompleteApiFallbackEnabled: boolean;
-  }) => ipcRenderer.invoke("autocomplete:run", request),
+  }) => invoke("autocomplete:run", request),
   cancelAutocompleteIdea: (requestId: string) => {
-    void ipcRenderer.invoke("autocomplete:cancel", requestId);
+    void invoke("autocomplete:cancel", requestId);
   },
   getWritingAssistStatus: (request: { autocompleteApiFallbackEnabled: boolean }) =>
-    ipcRenderer.invoke("writing-assist:status", request),
+    invoke("writing-assist:status", request),
   selectionComments: {
-    list: (workspaceSessionId: string) => ipcRenderer.invoke("selection-comments:list", workspaceSessionId),
+    list: (workspaceSessionId: string) => invoke("selection-comments:list", workspaceSessionId),
     save: (workspaceSessionId: string, documentRelativePath: string, comments: unknown) =>
-      ipcRenderer.invoke("selection-comments:save", workspaceSessionId, documentRelativePath, comments)
+      invoke("selection-comments:save", workspaceSessionId, documentRelativePath, comments)
   },
   writingCorrectorMemory: {
     get: (request: {
       workspaceSessionId: string;
       documentRelativePath: string;
       language: "en" | "es";
-    }) => ipcRenderer.invoke("writing-corrector-memory:get", request),
+    }) => invoke("writing-corrector-memory:get", request),
     ignoreIssue: (request: {
       workspaceSessionId: string;
       documentRelativePath: string;
       language: "en" | "es";
       fingerprint: string;
-    }) => ipcRenderer.invoke("writing-corrector-memory:ignore", request),
+    }) => invoke("writing-corrector-memory:ignore", request),
     addDictionaryWord: (request: { language: "en" | "es"; word: string }) =>
-      ipcRenderer.invoke("writing-corrector-memory:add-dictionary-word", request)
+      invoke("writing-corrector-memory:add-dictionary-word", request)
   },
   agent: {
-    getSettings: () => ipcRenderer.invoke("agent:get-settings"),
-    updateSettings: (update: unknown) => ipcRenderer.invoke("agent:update-settings", update),
-    probeCodexCli: (request?: unknown) => ipcRenderer.invoke("agent:probe-codex-cli", request),
-    codexStatus: () => ipcRenderer.invoke("agent:codex-status"),
-    startCodexDeviceLogin: () => ipcRenderer.invoke("agent:codex-start-device-login"),
-    cancelCodexLogin: () => ipcRenderer.invoke("agent:codex-cancel-login"),
-    logoutCodex: () => ipcRenderer.invoke("agent:codex-logout"),
-    openCodexDeviceLogin: () => ipcRenderer.invoke("agent:codex-open-device-login"),
-    startRun: (request: unknown) => ipcRenderer.invoke("agent:start-run", request),
-    transcribeAudio: (request: unknown) => ipcRenderer.invoke("agent:transcribe-audio", request),
+    getSettings: () => invoke("agent:get-settings"),
+    updateSettings: (update: unknown) => invoke("agent:update-settings", update),
+    probeCodexCli: (request?: unknown) => invoke("agent:probe-codex-cli", request),
+    codexStatus: () => invoke("agent:codex-status"),
+    startCodexDeviceLogin: () => invoke("agent:codex-start-device-login"),
+    cancelCodexLogin: () => invoke("agent:codex-cancel-login"),
+    logoutCodex: () => invoke("agent:codex-logout"),
+    openCodexDeviceLogin: () => invoke("agent:codex-open-device-login"),
+    startRun: (request: unknown) => invoke("agent:start-run", request),
+    transcribeAudio: (request: unknown) => invoke("agent:transcribe-audio", request),
     onRunEvent: (listener: (event: unknown) => void) => {
       const handler = (_event: IpcRendererEvent, runEvent: unknown) => {
         listener(runEvent);
@@ -186,28 +207,35 @@ const api = {
         ipcRenderer.removeListener("agent:run-event", handler);
       };
     },
-    cancelRun: (runId: string) => ipcRenderer.invoke("agent:cancel-run", runId),
-    applyPatch: (request: unknown) => ipcRenderer.invoke("agent:apply-patch", request),
-    applyNewDocument: (request: unknown) => ipcRenderer.invoke("agent:apply-new-document", request),
-    listProposals: (workspaceRoot: string) => ipcRenderer.invoke("agent:list-proposals", workspaceRoot),
-    startExternalCapture: (request: unknown) => ipcRenderer.invoke("agent:external-capture-start", request),
-    finishExternalCapture: (request: unknown) => ipcRenderer.invoke("agent:external-capture-finish", request),
-    cancelExternalCapture: (request: unknown) => ipcRenderer.invoke("agent:external-capture-cancel", request),
-    applyProposalFile: (request: unknown) => ipcRenderer.invoke("agent:apply-proposal-file", request),
-    rejectProposalFile: (request: unknown) => ipcRenderer.invoke("agent:reject-proposal-file", request),
-    rejectProposal: (request: unknown) => ipcRenderer.invoke("agent:reject-proposal", request),
-    resolveProposalHunk: (request: unknown) => ipcRenderer.invoke("agent:resolve-proposal-hunk", request),
-    listChatThreads: (workspaceRoot: string) => ipcRenderer.invoke("agent:list-chat-threads", workspaceRoot),
-    getChatThread: (request: unknown) => ipcRenderer.invoke("agent:get-chat-thread", request),
-    saveChatThread: (request: unknown) => ipcRenderer.invoke("agent:save-chat-thread", request),
-    clearChatHistory: (workspaceRoot: string) => ipcRenderer.invoke("agent:clear-chat-history", workspaceRoot),
-    generateChatThreadTitle: (request: unknown) => ipcRenderer.invoke("agent:generate-chat-thread-title", request)
+    cancelRun: (runId: string) => invoke("agent:cancel-run", runId),
+    listProposals: (workspaceRoot: string) => invoke("agent:list-proposals", workspaceRoot),
+    getExternalReview: (request: unknown) => invoke("agent:get-external-review", request),
+    onExternalReviewChanged: (listener: (snapshot: unknown) => void) => {
+      const handler = (_event: IpcRendererEvent, snapshot: unknown) => {
+        listener(snapshot);
+      };
+
+      ipcRenderer.on("agent:external-review-changed", handler);
+
+      return () => {
+        ipcRenderer.removeListener("agent:external-review-changed", handler);
+      };
+    },
+    applyProposalFile: (request: unknown) => invoke("agent:apply-proposal-file", request),
+    rejectProposalFile: (request: unknown) => invoke("agent:reject-proposal-file", request),
+    rejectProposal: (request: unknown) => invoke("agent:reject-proposal", request),
+    resolveProposalHunk: (request: unknown) => invoke("agent:resolve-proposal-hunk", request),
+    listChatThreads: (workspaceRoot: string) => invoke("agent:list-chat-threads", workspaceRoot),
+    getChatThread: (request: unknown) => invoke("agent:get-chat-thread", request),
+    saveChatThread: (request: unknown) => invoke("agent:save-chat-thread", request),
+    clearChatHistory: (workspaceRoot: string) => invoke("agent:clear-chat-history", workspaceRoot),
+    generateChatThreadTitle: (request: unknown) => invoke("agent:generate-chat-thread-title", request)
   },
   remote: {
-    getSettings: () => ipcRenderer.invoke("remote:get-settings"),
-    startPairing: () => ipcRenderer.invoke("remote:start-pairing"),
-    updateSettings: (update: unknown) => ipcRenderer.invoke("remote:update-settings", update),
-    revokeSettings: () => ipcRenderer.invoke("remote:revoke-settings")
+    getSettings: () => invoke("remote:get-settings"),
+    startPairing: () => invoke("remote:start-pairing"),
+    updateSettings: (update: unknown) => invoke("remote:update-settings", update),
+    revokeSettings: () => invoke("remote:revoke-settings")
   }
 };
 

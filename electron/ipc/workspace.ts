@@ -8,11 +8,13 @@ import { workspaceMutationMarkerMatches } from "../fs/workspaceMutationMarkers.j
 import { rememberWorkspace } from "../fs/workspaceRegistry.js";
 import { workspaceMutationLeaseOwner } from "../agent/workspaceMutationLease.js";
 import { canonicalizeWorkspaceDirectory, type WorkspaceInfo } from "../launch/workspace.js";
+import type { WorkspaceBaselineService } from "../review/workspaceBaseline.js";
 
 interface WorkspaceIpcOptions {
   getLaunchWorkspace: (webContentsId: number) => WorkspaceInfo | null;
   getWindowWorkspace?: (webContentsId: number) => WorkspaceInfo | null;
   setWindowWorkspace: (webContentsId: number, workspace: WorkspaceInfo) => WorkspaceInfo | null;
+  baselineService?: WorkspaceBaselineService;
 }
 
 interface ReadDirectoryRequest {
@@ -26,9 +28,13 @@ type ReadDirectoryResponse =
 
 interface WorkspaceWatcherState {
   workspaceRoot: string;
-  watcher: FSWatcher;
+  watcher: FSWatcher | null;
   timer: NodeJS.Timeout | null;
   pendingChange: WorkspaceChangePayload | null;
+  restartTimer: NodeJS.Timeout | null;
+  restartAttempt: number;
+  healthyTimer: NodeJS.Timeout | null;
+  closed: boolean;
 }
 
 interface WorkspaceChangePayload {
@@ -36,12 +42,15 @@ interface WorkspaceChangePayload {
   treeChanged: boolean;
   markdownChanged: boolean;
   changedMarkdownPaths: string[];
+  watcherDegraded?: boolean;
 }
 
 const latestReadRequestIdsByWebContentsId = new Map<number, number>();
 const workspaceWatchersByWebContentsId = new Map<number, WorkspaceWatcherState>();
 const workspaceChangeChannel = "workspace:changed";
 const workspaceWatchDebounceMs = 250;
+const watcherRestartBackoffMs = [500, 1000, 2000, 4000, 8000];
+const watcherHealthyAfterMs = 30_000;
 const openDialogTitles = {
   en: "Open Folder",
   es: "Abrir carpeta"
@@ -113,11 +122,22 @@ function closeWorkspaceWatcher(webContentsId: number) {
     return;
   }
 
+  current.closed = true;
+
   if (current.timer) {
     clearTimeout(current.timer);
   }
 
-  current.watcher.close();
+  if (current.restartTimer) {
+    clearTimeout(current.restartTimer);
+  }
+
+  if (current.healthyTimer) {
+    clearTimeout(current.healthyTimer);
+  }
+
+  current.watcher?.close();
+  current.watcher = null;
   workspaceWatchersByWebContentsId.delete(webContentsId);
 }
 
@@ -166,14 +186,35 @@ function assertWorkspaceCanBeWatched(webContentsId: number, workspace: Workspace
   }
 }
 
-function createWorkspaceWatcher(sender: WebContents, workspace: WorkspaceInfo): WorkspaceWatcherState {
-  const recursive = process.platform === "darwin" || process.platform === "win32";
-  let state: WorkspaceWatcherState;
+function createWorkspaceWatcher(
+  sender: WebContents,
+  workspace: WorkspaceInfo,
+  baselineService: WorkspaceBaselineService | undefined
+): WorkspaceWatcherState {
+  const state: WorkspaceWatcherState = {
+    workspaceRoot: workspace.path,
+    watcher: null,
+    timer: null,
+    pendingChange: null,
+    restartTimer: null,
+    restartAttempt: 0,
+    healthyTimer: null,
+    closed: false
+  };
 
   const onChange = (eventType: string | null, filename?: string | Buffer | null) => {
     const relativePath = normalizeWatchFilename(filename);
     const treeChanged = workspaceWatchEventNeedsTreeRefresh(eventType);
     const markdownChanged = workspaceWatchEventIsMarkdownChange(eventType, filename);
+
+    // The baseline service reconciles disk itself; hints are never dropped,
+    // even for Iliad-owned writes, because the service already knows those.
+    if (baselineService && (markdownChanged || treeChanged || !relativePath)) {
+      baselineService.noteDiskChange(workspace.path, {
+        relativePath: relativePath ? relativePath.split(path.sep).join("/") : null,
+        eventType: eventType === "change" ? "change" : eventType === "rename" ? "rename" : "unknown"
+      });
+    }
 
     if (
       (treeChanged || markdownChanged) &&
@@ -192,34 +233,93 @@ function createWorkspaceWatcher(sender: WebContents, workspace: WorkspaceInfo): 
     }
   };
 
-  let watcher: FSWatcher;
+  const start = () => {
+    const recursive = process.platform === "darwin" || process.platform === "win32";
+    let watcher: FSWatcher;
 
-  try {
-    watcher = watch(workspace.path, { recursive }, onChange);
-  } catch (error) {
-    if (!recursive) {
-      throw error;
+    try {
+      watcher = watch(workspace.path, { recursive }, onChange);
+    } catch (error) {
+      if (!recursive) {
+        throw error;
+      }
+
+      watcher = watch(workspace.path, onChange);
     }
 
-    watcher = watch(workspace.path, onChange);
-  }
+    watcher.on("error", (error) => {
+      console.warn(`[workspace] File watcher failed for "${workspace.path}".`, error);
+      scheduleRestart();
+    });
 
-  state = {
-    workspaceRoot: workspace.path,
-    watcher,
-    timer: null,
-    pendingChange: null
+    state.watcher = watcher;
+    state.healthyTimer = setTimeout(() => {
+      state.healthyTimer = null;
+      state.restartAttempt = 0;
+    }, watcherHealthyAfterMs);
+    state.healthyTimer.unref?.();
   };
 
-  watcher.on("error", (error) => {
-    console.warn(`[workspace] File watcher failed for "${workspace.path}".`, error);
-    closeWorkspaceWatcher(sender.id);
-  });
+  const scheduleRestart = () => {
+    if (state.closed) {
+      return;
+    }
 
+    state.watcher?.close();
+    state.watcher = null;
+
+    if (state.healthyTimer) {
+      clearTimeout(state.healthyTimer);
+      state.healthyTimer = null;
+    }
+
+    if (state.restartAttempt >= watcherRestartBackoffMs.length) {
+      scheduleWorkspaceChanged(sender, state, {
+        workspaceRoot: workspace.path,
+        treeChanged: true,
+        markdownChanged: true,
+        changedMarkdownPaths: [],
+        watcherDegraded: true
+      });
+      return;
+    }
+
+    const delay = watcherRestartBackoffMs[state.restartAttempt];
+    state.restartAttempt += 1;
+    state.restartTimer = setTimeout(() => {
+      state.restartTimer = null;
+
+      if (state.closed || sender.isDestroyed()) {
+        return;
+      }
+
+      try {
+        start();
+        baselineService?.noteWatcherRestarted(workspace.path);
+        scheduleWorkspaceChanged(sender, state, {
+          workspaceRoot: workspace.path,
+          treeChanged: true,
+          markdownChanged: true,
+          changedMarkdownPaths: []
+        });
+      } catch (error) {
+        console.warn(`[workspace] File watcher restart failed for "${workspace.path}".`, error);
+        scheduleRestart();
+      }
+    }, delay);
+    state.restartTimer.unref?.();
+  };
+
+  start();
   return state;
 }
 
-export function registerWorkspaceIpc({ getLaunchWorkspace, getWindowWorkspace, setWindowWorkspace }: WorkspaceIpcOptions) {
+export function registerWorkspaceIpc({
+  getLaunchWorkspace,
+  getWindowWorkspace,
+  setWindowWorkspace,
+  baselineService
+}: WorkspaceIpcOptions) {
   ipcMain.handle("workspace:get-launch-workspace", (event): WorkspaceInfo | null => {
     return getLaunchWorkspace(event.sender.id);
   });
@@ -284,14 +384,36 @@ export function registerWorkspaceIpc({ getLaunchWorkspace, getWindowWorkspace, s
       return { status: "ok" };
     }
 
+    if (current) {
+      baselineService?.detach(current.workspaceRoot, webContentsId);
+    }
+
     closeWorkspaceWatcher(webContentsId);
-    workspaceWatchersByWebContentsId.set(webContentsId, createWorkspaceWatcher(event.sender, workspace));
-    event.sender.once("destroyed", () => closeWorkspaceWatcher(webContentsId));
+    workspaceWatchersByWebContentsId.set(webContentsId, createWorkspaceWatcher(event.sender, workspace, baselineService));
+    event.sender.once("destroyed", () => {
+      closeWorkspaceWatcher(webContentsId);
+      baselineService?.detachSubscriber(webContentsId);
+    });
+
+    if (baselineService) {
+      const sender = event.sender;
+      await baselineService.attach(workspace.path, {
+        id: sender.id,
+        send: (channel, payload) => sender.send(channel, payload),
+        isDestroyed: () => sender.isDestroyed()
+      });
+    }
 
     return { status: "ok" };
   });
 
   ipcMain.handle("workspace:unwatch", (event): { status: "ok" } => {
+    const current = workspaceWatchersByWebContentsId.get(event.sender.id);
+
+    if (current) {
+      baselineService?.detach(current.workspaceRoot, event.sender.id);
+    }
+
     closeWorkspaceWatcher(event.sender.id);
     return { status: "ok" };
   });

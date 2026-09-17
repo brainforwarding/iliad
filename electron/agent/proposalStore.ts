@@ -1,12 +1,15 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { readMarkdownFile, writeMarkdownFile } from "../fs/fileOps.js";
+import { readMarkdownFile } from "../fs/fileOps.js";
 import { ensureMarkdownFile, ensureVisibleWorkspacePath } from "../fs/pathSafety.js";
+import { WorkspaceBaselineService, type GuardedMarkdownWriter } from "../review/workspaceBaseline.js";
+import { hashMarkdown } from "./hash.js";
 import {
   buildLineReviewHunks,
   deriveEditFileStatus,
   hasMutableReviewHunks,
   markUnresolvedHunksStale,
+  reviveStaleHunks,
   reconstructContent,
   resolveHunkStatus
 } from "./reviewDiff.js";
@@ -23,6 +26,28 @@ import type {
 const TERMINAL_HISTORY_LIMIT = 100;
 const STALE_EDIT_MESSAGE = "This document changed after the proposal was created. Ask the agent to regenerate it.";
 const CREATE_COLLISION_MESSAGE = "A file with that assistant-proposed name already exists.";
+const PENDING_REVIEW_MESSAGE = "This file has outside changes waiting for review. Keep or restore them first.";
+const UNSAFE_PATH_MESSAGE = "This path is not a regular Markdown file inside the workspace.";
+
+export interface AgentProposalStoreOptions {
+  markdownWriter?: GuardedMarkdownWriter;
+}
+
+function conflictMessage(reason: "pending_review" | "disk_changed" | "unsafe_path", fallback: string) {
+  if (reason === "pending_review") {
+    return PENDING_REVIEW_MESSAGE;
+  }
+
+  if (reason === "unsafe_path") {
+    return UNSAFE_PATH_MESSAGE;
+  }
+
+  return fallback;
+}
+
+function workspaceRelativePosix(workspaceRoot: string, filePath: string) {
+  return path.relative(path.resolve(workspaceRoot), path.resolve(filePath)).split(path.sep).join("/");
+}
 
 type ProposalMutation<T> = (proposals: AgentChangeProposal[]) => Promise<T> | T;
 
@@ -176,10 +201,29 @@ function validateGeneratedMarkdownPath(workspaceRoot: string, relativePath: stri
 
 export class AgentProposalStore {
   private readonly storePath: string;
+  private readonly writer: GuardedMarkdownWriter;
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(userDataPath: string) {
+  constructor(userDataPath: string, options: AgentProposalStoreOptions = {}) {
     this.storePath = path.join(userDataPath, "assistant", "proposals.json");
+    this.writer = options.markdownWriter ?? new WorkspaceBaselineService().markdownWriter();
+  }
+
+  /**
+   * An outside change on this path is waiting for review: the internal
+   * proposal must not touch disk or judge drift until the writer decides
+   * whether to keep or restore it. Hunks stay as they are.
+   */
+  private blockedByPendingReview(workspaceRoot: string, filePath: string, file: AgentEditFileProposal) {
+    const relativePath = workspaceRelativePosix(workspaceRoot, filePath);
+
+    if (!this.writer.hasPendingReview?.(workspaceRoot, relativePath)) {
+      return false;
+    }
+
+    file.status = "failed";
+    file.error = PENDING_REVIEW_MESSAGE;
+    return true;
   }
 
   async listProposals(workspaceRoot: string): Promise<AgentChangeProposal[]> {
@@ -270,6 +314,16 @@ export class AgentProposalStore {
         const filePath = resolveProposalFile(workspaceRoot, file.relativePath);
 
         try {
+          if (this.blockedByPendingReview(workspaceRoot, filePath, file)) {
+            touchAndRecompute(proposal);
+            return {
+              kind: "edit_file",
+              proposal: cloneProposal(proposal),
+              fileId: file.id,
+              status: file.status
+            };
+          }
+
           const current = await readMarkdownFile(workspaceRoot, filePath);
           const expected = reconstructContent(file.baseContent, file.hunks ?? []);
 
@@ -286,18 +340,46 @@ export class AgentProposalStore {
             };
           }
 
-          for (const hunk of file.hunks ?? []) {
-            if (hunk.status === "pending") {
-              hunk.status = "accepted";
+          // Disk matches the proposal again (for example after an outside
+          // change was restored): stale hunks are reviewable once more.
+          reviveStaleHunks(file);
+
+          const nextHunks = (file.hunks ?? []).map((hunk) => ({
+            ...hunk,
+            status: hunk.status === "pending" ? ("accepted" as const) : hunk.status
+          }));
+          const nextContent = reconstructContent(file.baseContent, nextHunks);
+
+          if (nextContent !== current) {
+            const written = await this.writer.write({
+              workspaceRoot,
+              relativePath: workspaceRelativePosix(workspaceRoot, filePath),
+              content: nextContent,
+              expected: { kind: "hash", hash: hashMarkdown(current) }
+            });
+
+            if (written.status === "conflict") {
+              if (written.reason === "disk_changed") {
+                markUnresolvedHunksStale(file);
+                file.error = STALE_EDIT_MESSAGE;
+                file.status = deriveEditFileStatus(file);
+              } else {
+                file.status = "failed";
+                file.error = conflictMessage(written.reason, STALE_EDIT_MESSAGE);
+              }
+
+              touchAndRecompute(proposal);
+              return {
+                kind: "edit_file",
+                proposal: cloneProposal(proposal),
+                fileId: file.id,
+                status: file.status
+              };
             }
           }
 
-          const nextContent = reconstructContent(file.baseContent, file.hunks ?? []);
-
-          if (nextContent !== current) {
-            await writeMarkdownFile(workspaceRoot, filePath, nextContent);
-          }
-
+          // Statuses commit only after the write succeeded.
+          file.hunks = nextHunks;
           if (file.status === "failed") {
             file.status = "pending";
           }
@@ -330,24 +412,23 @@ export class AgentProposalStore {
       if (file.kind === "create_file") {
         try {
           const filePath = validateGeneratedMarkdownPath(workspaceRoot, file.relativePath);
+          const written = await this.writer.write({
+            workspaceRoot,
+            relativePath: workspaceRelativePosix(workspaceRoot, filePath),
+            content: file.content,
+            expected: { kind: "absent" }
+          });
 
-          try {
-            await mkdir(path.dirname(filePath), { recursive: true });
-            await writeFile(filePath, file.content, { encoding: "utf8", flag: "wx" });
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-              file.status = "stale";
-              file.error = CREATE_COLLISION_MESSAGE;
-              touchAndRecompute(proposal);
-              return {
-                kind: "create_file",
-                proposal: cloneProposal(proposal),
-                fileId: file.id,
-                status: file.status
-              };
-            }
-
-            throw error;
+          if (written.status === "conflict") {
+            file.status = written.reason === "disk_changed" ? "stale" : "failed";
+            file.error = conflictMessage(written.reason, CREATE_COLLISION_MESSAGE);
+            touchAndRecompute(proposal);
+            return {
+              kind: "create_file",
+              proposal: cloneProposal(proposal),
+              fileId: file.id,
+              status: file.status
+            };
           }
 
           file.status = "applied";
@@ -390,7 +471,24 @@ export class AgentProposalStore {
           };
         }
 
-        await rm(filePath);
+        const removed = await this.writer.remove({
+          workspaceRoot,
+          relativePath: workspaceRelativePosix(workspaceRoot, filePath),
+          expected: { kind: "hash", hash: hashMarkdown(current) }
+        });
+
+        if (removed.status === "conflict") {
+          file.status = removed.reason === "disk_changed" ? "stale" : "failed";
+          file.error = conflictMessage(removed.reason, STALE_EDIT_MESSAGE);
+          touchAndRecompute(proposal);
+          return {
+            kind: "delete_file",
+            proposal: cloneProposal(proposal),
+            fileId: file.id,
+            status: file.status
+          };
+        }
+
         file.status = "applied";
         delete file.error;
         touchAndRecompute(proposal);
@@ -506,11 +604,7 @@ export class AgentProposalStore {
         throw new Error("Review hunk not found.");
       }
 
-      if (
-        hunk.status === "accepted" ||
-        hunk.status === "rejected" ||
-        (hunk.status === "stale" && decision === "accept")
-      ) {
+      if (hunk.status === "accepted" || hunk.status === "rejected") {
         return {
           proposal: cloneProposal(proposal),
           fileId: file.id,
@@ -526,6 +620,16 @@ export class AgentProposalStore {
       const filePath = resolveProposalFile(workspaceRoot, file.relativePath);
 
       try {
+        if (this.blockedByPendingReview(workspaceRoot, filePath, file)) {
+          touchAndRecompute(proposal);
+          return {
+            proposal: cloneProposal(proposal),
+            fileId: file.id,
+            hunkId: hunk.id,
+            status: hunk.status
+          };
+        }
+
         const current = await readMarkdownFile(workspaceRoot, filePath);
         const expected = reconstructContent(file.baseContent, file.hunks ?? []);
 
@@ -542,13 +646,46 @@ export class AgentProposalStore {
           };
         }
 
-        hunk.status = resolveHunkStatus(decision);
-        const nextContent = reconstructContent(file.baseContent, file.hunks ?? []);
+        // Disk matches the proposal again: stale hunks are reviewable once
+        // more, so accepting one is legitimate now.
+        reviveStaleHunks(file);
+
+        const nextStatus = resolveHunkStatus(decision);
+        const nextHunks = (file.hunks ?? []).map((candidate) =>
+          candidate.id === hunk.id ? { ...candidate, status: nextStatus } : candidate
+        );
+        const nextContent = reconstructContent(file.baseContent, nextHunks);
 
         if (nextContent !== current) {
-          await writeMarkdownFile(workspaceRoot, filePath, nextContent);
+          const written = await this.writer.write({
+            workspaceRoot,
+            relativePath: workspaceRelativePosix(workspaceRoot, filePath),
+            content: nextContent,
+            expected: { kind: "hash", hash: hashMarkdown(current) }
+          });
+
+          if (written.status === "conflict") {
+            if (written.reason === "disk_changed") {
+              markUnresolvedHunksStale(file);
+              file.error = STALE_EDIT_MESSAGE;
+              file.status = deriveEditFileStatus(file);
+            } else {
+              file.status = "failed";
+              file.error = conflictMessage(written.reason, STALE_EDIT_MESSAGE);
+            }
+
+            touchAndRecompute(proposal);
+            return {
+              proposal: cloneProposal(proposal),
+              fileId: file.id,
+              hunkId: hunk.id,
+              status: hunk.status
+            };
+          }
         }
 
+        // Statuses commit only after the write succeeded.
+        file.hunks = nextHunks;
         if (file.status === "failed") {
           file.status = "pending";
         }
@@ -559,7 +696,7 @@ export class AgentProposalStore {
           proposal: cloneProposal(proposal),
           fileId: file.id,
           hunkId: hunk.id,
-          status: hunk.status,
+          status: nextStatus,
           content: nextContent
         };
       } catch (error) {

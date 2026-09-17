@@ -23,6 +23,8 @@ export interface WorkspaceChangeEvent {
   treeChanged?: boolean;
   markdownChanged?: boolean;
   changedMarkdownPaths?: string[];
+  /** The file watcher could not be restarted; outside changes may go unnoticed. */
+  watcherDegraded?: boolean;
 }
 
 export interface SaveImageAssetRequest {
@@ -222,6 +224,7 @@ export interface ExternalFilesystemProposalMetadata {
   kind: "external_filesystem";
   baselineId: string;
   snapshotId: string;
+  revision: number;
   liveDisk: true;
   sessionScoped: true;
 }
@@ -282,56 +285,19 @@ export interface AgentDeleteFileProposal {
   reviewedContentHash?: string;
 }
 
-export interface ExternalAgentCaptureStartResponse {
-  captureId: string;
+export interface ExternalReviewSnapshot {
   workspaceRoot: string;
-  startedAt: string;
-  markdownFileCount: number;
-  resumed?: boolean;
+  revision: number;
+  proposal: AgentChangeProposal | null;
 }
 
-export type ExternalAgentCaptureFinishResponse =
-  | {
-      status: "proposal";
-      captureId: string;
-      proposal: AgentChangeProposal;
-      restoredRelativePaths: string[];
-      restoredCreateRelativePaths: string[];
-      unsupportedNotes: string[];
-    }
-  | {
-      status: "empty";
-      captureId: string;
-      restoredRelativePaths: string[];
-      restoredCreateRelativePaths: string[];
-      unsupportedNotes: string[];
-    }
-  | {
-      status: "unsupported_restored";
-      captureId: string;
-      restoredRelativePaths: string[];
-      restoredCreateRelativePaths: string[];
-      unsupportedNotes: string[];
-    }
-  | {
-      status: "git_baseline_changed";
-      captureId: string;
-      unsupportedNotes: string[];
-    }
-  | {
-      status: "unsafe";
-      captureId: string;
-      message: string;
-      unsupportedNotes: string[];
-    };
+export type MarkdownWriteExpectation = { kind: "absent" } | { kind: "hash"; hash: string };
 
-export interface ExternalAgentCaptureCancelResponse {
-  status: "canceled";
-  captureId: string;
-  restoredRelativePaths: string[];
-  restoredCreateRelativePaths: string[];
-  unsupportedNotes: string[];
-}
+export type MarkdownWriteConflictReason = "pending_review" | "disk_changed" | "unsafe_path";
+
+export type WriteMarkdownResult =
+  | { status: "written"; savedAt: string }
+  | { status: "conflict"; reason: MarkdownWriteConflictReason };
 
 export type AgentErrorCode =
   | "missing_api_key"
@@ -878,17 +844,6 @@ export type AgentRunEvent =
   | AgentTextRunEvent
   | AgentOpenDocumentRunEvent;
 
-export interface ApplyAgentPatchResponse {
-  savedAt: string;
-  content: string;
-}
-
-export interface ApplyAgentCreateDocumentResponse {
-  savedAt: string;
-  file: FileTreeNode;
-  content: string;
-}
-
 export type ApplyAgentProposalFileResponse =
   | {
       kind: "edit_file";
@@ -933,27 +888,9 @@ export interface AgentApi {
   transcribeAudio: (request: AgentTranscribeAudioRequest) => Promise<AgentTranscribeAudioResponse>;
   onRunEvent: (listener: (event: AgentRunEvent) => void) => () => void;
   cancelRun: (runId: string) => Promise<void>;
-  applyPatch: (request: {
-    workspaceRoot: string;
-    patch: AgentPatchProposal;
-  }) => Promise<ApplyAgentPatchResponse>;
-  applyNewDocument: (request: {
-    workspaceRoot: string;
-    document: AgentCreateDocumentProposal;
-  }) => Promise<ApplyAgentCreateDocumentResponse>;
   listProposals: (workspaceRoot: string) => Promise<AgentChangeProposal[]>;
-  startExternalCapture: (request: {
-    workspaceSessionId: string;
-    agentName?: string;
-  }) => Promise<ExternalAgentCaptureStartResponse>;
-  finishExternalCapture: (request: {
-    workspaceSessionId: string;
-    captureId: string;
-  }) => Promise<ExternalAgentCaptureFinishResponse>;
-  cancelExternalCapture: (request: {
-    workspaceSessionId: string;
-    captureId: string;
-  }) => Promise<ExternalAgentCaptureCancelResponse>;
+  getExternalReview: (request: { workspaceSessionId: string }) => Promise<ExternalReviewSnapshot>;
+  onExternalReviewChanged: (listener: (snapshot: ExternalReviewSnapshot) => void) => () => void;
   applyProposalFile: (request: {
     workspaceRoot: string;
     proposalId: string;
@@ -1029,7 +966,12 @@ export interface IliadApi {
   readDirectory: (workspaceRoot: string) => Promise<ReadDirectoryResponse>;
   watchWorkspace?: (workspaceRoot: string, listener: (event: WorkspaceChangeEvent) => void) => () => void;
   readMarkdown: (workspaceRoot: string, filePath: string) => Promise<string>;
-  writeMarkdown: (workspaceRoot: string, filePath: string, content: string) => Promise<{ savedAt: string }>;
+  writeMarkdown: (
+    workspaceRoot: string,
+    filePath: string,
+    content: string,
+    expected?: MarkdownWriteExpectation
+  ) => Promise<WriteMarkdownResult>;
   createMarkdown: (workspaceRoot: string, directoryPath: string, requestedName: string) => Promise<FileTreeNode>;
   createFolder: (workspaceRoot: string, directoryPath: string, requestedName: string) => Promise<FileTreeNode>;
   renamePath: (workspaceRoot: string, filePath: string, requestedName: string) => Promise<FileTreeNode>;

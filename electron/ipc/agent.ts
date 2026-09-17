@@ -20,9 +20,7 @@ import type {
   AgentRunRequest,
   AgentSettingsUpdate,
   AgentTranscribeAudioResponse,
-  ApplyAgentCreateDocumentRequest,
   ApplyAgentProposalFileRequest,
-  ApplyAgentPatchRequest,
   CodexAccountStatusResponse,
   CodexDeviceLoginResponse,
   CodexOpenDeviceLoginResponse,
@@ -74,31 +72,21 @@ export function registerAgentIpc({
   ipcMain.handle("agent:cancel-run", (_event, runId: string) => {
     service.cancelRun(runId);
   });
-  ipcMain.handle("agent:apply-patch", (_event, request: ApplyAgentPatchRequest) => service.applyPatch(request));
-  ipcMain.handle("agent:apply-new-document", (_event, request: ApplyAgentCreateDocumentRequest) =>
-    service.applyNewDocument(request)
-  );
   ipcMain.handle("agent:list-proposals", (_event, workspaceRoot: string) => service.listProposals(workspaceRoot));
-  ipcMain.handle("agent:external-capture-start", (event, request: unknown) =>
-    handleStartExternalCaptureIpc(event, request, service, resolveWorkspaceRootForSession)
+  ipcMain.handle("agent:get-external-review", (event, request: unknown) =>
+    handleGetExternalReviewIpc(event, request, service, resolveWorkspaceRootForSession)
   );
-  ipcMain.handle("agent:external-capture-finish", (event, request: unknown) =>
-    handleFinishExternalCaptureIpc(event, request, service, resolveWorkspaceRootForSession)
+  ipcMain.handle("agent:apply-proposal-file", (event, request: ApplyAgentProposalFileRequest) =>
+    handleProposalActionIpc(event, () => service.applyProposalFile(request))
   );
-  ipcMain.handle("agent:external-capture-cancel", (event, request: unknown) =>
-    handleCancelExternalCaptureIpc(event, request, service, resolveWorkspaceRootForSession)
+  ipcMain.handle("agent:reject-proposal-file", (event, request: RejectAgentProposalFileRequest) =>
+    handleProposalActionIpc(event, () => service.rejectProposalFile(request))
   );
-  ipcMain.handle("agent:apply-proposal-file", (_event, request: ApplyAgentProposalFileRequest) =>
-    service.applyProposalFile(request)
+  ipcMain.handle("agent:reject-proposal", (event, request: RejectAgentProposalRequest) =>
+    handleProposalActionIpc(event, () => service.rejectProposal(request))
   );
-  ipcMain.handle("agent:reject-proposal-file", (_event, request: RejectAgentProposalFileRequest) =>
-    service.rejectProposalFile(request)
-  );
-  ipcMain.handle("agent:reject-proposal", (_event, request: RejectAgentProposalRequest) =>
-    service.rejectProposal(request)
-  );
-  ipcMain.handle("agent:resolve-proposal-hunk", (_event, request: ResolveAgentProposalHunkRequest) =>
-    service.resolveProposalHunk(request)
+  ipcMain.handle("agent:resolve-proposal-hunk", (event, request: ResolveAgentProposalHunkRequest) =>
+    handleProposalActionIpc(event, () => service.resolveProposalHunk(request))
   );
   ipcMain.handle("agent:list-chat-threads", (_event, workspaceRoot: string) => service.listChatThreads(workspaceRoot));
   ipcMain.handle("agent:get-chat-thread", (_event, request: { workspaceRoot: string; threadId: string }) =>
@@ -205,14 +193,14 @@ export function handleCodexCliProbeIpc(event: AgentIpcEvent, request: unknown) {
   return probeCodexCli(normalizeCodexCliProbeRequest(request));
 }
 
-export async function handleStartExternalCaptureIpc(
+export async function handleGetExternalReviewIpc(
   event: AgentIpcEvent,
   request: unknown,
-  service: Pick<AgentService, "startExternalCapture">,
+  service: Pick<AgentService, "getExternalReview">,
   resolveWorkspaceRootForSession: WorkspaceSessionResolver = defaultWorkspaceSessionResolver
 ) {
   if (!isTrustedAgentIpcSender(event)) {
-    throw new Error("The external capture request came from an untrusted window.");
+    throw new Error("The outside-changes request came from an untrusted window.");
   }
 
   const workspaceRoot = await resolveWorkspaceRoot(
@@ -222,65 +210,18 @@ export async function handleStartExternalCaptureIpc(
   );
 
   if (!workspaceRoot) {
-    throw new Error("External capture requires the current trusted workspace.");
+    throw new Error("Outside-changes review requires the current trusted workspace.");
   }
 
-  return service.startExternalCapture({
-    workspaceRoot,
-    agentName: captureAgentName(request)
-  });
+  return service.getExternalReview(workspaceRoot);
 }
 
-export async function handleFinishExternalCaptureIpc(
-  event: AgentIpcEvent,
-  request: unknown,
-  service: Pick<AgentService, "finishExternalCapture">,
-  resolveWorkspaceRootForSession: WorkspaceSessionResolver = defaultWorkspaceSessionResolver
-) {
+export function handleProposalActionIpc<T>(event: AgentIpcEvent, action: () => Promise<T> | T): Promise<T> | T {
   if (!isTrustedAgentIpcSender(event)) {
-    throw new Error("The external capture request came from an untrusted window.");
+    throw new Error("The review action came from an untrusted window.");
   }
 
-  const workspaceRoot = await resolveWorkspaceRoot(
-    event,
-    captureWorkspaceSessionId(request),
-    resolveWorkspaceRootForSession
-  );
-
-  if (!workspaceRoot) {
-    throw new Error("External capture requires the current trusted workspace.");
-  }
-
-  return service.finishExternalCapture({
-    workspaceRoot,
-    captureId: captureIdFromRequest(request)
-  });
-}
-
-export async function handleCancelExternalCaptureIpc(
-  event: AgentIpcEvent,
-  request: unknown,
-  service: Pick<AgentService, "cancelExternalCapture">,
-  resolveWorkspaceRootForSession: WorkspaceSessionResolver = defaultWorkspaceSessionResolver
-) {
-  if (!isTrustedAgentIpcSender(event)) {
-    throw new Error("The external capture request came from an untrusted window.");
-  }
-
-  const workspaceRoot = await resolveWorkspaceRoot(
-    event,
-    captureWorkspaceSessionId(request),
-    resolveWorkspaceRootForSession
-  );
-
-  if (!workspaceRoot) {
-    throw new Error("External capture requires the current trusted workspace.");
-  }
-
-  return service.cancelExternalCapture({
-    workspaceRoot,
-    captureId: captureIdFromRequest(request)
-  });
+  return action();
 }
 
 export function handleCodexStatusIpc(
@@ -412,22 +353,6 @@ function captureWorkspaceSessionId(request: unknown) {
   return request && typeof request === "object" && "workspaceSessionId" in request
     ? request.workspaceSessionId
     : undefined;
-}
-
-function captureIdFromRequest(request: unknown) {
-  if (request && typeof request === "object" && "captureId" in request && typeof request.captureId === "string") {
-    return request.captureId;
-  }
-
-  throw new Error("External capture id is required.");
-}
-
-function captureAgentName(request: unknown) {
-  if (request && typeof request === "object" && "agentName" in request && typeof request.agentName === "string") {
-    return request.agentName;
-  }
-
-  return undefined;
 }
 
 function parseUrl(url: string) {

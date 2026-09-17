@@ -1,4 +1,3 @@
-import CodeMirror from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
@@ -9,6 +8,7 @@ import { markdownLineCount, reviewBlockedLineRanges } from "../editor/aiReview/b
 import { aiReviewExtension } from "../editor/aiReview/extension";
 import { reviewHunksForDisplay, type DisplayReviewHunk } from "../editor/aiReview/diff";
 import type { EditorReviewState } from "../editor/aiReview/types";
+import { CodeMirrorHost } from "../editor/CodeMirrorHost";
 import { imageDropPasteExtension } from "../editor/imageDropPaste";
 import { ideaAutocompleteExtension, type IdeaAutocompleteStatus } from "../editor/ideaAutocomplete/extension";
 import {
@@ -105,8 +105,19 @@ export interface EditorWritingAssistsProps {
   };
 }
 
+export interface EditorConflictState {
+  relativePath: string;
+  busy: boolean;
+  /** No outside item exists for the path any more; the only exit is a reload. */
+  orphan?: boolean;
+  onRestore: () => void;
+  onKeep: () => void;
+}
+
 interface EditorPaneProps {
   file: FileTreeNode | null;
+  /** Conflict mode: the buffer stays editable while the writer decides. */
+  conflict?: EditorConflictState | null;
   /** Reports the live main selection (ADR-0017); null when empty/whitespace. */
   onActiveSelectionChange?: (range: { from: number; to: number } | null) => void;
   value: string;
@@ -122,6 +133,14 @@ interface EditorPaneProps {
       markTaskComplete: string;
     };
     selectionComments: SelectionCommentsEditorLabels;
+    conflictBanner: {
+      title: string;
+      orphanTitle: string;
+      restore: string;
+      keep: string;
+      reload: string;
+      confirmDiscard: string;
+    };
     reviewToolbar: {
       changes: (count: number) => string;
       previous: string;
@@ -233,6 +252,7 @@ function createEditorTheme(editorFontSize: number, editorFontPreset: EditorFontP
 
 export function EditorPane({
   file,
+  conflict = null,
   onActiveSelectionChange,
   value,
   editorFontSize,
@@ -959,6 +979,31 @@ export function EditorPane({
 
   return (
     <main className="editor-shell">
+      {!review && conflict ? (
+        <div className="editor-review-toolbar editor-conflict-toolbar" role="status">
+          <div className="editor-review-title">
+            <span className="editor-review-path">{conflict.relativePath}</span>
+            <span aria-hidden="true">·</span>
+            <span>{conflict.orphan ? labels.conflictBanner.orphanTitle : labels.conflictBanner.title}</span>
+          </div>
+          <div className="editor-review-actions">
+            {conflict.orphan ? (
+              <button type="button" disabled={conflict.busy} onClick={conflict.onKeep}>
+                {labels.conflictBanner.reload}
+              </button>
+            ) : (
+              <>
+                <button type="button" disabled={conflict.busy} onClick={conflict.onRestore}>
+                  {labels.conflictBanner.restore}
+                </button>
+                <button type="button" disabled={conflict.busy} onClick={conflict.onKeep}>
+                  {labels.conflictBanner.keep}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
       {review ? (
         <div className="editor-review-toolbar">
           {review.mode === "edit_file" ? (
@@ -1021,7 +1066,7 @@ export function EditorPane({
         </div>
       ) : null}
       <div className="editor-surface" ref={editorSurfaceRef}>
-        <CodeMirror
+        <CodeMirrorHost
           value={value}
           basicSetup={{
             foldGutter: false,

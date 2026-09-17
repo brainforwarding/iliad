@@ -8,14 +8,20 @@ import {
   movePath,
   readMarkdownFile,
   renamePath,
-  writeMarkdownFile,
   type FileTreeNode
 } from "../fs/fileOps.js";
-import { trackWorkspaceMutation } from "../fs/workspaceMutationMarkers.js";
+import { toKind } from "../fs/pathSafety.js";
 import type { WorkspaceInfo } from "../launch/workspace.js";
+import {
+  type BaselineRecord,
+  type MarkdownWriteExpectation,
+  type MarkdownWriteResult,
+  WorkspaceBaselineService
+} from "../review/workspaceBaseline.js";
 
 interface RegisterFileIpcOptions {
   getWindowWorkspace?: (webContentsId: number) => WorkspaceInfo | null;
+  baselineService?: WorkspaceBaselineService;
 }
 
 function assertCurrentWorkspace(
@@ -40,27 +46,62 @@ function assertCurrentWorkspace(
   return currentWorkspace.path;
 }
 
+export function workspaceRelativePosix(workspaceRoot: string, absolutePath: string) {
+  return path.relative(path.resolve(workspaceRoot), path.resolve(absolutePath)).split(path.sep).join("/");
+}
+
+export function normalizeWriteExpectation(value: unknown): MarkdownWriteExpectation {
+  if (value && typeof value === "object" && "kind" in value) {
+    const record = value as Record<string, unknown>;
+
+    if (record.kind === "absent") {
+      return { kind: "absent" };
+    }
+
+    if (record.kind === "hash" && typeof record.hash === "string" && record.hash) {
+      return { kind: "hash", hash: record.hash };
+    }
+  }
+
+  // Without a trusted disk identity the renderer must not overwrite anything.
+  return { kind: "absent" };
+}
+
 export function registerFileIpc(options: RegisterFileIpcOptions = {}) {
+  const baseline = options.baselineService ?? new WorkspaceBaselineService();
+
   ipcMain.handle("file:read-markdown", async (_event, workspaceRoot: string, filePath: string): Promise<string> => {
     return readMarkdownFile(workspaceRoot, filePath);
   });
 
-  ipcMain.handle("file:write-markdown", async (event, workspaceRoot: string, filePath: string, content: string) => {
-    const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
+  ipcMain.handle(
+    "file:write-markdown",
+    async (event, workspaceRoot: string, filePath: string, content: string, expected?: unknown): Promise<MarkdownWriteResult> => {
+      const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
+      const relativePath = workspaceRelativePosix(verifiedWorkspaceRoot, filePath);
 
-    return trackWorkspaceMutation(verifiedWorkspaceRoot, [filePath], () =>
-      writeMarkdownFile(verifiedWorkspaceRoot, filePath, content)
-    );
-  });
+      return baseline.writeMarkdownIfUnchanged(verifiedWorkspaceRoot, {
+        relativePath,
+        content,
+        expected: normalizeWriteExpectation(expected)
+      });
+    }
+  );
 
   ipcMain.handle(
     "file:create-markdown",
     async (event, workspaceRoot: string, directoryPath: string, requestedName: string): Promise<FileTreeNode> => {
       const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
 
-      return trackWorkspaceMutation(verifiedWorkspaceRoot, undefined, () =>
-        createMarkdownFile(verifiedWorkspaceRoot, directoryPath, requestedName)
-      );
+      const created = await baseline.runIliadMutation(verifiedWorkspaceRoot, {
+        paths: [],
+        operation: () => createMarkdownFile(verifiedWorkspaceRoot, directoryPath, requestedName),
+        record: (result) => [
+          { op: "set", relativePath: workspaceRelativePosix(verifiedWorkspaceRoot, result.path), content: result.content }
+        ]
+      });
+      const { content: _content, ...node } = created;
+      return node;
     }
   );
 
@@ -69,18 +110,22 @@ export function registerFileIpc(options: RegisterFileIpcOptions = {}) {
     async (event, workspaceRoot: string, directoryPath: string, requestedName: string): Promise<FileTreeNode> => {
       const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
 
-      return trackWorkspaceMutation(verifiedWorkspaceRoot, undefined, () =>
-        createFolder(verifiedWorkspaceRoot, directoryPath, requestedName)
-      );
+      return baseline.runIliadMutation(verifiedWorkspaceRoot, {
+        paths: [],
+        operation: () => createFolder(verifiedWorkspaceRoot, directoryPath, requestedName)
+      });
     }
   );
 
   ipcMain.handle("file:rename", async (event, workspaceRoot: string, filePath: string, requestedName: string) => {
     const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
+    const fromRelativePath = workspaceRelativePosix(verifiedWorkspaceRoot, filePath);
 
-    return trackWorkspaceMutation(verifiedWorkspaceRoot, undefined, () =>
-      renamePath(verifiedWorkspaceRoot, filePath, requestedName)
-    );
+    return baseline.runIliadMutation(verifiedWorkspaceRoot, {
+      paths: [fromRelativePath],
+      operation: () => renamePath(verifiedWorkspaceRoot, filePath, requestedName),
+      record: (result) => moveRecords(verifiedWorkspaceRoot, fromRelativePath, result)
+    });
   });
 
   ipcMain.handle(
@@ -92,27 +137,56 @@ export function registerFileIpc(options: RegisterFileIpcOptions = {}) {
       targetDirectoryPath: string
     ): Promise<FileTreeNode> => {
       const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
+      const fromRelativePath = workspaceRelativePosix(verifiedWorkspaceRoot, sourcePath);
 
-      return trackWorkspaceMutation(verifiedWorkspaceRoot, undefined, () =>
-        movePath(verifiedWorkspaceRoot, sourcePath, targetDirectoryPath)
-      );
+      return baseline.runIliadMutation(verifiedWorkspaceRoot, {
+        paths: [fromRelativePath],
+        operation: () => movePath(verifiedWorkspaceRoot, sourcePath, targetDirectoryPath),
+        record: (result) => moveRecords(verifiedWorkspaceRoot, fromRelativePath, result)
+      });
     }
   );
 
   ipcMain.handle("file:duplicate", async (event, workspaceRoot: string, filePath: string): Promise<FileTreeNode> => {
     const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
 
-    return trackWorkspaceMutation(verifiedWorkspaceRoot, undefined, () =>
-      duplicatePath(verifiedWorkspaceRoot, filePath)
-    );
+    return baseline.runIliadMutation(verifiedWorkspaceRoot, {
+      paths: [],
+      operation: () => duplicatePath(verifiedWorkspaceRoot, filePath),
+      record: (result) =>
+        result.kind === "markdown"
+          ? [{ op: "reconcile", relativePath: workspaceRelativePosix(verifiedWorkspaceRoot, result.path) }]
+          : []
+    });
   });
 
   ipcMain.handle("file:trash", async (event, workspaceRoot: string, filePath: string) => {
     const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
+    const relativePath = workspaceRelativePosix(verifiedWorkspaceRoot, filePath);
 
-    await trackWorkspaceMutation(verifiedWorkspaceRoot, undefined, async () => {
-      await assertTrashablePath(verifiedWorkspaceRoot, filePath);
-      await shell.trashItem(filePath);
+    await baseline.runIliadMutation(verifiedWorkspaceRoot, {
+      paths: [relativePath],
+      operation: async () => {
+        await assertTrashablePath(verifiedWorkspaceRoot, filePath);
+        await shell.trashItem(filePath);
+      },
+      record: () => [{ op: "remove", relativePath }]
     });
   });
+}
+
+function moveRecords(workspaceRoot: string, fromRelativePath: string, result: FileTreeNode): BaselineRecord[] {
+  const toRelativePath = workspaceRelativePosix(workspaceRoot, result.path);
+
+  if (fromRelativePath === toRelativePath) {
+    return [];
+  }
+
+  const directory = result.kind === "directory";
+
+  if (!directory && toKind(result.path, false) !== "markdown" && toKind(fromRelativePath, false) !== "markdown") {
+    return [];
+  }
+
+  return [{ op: "move", fromRelativePath, toRelativePath, directory }];
 }

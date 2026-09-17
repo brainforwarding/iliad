@@ -4,6 +4,27 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AgentProposalStore } from "../../electron/agent/proposalStore";
 import type { AgentChangeProposal } from "../../electron/agent/types";
+import { WorkspaceBaselineService, type GuardedMarkdownWriter } from "../../electron/review/workspaceBaseline";
+
+function flakyWriter(): { writer: GuardedMarkdownWriter; failNext: { value: boolean } } {
+  const real = new WorkspaceBaselineService().markdownWriter();
+  const failNext = { value: false };
+
+  return {
+    failNext,
+    writer: {
+      write: async (request) => {
+        if (failNext.value) {
+          failNext.value = false;
+          throw new Error("EACCES: permission denied");
+        }
+
+        return real.write(request);
+      },
+      remove: (request) => real.remove(request)
+    }
+  };
+}
 
 let root = "";
 let userData = "";
@@ -314,5 +335,175 @@ describe("AgentProposalStore", () => {
       true
     );
     expect(staleFile?.kind === "edit_file" && staleFile.hunks?.every((hunk) => hunk.status === "stale")).toBe(true);
+  });
+
+  it("keeps hunks pending when the file accept write fails, then succeeds on retry", async () => {
+    const filePath = path.join(root, "doc.md");
+    const base = "one\ntwo\n";
+    await writeFile(filePath, base, "utf8");
+    const { writer, failNext } = flakyWriter();
+    const store = new AgentProposalStore(userData, { markdownWriter: writer });
+    const saved = await store.saveProposal(
+      proposal({
+        files: [
+          {
+            id: "file-test",
+            kind: "edit_file",
+            status: "pending",
+            relativePath: "doc.md",
+            baseHash: "",
+            baseContent: base,
+            replacement: "ONE\ntwo\n",
+            unifiedDiff: ""
+          }
+        ]
+      })
+    );
+
+    failNext.value = true;
+    const failed = await store.applyProposalFile(root, saved.id, "file-test");
+    expect(failed.status).toBe("failed");
+    const failedFile = failed.proposal.files[0];
+    expect(failedFile.kind === "edit_file" && failedFile.hunks?.every((hunk) => hunk.status === "pending")).toBe(true);
+    expect(await readFile(filePath, "utf8")).toBe(base);
+
+    const retried = await store.applyProposalFile(root, saved.id, "file-test");
+    expect(retried.status).toBe("applied");
+    expect(await readFile(filePath, "utf8")).toBe("ONE\ntwo\n");
+  });
+
+  it("keeps a hunk pending when the hunk write fails and marks it stale on disk drift", async () => {
+    const filePath = path.join(root, "doc.md");
+    const base = "one\nsame\nthree\nsame\nfive\n";
+    await writeFile(filePath, base, "utf8");
+    const { writer, failNext } = flakyWriter();
+    const store = new AgentProposalStore(userData, { markdownWriter: writer });
+    const saved = await store.saveProposal(
+      proposal({
+        files: [
+          {
+            id: "file-test",
+            kind: "edit_file",
+            status: "pending",
+            relativePath: "doc.md",
+            baseHash: "",
+            baseContent: base,
+            replacement: "ONE\nsame\nthree\nsame\nFIVE\n",
+            unifiedDiff: ""
+          }
+        ]
+      })
+    );
+    const file = saved.files[0];
+    const hunks = file.kind === "edit_file" ? file.hunks ?? [] : [];
+
+    failNext.value = true;
+    const failed = await store.resolveProposalHunk(root, saved.id, file.id, hunks[0].id, "accept");
+    expect(failed.status).toBe("pending");
+    expect(await readFile(filePath, "utf8")).toBe(base);
+
+    const accepted = await store.resolveProposalHunk(root, saved.id, file.id, hunks[0].id, "accept");
+    expect(accepted.status).toBe("accepted");
+    expect(await readFile(filePath, "utf8")).toMatch(/^ONE\n/);
+
+    await writeFile(filePath, "manual\n", "utf8");
+    const stale = await store.resolveProposalHunk(root, saved.id, file.id, hunks[1].id, "accept");
+    expect(stale.status).toBe("stale");
+    expect(await readFile(filePath, "utf8")).toBe("manual\n");
+  });
+
+  it("reports a pending outside review instead of marking hunks stale, and applies once it is resolved", async () => {
+    const filePath = path.join(root, "doc.md");
+    const base = "one\nsame\nthree\n";
+    await writeFile(filePath, base, "utf8");
+    const real = new WorkspaceBaselineService().markdownWriter();
+    const pending = { value: true };
+    const writer: GuardedMarkdownWriter = {
+      write: (request) => real.write(request),
+      remove: (request) => real.remove(request),
+      hasPendingReview: () => pending.value
+    };
+    const store = new AgentProposalStore(userData, { markdownWriter: writer });
+    const saved = await store.saveProposal(
+      proposal({
+        files: [
+          {
+            id: "file-test",
+            kind: "edit_file",
+            status: "pending",
+            relativePath: "doc.md",
+            baseHash: "",
+            baseContent: base,
+            replacement: "ONE\nsame\nthree\n",
+            unifiedDiff: ""
+          }
+        ]
+      })
+    );
+    const file = saved.files[0];
+    const hunks = file.kind === "edit_file" ? file.hunks ?? [] : [];
+
+    const blocked = await store.applyProposalFile(root, saved.id, file.id);
+    expect(blocked.status).toBe("failed");
+    expect(blocked.proposal.files[0].error).toBe(
+      "This file has outside changes waiting for review. Keep or restore them first."
+    );
+    const blockedFile = blocked.proposal.files[0];
+    expect(blockedFile.kind === "edit_file" && blockedFile.hunks?.every((hunk) => hunk.status === "pending")).toBe(true);
+    expect(await readFile(filePath, "utf8")).toBe(base);
+
+    const blockedHunk = await store.resolveProposalHunk(root, saved.id, file.id, hunks[0].id, "accept");
+    expect(blockedHunk.status).toBe("pending");
+    expect(await readFile(filePath, "utf8")).toBe(base);
+
+    pending.value = false;
+    const applied = await store.applyProposalFile(root, saved.id, file.id);
+    expect(applied.status).toBe("applied");
+    expect(applied.proposal.files[0].error).toBeUndefined();
+    expect(await readFile(filePath, "utf8")).toBe("ONE\nsame\nthree\n");
+  });
+
+  it("revives stale hunks once the disk matches the proposal again", async () => {
+    const filePath = path.join(root, "doc.md");
+    const base = "one\nsame\nthree\nsame\nfive\n";
+    await writeFile(filePath, base, "utf8");
+    const store = new AgentProposalStore(userData, { markdownWriter: new WorkspaceBaselineService().markdownWriter() });
+    const saved = await store.saveProposal(
+      proposal({
+        files: [
+          {
+            id: "file-test",
+            kind: "edit_file",
+            status: "pending",
+            relativePath: "doc.md",
+            baseHash: "",
+            baseContent: base,
+            replacement: "ONE\nsame\nthree\nsame\nFIVE\n",
+            unifiedDiff: ""
+          }
+        ]
+      })
+    );
+    const file = saved.files[0];
+    const hunks = file.kind === "edit_file" ? file.hunks ?? [] : [];
+
+    await writeFile(filePath, "manual\n", "utf8");
+    const stale = await store.resolveProposalHunk(root, saved.id, file.id, hunks[0].id, "accept");
+    expect(stale.status).toBe("stale");
+
+    // The outside change is restored (or undone): the proposal applies again.
+    await writeFile(filePath, base, "utf8");
+    const accepted = await store.resolveProposalHunk(root, saved.id, file.id, hunks[0].id, "accept");
+    expect(accepted.status).toBe("accepted");
+    expect(await readFile(filePath, "utf8")).toMatch(/^ONE\n/);
+    const acceptedFile = accepted.proposal.files[0];
+    expect(acceptedFile.kind === "edit_file" && acceptedFile.hunks?.map((hunk) => hunk.status)).toEqual(["accepted", "pending"]);
+
+    await writeFile(filePath, "manual again\n", "utf8");
+    expect((await store.applyProposalFile(root, saved.id, file.id)).status).toBe("partially_applied");
+    await writeFile(filePath, "ONE\nsame\nthree\nsame\nfive\n", "utf8");
+    const applied = await store.applyProposalFile(root, saved.id, file.id);
+    expect(applied.status).toBe("applied");
+    expect(await readFile(filePath, "utf8")).toBe("ONE\nsame\nthree\nsame\nFIVE\n");
   });
 });

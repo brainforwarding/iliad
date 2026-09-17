@@ -12,7 +12,7 @@ import {
   sameRelativePath
 } from "../assistant/pendingFileTree";
 import type { ReviewTarget } from "../assistant/reviewNavigation";
-import type { AgentApi, AgentChangeProposal, FileTreeNode, WorkspaceInfo } from "../types/iliad";
+import type { AgentApi, AgentChangeProposal, ExternalReviewSnapshot, FileTreeNode, WorkspaceInfo } from "../types/iliad";
 
 export type { ReviewTarget };
 
@@ -32,6 +32,12 @@ interface UseAgentProposalsOptions {
   setSelectedTreePath: (path: string | null) => void;
   requestReviewReveal?: (path: string) => void;
   onReviewNavigation?: () => void;
+  /** True while the active document's buffer is in save conflict with disk. */
+  activeFileInConflict?: boolean;
+  /** Fires when the active file's outside-change item disappears while the buffer is in conflict. */
+  onActiveFileExternalItemCleared?: () => void;
+  /** Reloads the active document from disk (used when its outside item vanishes under a clean buffer). */
+  reloadActiveDocument?: () => Promise<void>;
   strings: AppStrings;
   tree: FileTreeNode[];
   workspace: WorkspaceInfo | null;
@@ -232,6 +238,9 @@ export function useAgentProposals({
   setSelectedTreePath,
   requestReviewReveal,
   onReviewNavigation,
+  activeFileInConflict = false,
+  onActiveFileExternalItemCleared,
+  reloadActiveDocument,
   strings,
   tree,
   workspace
@@ -244,7 +253,15 @@ export function useAgentProposals({
   const activeFilePathRef = useRef<string | null>(null);
   const activeFileRelativePathRef = useRef<string | null>(null);
   const reviewActionKeyRef = useRef<string | null>(null);
+  const agentProposalsRef = useRef<AgentChangeProposal[]>([]);
+  const agentReviewTargetRef = useRef<ReviewTarget | null>(null);
+  const activeFileInConflictRef = useRef(activeFileInConflict);
+  const activeReviewActionRef = useRef(false);
+  const externalRevisionRef = useRef(0);
   workspacePathRef.current = workspace?.path ?? null;
+  agentProposalsRef.current = agentProposals;
+  agentReviewTargetRef.current = agentReviewTarget;
+  activeFileInConflictRef.current = activeFileInConflict;
 
   useEffect(() => {
     workspacePathRef.current = workspace?.path ?? null;
@@ -289,6 +306,18 @@ export function useAgentProposals({
         });
       }
 
+      // A document reached through history or a link that has a pending
+      // outside edit must open in review, never as an editable copy of the
+      // outside content (typing there would only end in a conflict).
+      if (!next && !activeFileInConflictRef.current && workspacePathRef.current) {
+        const externalTarget = externalReviewTargetForActiveFile(agentProposals, workspacePathRef.current, activeRel);
+
+        if (externalTarget) {
+          logReviewNavigation("active_file_entered_external_review", { target: externalTarget, activeRel });
+          return externalTarget;
+        }
+      }
+
       return next;
     });
   }, [activeFile?.path, activeFile?.relativePath, agentProposals]);
@@ -309,6 +338,7 @@ export function useAgentProposals({
       return [];
     }
 
+    externalRevisionRef.current = 0;
     setAgentProposals(proposals);
     setProposalLoadState("loaded");
     return proposals;
@@ -328,6 +358,13 @@ export function useAgentProposals({
       const byId = new Map(current.map((proposal) => [proposal.id, proposal]));
 
       for (const proposal of scopedProposals) {
+        // Outside-change reviews are owned by main; a terminal copy from an
+        // action response must not linger as a ghost until the next push.
+        if (isExternalFilesystemProposal(proposal) && !proposal.files.some(fileHasMutableReview)) {
+          byId.delete(proposal.id);
+          continue;
+        }
+
         byId.set(proposal.id, proposal);
       }
 
@@ -338,6 +375,18 @@ export function useAgentProposals({
   }, []);
 
   const pendingTreeChanges = useMemo(() => buildPendingFileTreeChanges(agentProposals), [agentProposals]);
+  const applyExternalReviewUpdateRef = useRef<(snapshot: ExternalReviewSnapshot) => void>(() => undefined);
+
+  const refreshExternalReview = useCallback(async () => {
+    const workspaceSessionId = workspace?.sessionId;
+
+    if (!workspaceSessionId) {
+      return;
+    }
+
+    const snapshot = await window.iliad.agent.getExternalReview({ workspaceSessionId });
+    applyExternalReviewUpdateRef.current(snapshot);
+  }, [workspace?.sessionId]);
 
   const runReviewAction = useCallback(async <T,>(key: string, action: () => Promise<T>) => {
     if (reviewActionKeyRef.current) {
@@ -349,6 +398,7 @@ export function useAgentProposals({
     }
 
     reviewActionKeyRef.current = key;
+    activeReviewActionRef.current = true;
     setReviewActionKey(key);
     logReviewNavigation("review_action_start", { key });
 
@@ -365,6 +415,7 @@ export function useAgentProposals({
     } finally {
       if (reviewActionKeyRef.current === key) {
         reviewActionKeyRef.current = null;
+        activeReviewActionRef.current = false;
         setReviewActionKey(null);
       }
     }
@@ -378,8 +429,9 @@ export function useAgentProposals({
         }
 
         const proposal = agentProposals.find((candidate) => candidate.id === proposalId);
+        const externalReview = isExternalFilesystemProposal(proposal);
 
-        if (!isExternalFilesystemProposal(proposal)) {
+        if (!externalReview) {
           await flushSave();
         }
 
@@ -389,14 +441,30 @@ export function useAgentProposals({
             proposalId,
             fileId
           });
-        mergeAgentProposals([result.proposal]);
+
+        if (workspacePathRef.current !== workspace.path) {
+          // The workspace changed while the action was in flight; nothing
+          // below may touch the new workspace's editor.
+          return;
+        }
 
         if (result.kind === "edit_file" && result.content) {
           const file = result.proposal.files.find((candidate) => candidate.id === result.fileId);
+          // Compare against the file that is active now, not the one captured
+          // before the await: navigating mid-apply must not clobber another buffer.
+          const activeRelativePath = activeFileRelativePathRef.current;
 
-          if (file && activeFile?.relativePath && sameRelativePath(activeFile.relativePath, file.relativePath)) {
+          // Load before refreshing the outside review, so a conflict buffer is
+          // already replaced when the item's disappearance is processed.
+          if (file && activeRelativePath && sameRelativePath(activeRelativePath, file.relativePath)) {
             loadDocument(result.content);
           }
+        }
+
+        if (externalReview) {
+          await refreshExternalReview();
+        } else {
+          mergeAgentProposals([result.proposal]);
         }
 
         if (result.kind === "create_file" && result.file && result.content) {
@@ -415,8 +483,9 @@ export function useAgentProposals({
 
         if (result.kind === "delete_file") {
           const file = result.proposal.files.find((candidate) => candidate.id === result.fileId);
+          const activeRelativePath = activeFileRelativePathRef.current;
 
-          if (file?.kind === "delete_file" && activeFile?.relativePath && sameRelativePath(activeFile.relativePath, file.relativePath)) {
+          if (file?.kind === "delete_file" && activeRelativePath && sameRelativePath(activeRelativePath, file.relativePath)) {
             await refreshTree(workspace.path);
             setActiveFile(null);
             setSelectedTreePath(null);
@@ -429,6 +498,11 @@ export function useAgentProposals({
         if (result.status === "applied" || (resultFile && !fileHasMutableReview(resultFile))) {
           setNotice(result.kind === "create_file" ? strings.assistant.status.created : strings.assistant.status.applied);
           setAgentReviewTarget(null);
+        } else if (externalReview && result.status === "stale") {
+          // The outside tool changed the file again (or reverted it). Main
+          // already refreshed the review; the target stays so the refreshed
+          // item is what the editor shows next.
+          setNotice(strings.assistant.outsideChangeStale);
         } else {
           setError(resultFile?.error ?? strings.assistant.errorFallback);
         }
@@ -440,12 +514,12 @@ export function useAgentProposals({
     },
     [
       activeFile?.path,
-      activeFile?.relativePath,
       agentProposals,
       flushSave,
       loadDocument,
       mergeAgentProposals,
       recordNormalNavigation,
+      refreshExternalReview,
       refreshTree,
       runReviewAction,
       setActiveFile,
@@ -453,6 +527,7 @@ export function useAgentProposals({
       setNotice,
       setSelectedTreePath,
       strings.assistant.errorFallback,
+      strings.assistant.outsideChangeStale,
       strings.assistant.status.applied,
       strings.assistant.status.created,
       workspace
@@ -467,8 +542,10 @@ export function useAgentProposals({
         }
 
         const proposal = agentProposals.find((candidate) => candidate.id === proposalId);
+        const externalReview = isExternalFilesystemProposal(proposal);
+        const wasInConflict = activeFileInConflictRef.current;
 
-        if (!isExternalFilesystemProposal(proposal)) {
+        if (!externalReview) {
           await flushSave();
         }
 
@@ -478,7 +555,41 @@ export function useAgentProposals({
             workspaceRoot: workspace.path,
             proposalId
           });
-          mergeAgentProposals([proposal]);
+
+          if (workspacePathRef.current !== workspace.path) {
+            return;
+          }
+
+          if (externalReview) {
+            await refreshExternalReview();
+            await refreshTree(workspace.path);
+
+            if (proposal.status === "stale") {
+              // Nothing was restored: the items changed or were resolved
+              // elsewhere first. The refreshed review replaces them in place.
+              setNotice(strings.assistant.outsideChangeStale);
+              return "stale" as const;
+            }
+
+            const activeRelativePath = activeFileRelativePathRef.current;
+            const activePath = activeFilePathRef.current;
+            const touchedActive = proposal.files.some(
+              (file) => activeRelativePath && sameRelativePath(activeRelativePath, file.relativePath)
+            );
+
+            if (touchedActive && activePath && !wasInConflict) {
+              try {
+                loadDocument(await window.iliad.readMarkdown(workspace.path, activePath));
+              } catch {
+                setActiveFile(null);
+                setSelectedTreePath(null);
+                loadDocument("");
+              }
+            }
+          } else {
+            mergeAgentProposals([proposal]);
+          }
+
           setAgentReviewTarget((current) => (current?.proposalId === proposalId ? null : current));
         } catch (rejectError) {
           setError(rejectError instanceof Error ? rejectError.message : strings.assistant.errorFallback);
@@ -486,7 +597,22 @@ export function useAgentProposals({
         }
       });
     },
-    [agentProposals, flushSave, mergeAgentProposals, runReviewAction, setError, strings.assistant.errorFallback, workspace]
+    [
+      agentProposals,
+      flushSave,
+      loadDocument,
+      mergeAgentProposals,
+      refreshExternalReview,
+      refreshTree,
+      runReviewAction,
+      setActiveFile,
+      setError,
+      setNotice,
+      setSelectedTreePath,
+      strings.assistant.errorFallback,
+      strings.assistant.outsideChangeStale,
+      workspace
+    ]
   );
   const rejectAgentProposalStateOnly = useCallback(
     async (proposalId: string) => {
@@ -520,6 +646,9 @@ export function useAgentProposals({
         const previousProposal = agentProposals.find((candidate) => candidate.id === proposalId);
         const previousFile = previousProposal?.files.find((candidate) => candidate.id === fileId);
         const externalReview = isExternalFilesystemProposal(previousProposal);
+        // Read before any await: the refresh below clears the conflict state,
+        // and the reload decision must reflect the state when the writer acted.
+        const wasInConflict = activeFileInConflictRef.current;
 
         if (!externalReview) {
           await flushSave();
@@ -531,18 +660,39 @@ export function useAgentProposals({
             proposalId,
             fileId
           });
-        mergeAgentProposals([proposal]);
+
+        if (workspacePathRef.current !== workspace.path) {
+          return;
+        }
 
         if (externalReview) {
+          await refreshExternalReview();
           await refreshTree(workspace.path);
+          const activeRelativePath = activeFileRelativePathRef.current;
+          const activePath = activeFilePathRef.current;
+          const resultFile = proposal.files.find((candidate) => candidate.id === fileId);
 
+          // A stale result carries the file marked stale, or no file at all
+          // when the item was already gone (another window acted first).
+          if (!resultFile || resultFile.status === "stale") {
+            // Nothing was written; keep the review target so the refreshed
+            // item replaces the old one in place instead of dropping to an
+            // editable buffer holding unreviewed text.
+            setNotice(strings.assistant.outsideChangeStale);
+            return "stale" as const;
+          }
+
+          // In conflict mode the buffer holds the writer's edits; restoring the
+          // previous version on disk must leave that buffer alone.
           if (
             previousFile &&
-            activeFile?.relativePath &&
-            sameRelativePath(activeFile.relativePath, previousFile.relativePath)
+            activeRelativePath &&
+            activePath &&
+            sameRelativePath(activeRelativePath, previousFile.relativePath) &&
+            !wasInConflict
           ) {
             try {
-              const text = await window.iliad.readMarkdown(workspace.path, activeFile.path);
+              const text = await window.iliad.readMarkdown(workspace.path, activePath);
               loadDocument(text);
             } catch {
               setActiveFile(null);
@@ -550,6 +700,8 @@ export function useAgentProposals({
               loadDocument("");
             }
           }
+        } else {
+          mergeAgentProposals([proposal]);
         }
 
         setAgentReviewTarget((current) =>
@@ -562,17 +714,19 @@ export function useAgentProposals({
       });
     },
     [
-      activeFile,
       agentProposals,
       flushSave,
       loadDocument,
       mergeAgentProposals,
+      refreshExternalReview,
       refreshTree,
       runReviewAction,
       setActiveFile,
       setError,
+      setNotice,
       setSelectedTreePath,
       strings.assistant.errorFallback,
+      strings.assistant.outsideChangeStale,
       workspace
     ]
   );
@@ -593,15 +747,21 @@ export function useAgentProposals({
             hunkId,
             decision
           });
+
+        if (workspacePathRef.current !== workspace.path) {
+          return;
+        }
+
         mergeAgentProposals([result.proposal]);
 
         const file = result.proposal.files.find((candidate) => candidate.id === result.fileId);
+        const activeRelativePath = activeFileRelativePathRef.current;
 
         if (
           file?.kind === "edit_file" &&
           result.content &&
-          activeFile?.relativePath &&
-          sameRelativePath(activeFile.relativePath, file.relativePath)
+          activeRelativePath &&
+          sameRelativePath(activeRelativePath, file.relativePath)
         ) {
           loadDocument(result.content);
         }
@@ -620,7 +780,6 @@ export function useAgentProposals({
       });
     },
     [
-      activeFile?.relativePath,
       flushSave,
       loadDocument,
       mergeAgentProposals,
@@ -755,7 +914,10 @@ export function useAgentProposals({
       }
 
       if (file.kind === "delete_file") {
-        const node = findNodeByRelativePath(tree, file.relativePath);
+        const found = findNodeByRelativePath(tree, file.relativePath);
+        // A folder that took the file's name is not the document: the delete
+        // is reviewed virtually, from its own ghost row.
+        const node = found?.kind === "markdown" ? found : null;
 
         if (node && !sameRelativePath(activeFile?.relativePath ?? "", file.relativePath)) {
           logReviewNavigation("select_target_open_delete_node", {
@@ -821,6 +983,120 @@ export function useAgentProposals({
       workspace
     ]
   );
+
+  /**
+   * Single entry point for outside-change review state pushed or pulled from
+   * main. Stale revisions and other workspaces are ignored; the external
+   * proposal is replaced or removed; the tree refreshes when the item set
+   * changed by path; the active file's item auto-selects unless the buffer is
+   * in conflict, where the banner owns the decision.
+   */
+  const applyExternalReviewUpdate = useCallback(
+    (snapshot: ExternalReviewSnapshot) => {
+      const workspacePath = workspacePathRef.current;
+
+      if (!workspacePath || snapshot.workspaceRoot !== workspacePath) {
+        return;
+      }
+
+      // A pull and a push often carry the same revision; applying it twice
+      // would re-run the active-file side effects on stale refs.
+      if (
+        snapshot.revision < externalRevisionRef.current ||
+        (snapshot.revision === externalRevisionRef.current && externalRevisionRef.current !== 0)
+      ) {
+        logReviewNavigation("external_review_stale_revision", {
+          revision: snapshot.revision,
+          knownRevision: externalRevisionRef.current
+        });
+        return;
+      }
+
+      externalRevisionRef.current = snapshot.revision;
+      const incoming = snapshot.proposal;
+      const previous = agentProposalsRef.current.find(isExternalFilesystemProposal) ?? null;
+      const previousPaths = new Set((previous?.files ?? []).map((file) => normalizeRelativePath(file.relativePath)));
+      const nextPaths = new Set((incoming?.files ?? []).map((file) => normalizeRelativePath(file.relativePath)));
+      const pathSetChanged =
+        previousPaths.size !== nextPaths.size || [...previousPaths].some((relativePath) => !nextPaths.has(relativePath));
+
+      setAgentProposals((current) => {
+        const rest = current.filter((proposal) => !isExternalFilesystemProposal(proposal));
+        const next = incoming ? [...rest, incoming] : rest;
+        return next.sort((a, b) => Date.parse(b.updatedAt || b.createdAt) - Date.parse(a.updatedAt || a.createdAt));
+      });
+
+      if (previous) {
+        setAgentReviewTarget((current) => {
+          if (!current || current.proposalId !== previous.id) {
+            return current;
+          }
+
+          return incoming?.files.some((file) => file.id === current.fileId) ? current : null;
+        });
+      }
+
+      if (pathSetChanged) {
+        void refreshTree(workspacePath).catch(() => undefined);
+      }
+
+      const activeRelativePath = activeFileRelativePathRef.current;
+
+      if (!activeRelativePath) {
+        return;
+      }
+
+      const normalizedActive = normalizeRelativePath(activeRelativePath);
+      const hadItem = previousPaths.has(normalizedActive);
+      const hasItem = nextPaths.has(normalizedActive);
+
+      if (hadItem && !hasItem) {
+        if (activeFileInConflictRef.current) {
+          // The writer's buffer is the truth; disk matches its saved identity again.
+          onActiveFileExternalItemCleared?.();
+        } else if (!activeReviewActionRef.current) {
+          // The read-only review vanished under a clean buffer that may hold
+          // the outside content (opened while the item was pending): reload
+          // so the editor never shows text that is not on disk.
+          void reloadActiveDocument?.();
+        }
+      }
+
+      if (!hasItem || !incoming || activeFileInConflictRef.current) {
+        return;
+      }
+
+      const target = externalReviewTargetForActiveFile([incoming], workspacePath, activeRelativePath);
+
+      if (!target) {
+        return;
+      }
+
+      const currentTarget = agentReviewTargetRef.current;
+      const alreadyReviewingFile =
+        currentTarget?.proposalId === target.proposalId && currentTarget.fileId === target.fileId;
+      const decision = externalActiveFileAutoSelectionDecision({
+        hasActiveReview: Boolean(currentTarget),
+        alreadyReviewingFile
+      });
+
+      logReviewNavigation("external_review_active_file_target", {
+        target,
+        revision: snapshot.revision,
+        autoSelectDecision: decision,
+        activeRel: activeRelativePath
+      });
+
+      if (decision === "allow") {
+        void selectAgentReviewTarget(target);
+      }
+    },
+    [onActiveFileExternalItemCleared, refreshTree, reloadActiveDocument, selectAgentReviewTarget]
+  );
+
+  useEffect(() => {
+    applyExternalReviewUpdateRef.current = applyExternalReviewUpdate;
+  }, [applyExternalReviewUpdate]);
 
   const clearReviewForNormalNavigation = useCallback(
     (node: FileTreeNode) => {
@@ -906,8 +1182,20 @@ export function useAgentProposals({
       return null;
     }
 
+    // Conflict mode shows the writer's editable buffer instead of the
+    // read-only outside review of the same file.
+    if (
+      activeFileInConflict &&
+      isExternalFilesystemProposal(proposal) &&
+      file.kind === "edit_file" &&
+      activeFile?.relativePath &&
+      sameRelativePath(activeFile.relativePath, file.relativePath)
+    ) {
+      return null;
+    }
+
     return { proposal, file };
-  }, [agentProposals, agentReviewTarget, workspace]);
+  }, [activeFile?.relativePath, activeFileInConflict, agentProposals, agentReviewTarget, workspace]);
 
   const virtualReviewFile = useMemo<FileTreeNode | null>(() => {
     if (!activeReview || (activeReview.file.kind !== "create_file" && activeReview.file.kind !== "delete_file")) {
@@ -955,11 +1243,11 @@ export function useAgentProposals({
         },
         onAcceptFile: () => {
           onReviewNavigation?.();
-          void applyAgentProposalFile(activeReview.proposal.id, activeReview.file.id);
+          void applyAgentProposalFile(activeReview.proposal.id, activeReview.file.id).catch(() => undefined);
         },
         onRejectFile: () => {
           onReviewNavigation?.();
-          void rejectAgentProposalFile(activeReview.proposal.id, activeReview.file.id);
+          void rejectAgentProposalFile(activeReview.proposal.id, activeReview.file.id).catch(() => undefined);
         }
       };
     }
@@ -976,11 +1264,11 @@ export function useAgentProposals({
         },
         onAcceptFile: () => {
           onReviewNavigation?.();
-          void applyAgentProposalFile(activeReview.proposal.id, activeReview.file.id);
+          void applyAgentProposalFile(activeReview.proposal.id, activeReview.file.id).catch(() => undefined);
         },
         onRejectFile: () => {
           onReviewNavigation?.();
-          void rejectAgentProposalFile(activeReview.proposal.id, activeReview.file.id);
+          void rejectAgentProposalFile(activeReview.proposal.id, activeReview.file.id).catch(() => undefined);
         }
       };
     }
@@ -996,11 +1284,11 @@ export function useAgentProposals({
       },
       onAcceptFile: () => {
         onReviewNavigation?.();
-        void applyAgentProposalFile(activeReview.proposal.id, activeReview.file.id);
+        void applyAgentProposalFile(activeReview.proposal.id, activeReview.file.id).catch(() => undefined);
       },
       onRejectFile: () => {
         onReviewNavigation?.();
-        void rejectAgentProposalFile(activeReview.proposal.id, activeReview.file.id);
+        void rejectAgentProposalFile(activeReview.proposal.id, activeReview.file.id).catch(() => undefined);
       }
     };
   }, [
@@ -1018,9 +1306,12 @@ export function useAgentProposals({
     activeReview,
     agentProposals,
     applyAgentProposalFile,
+    applyExternalReviewUpdate,
     clearReviewForNormalNavigation,
     editorReview,
     mergeAgentProposals,
+    refreshExternalReview,
+    reviewActionBusy: Boolean(reviewActionKey),
     pendingTreeChanges,
     proposalLoadState,
     rejectAgentProposal,

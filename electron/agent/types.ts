@@ -119,57 +119,6 @@ export interface AgentMarkdownContextDocumentListResponse {
   truncated: boolean;
 }
 
-export interface ExternalAgentCaptureStartResponse {
-  captureId: string;
-  workspaceRoot: string;
-  startedAt: string;
-  markdownFileCount: number;
-  resumed?: boolean;
-}
-
-export type ExternalAgentCaptureFinishResponse =
-  | {
-      status: "proposal";
-      captureId: string;
-      proposal: AgentChangeProposal;
-      restoredRelativePaths: string[];
-      restoredCreateRelativePaths: string[];
-      unsupportedNotes: string[];
-    }
-  | {
-      status: "empty";
-      captureId: string;
-      restoredRelativePaths: string[];
-      restoredCreateRelativePaths: string[];
-      unsupportedNotes: string[];
-    }
-  | {
-      status: "unsupported_restored";
-      captureId: string;
-      restoredRelativePaths: string[];
-      restoredCreateRelativePaths: string[];
-      unsupportedNotes: string[];
-    }
-  | {
-      status: "git_baseline_changed";
-      captureId: string;
-      unsupportedNotes: string[];
-    }
-  | {
-      status: "unsafe";
-      captureId: string;
-      message: string;
-      unsupportedNotes: string[];
-    };
-
-export interface ExternalAgentCaptureCancelResponse {
-  status: "canceled";
-  captureId: string;
-  restoredRelativePaths: string[];
-  restoredCreateRelativePaths: string[];
-  unsupportedNotes: string[];
-}
-
 export type NormalizeContextDropResponse =
   | { ok: true; relativePath: string }
   | { ok: false; reason: "outside_workspace" | "not_markdown" | "unsafe" | "not_found" };
@@ -262,6 +211,7 @@ export interface ExternalFilesystemProposalMetadata {
   kind: "external_filesystem";
   baselineId: string;
   snapshotId: string;
+  revision: number;
   liveDisk: true;
   sessionScoped: true;
 }
@@ -614,32 +564,6 @@ export type CodexOpenDeviceLoginResponse =
       ok: false;
       error: CodexAccountConnectionError;
     };
-
-export interface ApplyAgentPatchRequest {
-  workspaceRoot: string;
-  patch: AgentPatchProposal;
-}
-
-export interface ApplyAgentPatchResponse {
-  savedAt: string;
-  content: string;
-}
-
-export interface ApplyAgentCreateDocumentRequest {
-  workspaceRoot: string;
-  document: AgentCreateDocumentProposal;
-}
-
-export interface ApplyAgentCreateDocumentResponse {
-  savedAt: string;
-  file: {
-    name: string;
-    path: string;
-    relativePath: string;
-    kind: "markdown";
-  };
-  content: string;
-}
 
 export interface ApplyAgentProposalFileRequest {
   workspaceRoot: string;

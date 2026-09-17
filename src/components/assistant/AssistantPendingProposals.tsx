@@ -14,7 +14,7 @@ interface AssistantPendingProposalsProps {
   labels: AppStrings["assistant"];
   proposals: AgentChangeProposal[];
   onAcceptProposalFile: (proposalId: string, fileId: string) => Promise<void>;
-  onRejectProposalFile: (proposalId: string, fileId: string) => Promise<void>;
+  onRejectProposalFile: (proposalId: string, fileId: string) => Promise<unknown>;
 }
 
 export function AssistantPendingProposals({
@@ -74,7 +74,9 @@ export function AssistantPendingProposals({
                 onClick={() => {
                   void (async () => {
                     for (const candidate of reviewableFiles) {
-                      await onAcceptProposalFile(proposal.id, candidate.id);
+                      // The action reports its own error; one failure must
+                      // not stop the rest or surface as an unhandled rejection.
+                      await onAcceptProposalFile(proposal.id, candidate.id).catch(() => undefined);
                     }
                   })();
                 }}
@@ -87,7 +89,9 @@ export function AssistantPendingProposals({
                 onClick={() => {
                   void (async () => {
                     for (const candidate of reviewableFiles) {
-                      await onRejectProposalFile(proposal.id, candidate.id);
+                      // The action reports its own error; one failure must
+                      // not stop the rest or surface as an unhandled rejection.
+                      await onRejectProposalFile(proposal.id, candidate.id).catch(() => undefined);
                     }
                   })();
                 }}

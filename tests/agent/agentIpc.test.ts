@@ -522,46 +522,60 @@ describe("agent IPC trust validation", () => {
     });
   });
 
-  it("starts external capture only through the resolved workspace session", async () => {
-    const { handleStartExternalCaptureIpc } = await import("../../electron/ipc/agent");
+  it("returns the outside-changes review only through the resolved workspace session", async () => {
+    const { handleGetExternalReviewIpc } = await import("../../electron/ipc/agent");
     const workspaceRoot = await tempWorkspace();
     const resolveWorkspaceRoot = vi.fn(async () => workspaceRoot);
-    const startExternalCapture = vi.fn(async () => ({
-      captureId: "capture-ipc",
-      workspaceRoot,
-      startedAt: "2026-06-17T12:00:00.000Z",
-      markdownFileCount: 1
-    }));
+    const getExternalReview = vi.fn(() => ({ workspaceRoot, revision: 3, proposal: null }));
 
-    const response = await handleStartExternalCaptureIpc(
+    const response = await handleGetExternalReviewIpc(
       trustedEvent(),
-      { workspaceSessionId: "session-test", workspaceRoot: "/untrusted", agentName: "Claude" },
-      { startExternalCapture },
+      { workspaceSessionId: "session-test", workspaceRoot: "/untrusted" },
+      { getExternalReview },
       resolveWorkspaceRoot
     );
 
     expect(resolveWorkspaceRoot).toHaveBeenCalledWith(expect.anything(), "session-test");
-    expect(startExternalCapture).toHaveBeenCalledWith({ workspaceRoot, agentName: "Claude" });
-    expect(response.captureId).toBe("capture-ipc");
+    expect(getExternalReview).toHaveBeenCalledWith(workspaceRoot);
+    expect(response.revision).toBe(3);
   });
 
-  it("rejects untrusted external capture senders before calling the service", async () => {
-    const { handleStartExternalCaptureIpc } = await import("../../electron/ipc/agent");
-    const startExternalCapture = vi.fn();
+  it("rejects untrusted outside-changes senders before calling the service", async () => {
+    const { handleGetExternalReviewIpc } = await import("../../electron/ipc/agent");
+    const getExternalReview = vi.fn();
     electronMock.fromWebContents.mockReturnValue(null);
 
     await expect(
-      handleStartExternalCaptureIpc(
+      handleGetExternalReviewIpc(
         {
           sender: {},
           senderFrame: { url: "file:///Applications/Iliad.app/index.html" }
         } as never,
         { workspaceSessionId: "session-test" },
-        { startExternalCapture },
+        { getExternalReview },
         vi.fn(async () => "/workspace")
       )
     ).rejects.toThrow("untrusted window");
-    expect(startExternalCapture).not.toHaveBeenCalled();
+    expect(getExternalReview).not.toHaveBeenCalled();
+  });
+
+  it("rejects untrusted review action senders before running the action", async () => {
+    const { handleProposalActionIpc } = await import("../../electron/ipc/agent");
+    const action = vi.fn(async () => "done");
+    electronMock.fromWebContents.mockReturnValue(null);
+
+    expect(() =>
+      handleProposalActionIpc(
+        {
+          sender: {},
+          senderFrame: { url: "file:///Applications/Iliad.app/index.html" }
+        } as never,
+        action
+      )
+    ).toThrow("untrusted window");
+    expect(action).not.toHaveBeenCalled();
+
+    await expect(handleProposalActionIpc(trustedEvent(), action)).resolves.toBe("done");
   });
 
   it("trusts production file frames only when they belong to an app window", async () => {

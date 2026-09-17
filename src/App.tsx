@@ -19,7 +19,6 @@ import {
   type SaveStatus
 } from "./app/useDocumentPersistence";
 import {
-  externalActiveFileAutoSelectionDecision,
   externalReviewTargetForActiveFile,
   useAgentProposals
 } from "./app/useAgentProposals";
@@ -28,6 +27,7 @@ import { useWorkspace } from "./app/useWorkspace";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
 import {
   EditorPane,
+  type EditorConflictState,
   type EditorSelectionCommentsProps,
   type EditorTightenProps,
   type EditorWritingAssistsProps
@@ -68,7 +68,6 @@ import { useWritingAssistPreferences } from "./preferences/writingAssistPreferen
 import type { EditorView } from "@codemirror/view";
 import type {
   AgentChangeProposal,
-  ExternalAgentCaptureStartResponse,
   FileTreeNode,
   MarkdownContentSearchResponse,
   UpdateCheckResult,
@@ -84,6 +83,7 @@ function statusText(
     saving: string;
     unsaved: string;
     error: string;
+    conflict: string;
   }
 ): string {
   if (saveStatus === "saved") {
@@ -127,17 +127,6 @@ function emptyContentSearchResponse(query: string): MarkdownContentSearchRespons
   };
 }
 
-const externalCaptureAutoFinishDelayMs = 1200;
-const externalCaptureAutoRetryDelayMs = 500;
-
-function debugExternalCapture(event: string, details: Record<string, unknown>) {
-  if (!import.meta.env.DEV) {
-    return;
-  }
-
-  console.debug(`[external-capture] ${event} ${JSON.stringify(details)}`);
-}
-
 export default function App() {
   const { language, setLanguage, t: strings } = useAppLanguage();
   const [error, setError] = useState<string | null>(null);
@@ -167,8 +156,10 @@ export default function App() {
     clearDocument,
     flushSave,
     handleEditorChange,
-    loadDocument
+    loadDocument,
+    resumeAfterConflict
   } = useDocumentPersistence({ activeFile, messages: strings.documentMessages, onError: setError, workspace });
+  const activeFileInConflict = saveStatus === "conflict";
   const {
     editorFontPreset,
     editorFontSize,
@@ -187,8 +178,6 @@ export default function App() {
   } = useWritingAssistPreferences();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [assistantOpen, setAssistantOpen] = useState(false);
-  const [externalCapture, setExternalCapture] = useState<ExternalAgentCaptureStartResponse | null>(null);
-  const [externalCaptureBusy, setExternalCaptureBusy] = useState(false);
   const [runningAssistantRunId, setRunningAssistantRunId] = useState<string | null>(null);
   const [focusMode, setFocusMode] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() =>
@@ -216,8 +205,6 @@ export default function App() {
   const contentSearchRevealRequestIdRef = useRef(0);
   const runningAssistantRunIdRef = useRef<string | null>(null);
   const contextAttachmentMoveHandlerRef = useRef<ContextAttachmentMoveHandler | null>(null);
-  const externalCaptureAutoFinishTimerRef = useRef<number | null>(null);
-  const finishExternalCaptureRef = useRef<((options?: { automatic?: boolean }) => Promise<void>) | null>(null);
   const editorNavigationDuringRunRef = useRef<{ runId: string | null; changed: boolean }>({
     runId: null,
     changed: false
@@ -306,14 +293,19 @@ export default function App() {
     workspace
   });
 
+  const reloadActiveDocumentRef = useRef<() => Promise<void>>(async () => undefined);
   const {
     activeReview,
     agentProposals,
     applyAgentProposalFile,
+    applyExternalReviewUpdate,
     clearReviewForNormalNavigation,
     editorReview,
     mergeAgentProposals,
     proposalLoadState,
+    refreshExternalReview,
+    reviewActionBusy,
+    rejectAgentProposal,
     rejectAgentProposalFile,
     selectAgentReviewTarget,
     setAgentProposals,
@@ -333,11 +325,113 @@ export default function App() {
     setSelectedTreePath,
     requestReviewReveal,
     onReviewNavigation: markEditorNavigationDuringRun,
+    activeFileInConflict,
+    onActiveFileExternalItemCleared: resumeAfterConflict,
+    reloadActiveDocument: () => reloadActiveDocumentRef.current(),
     strings,
     tree,
     workspace
   });
   const activeReviewRef = useRef(activeReview);
+
+  useEffect(() => {
+    if (lastWorkspaceChange?.watcherDegraded && lastWorkspaceChange.workspaceRoot === workspace?.path) {
+      setNotice(strings.workspaceMessages.watcherDegraded);
+    }
+  }, [lastWorkspaceChange, strings.workspaceMessages.watcherDegraded, workspace?.path]);
+
+  // Outside-change review is owned by main: subscribe to its pushes for the
+  // current workspace and pull once after the proposal list has loaded.
+  useEffect(() => {
+    if (!workspace?.sessionId) {
+      return;
+    }
+
+    return window.iliad.agent.onExternalReviewChanged((snapshot) => {
+      applyExternalReviewUpdate(snapshot);
+    });
+  }, [applyExternalReviewUpdate, workspace?.sessionId]);
+
+  useEffect(() => {
+    if (proposalLoadState !== "loaded" || !workspace?.sessionId) {
+      return;
+    }
+
+    void refreshExternalReview().catch(() => undefined);
+  }, [proposalLoadState, refreshExternalReview, workspace?.sessionId]);
+
+  const conflictReviewTarget = useMemo(() => {
+    if (!activeFileInConflict || !workspace || activeFile?.kind !== "markdown") {
+      return null;
+    }
+
+    return externalReviewTargetForActiveFile(agentProposals, workspace.path, activeFile.relativePath);
+  }, [activeFile, activeFileInConflict, agentProposals, workspace]);
+  const reloadActiveDocumentFromDisk = useCallback(async () => {
+    if (!workspace || !activeFile || activeFile.kind !== "markdown") {
+      return;
+    }
+
+    try {
+      loadDocument(await window.iliad.readMarkdown(workspace.path, activeFile.path));
+    } catch (readError) {
+      setError(readError instanceof Error ? readError.message : strings.fileMessages.openFileFallback);
+    }
+  }, [activeFile, loadDocument, strings.fileMessages.openFileFallback, workspace]);
+  useEffect(() => {
+    reloadActiveDocumentRef.current = reloadActiveDocumentFromDisk;
+  }, [reloadActiveDocumentFromDisk]);
+  const editorConflict = useMemo<EditorConflictState | null>(() => {
+    if (!activeFile || activeFile.kind !== "markdown") {
+      return null;
+    }
+
+    if (!conflictReviewTarget) {
+      // Conflict with no pending item for this path: disk already matches
+      // the baseline again, so the only honest exit is to reload from disk.
+      if (!activeFileInConflict) {
+        return null;
+      }
+
+      return {
+        relativePath: activeFile.relativePath,
+        busy: reviewActionBusy,
+        orphan: true,
+        onRestore: () => undefined,
+        onKeep: () => {
+          if (!window.confirm(strings.editor.conflictBanner.confirmDiscard)) {
+            return;
+          }
+
+          void reloadActiveDocumentFromDisk();
+        }
+      };
+    }
+
+    return {
+      relativePath: activeFile.relativePath,
+      busy: reviewActionBusy,
+      onRestore: () => {
+        void rejectAgentProposalFile(conflictReviewTarget.proposalId, conflictReviewTarget.fileId).catch(() => undefined);
+      },
+      onKeep: () => {
+        if (!window.confirm(strings.editor.conflictBanner.confirmDiscard)) {
+          return;
+        }
+
+        void applyAgentProposalFile(conflictReviewTarget.proposalId, conflictReviewTarget.fileId).catch(() => undefined);
+      }
+    };
+  }, [
+    activeFile,
+    activeFileInConflict,
+    applyAgentProposalFile,
+    conflictReviewTarget,
+    rejectAgentProposalFile,
+    reloadActiveDocumentFromDisk,
+    reviewActionBusy,
+    strings.editor.conflictBanner.confirmDiscard
+  ]);
 
   useEffect(() => {
     activeReviewRef.current = activeReview;
@@ -360,8 +454,10 @@ export default function App() {
   const selectedTreePathForFileTree = useMemo(() => {
     if (
       activeReview?.file.kind === "delete_file" &&
-      !findNodeByRelativePath(tree, activeReview.file.relativePath)
+      findNodeByRelativePath(tree, activeReview.file.relativePath)?.kind !== "markdown"
     ) {
+      // No document row to select: the delete is reviewed from its ghost row
+      // (the file is gone, or a folder took its name).
       return null;
     }
 
@@ -582,451 +678,6 @@ export default function App() {
     },
     [activeFile?.relativePath, markEditorNavigationDuringRun, selectAgentReviewTarget, selectedTreePath]
   );
-  const reloadActiveFileAfterExternalCapture = useCallback(
-    async ({
-      restoredRelativePaths,
-      restoredCreateRelativePaths,
-      proposal
-    }: {
-      restoredRelativePaths: string[];
-      restoredCreateRelativePaths: string[];
-      proposal?: AgentChangeProposal;
-    }) => {
-      if (!activeFile || activeFile.kind !== "markdown") {
-        return;
-      }
-
-      if (restoredCreateRelativePaths.some((relativePath) => sameRelativePath(relativePath, activeFile.relativePath))) {
-        setActiveFile(null);
-        setSelectedTreePath(null);
-        clearDocument();
-        return;
-      }
-
-      if (!restoredRelativePaths.some((relativePath) => sameRelativePath(relativePath, activeFile.relativePath))) {
-        return;
-      }
-
-      const proposalFile = proposal?.files.find(
-        (file) =>
-          (file.kind === "edit_file" || file.kind === "delete_file") &&
-          sameRelativePath(file.relativePath, activeFile.relativePath)
-      );
-
-      if (proposalFile?.kind === "edit_file" || proposalFile?.kind === "delete_file") {
-        loadDocument(proposalFile.baseContent);
-        return;
-      }
-
-      if (!workspace) {
-        return;
-      }
-
-      try {
-        const text = await window.iliad.readMarkdown(workspace.path, activeFile.path);
-        loadDocument(text);
-      } catch (readError) {
-        setError(readError instanceof Error ? readError.message : strings.fileMessages.openFileFallback);
-      }
-    },
-    [activeFile, clearDocument, loadDocument, setActiveFile, setError, setSelectedTreePath, strings.fileMessages.openFileFallback, workspace]
-  );
-  const clearExternalCaptureAutoFinishTimer = useCallback(() => {
-    if (externalCaptureAutoFinishTimerRef.current === null) {
-      return;
-    }
-
-    window.clearTimeout(externalCaptureAutoFinishTimerRef.current);
-    externalCaptureAutoFinishTimerRef.current = null;
-  }, []);
-  const scheduleExternalCaptureAutoFinish = useCallback(
-    (delayMs = externalCaptureAutoFinishDelayMs) => {
-      clearExternalCaptureAutoFinishTimer();
-      externalCaptureAutoFinishTimerRef.current = window.setTimeout(() => {
-        externalCaptureAutoFinishTimerRef.current = null;
-        void finishExternalCaptureRef.current?.({ automatic: true });
-      }, delayMs);
-    },
-    [clearExternalCaptureAutoFinishTimer]
-  );
-  const startExternalCapture = useCallback(async (options: { silent?: boolean } = {}) => {
-    const workspaceSessionId = workspace?.sessionId;
-
-    if (!workspaceSessionId || externalCapture || externalCaptureBusy) {
-      return;
-    }
-
-    setExternalCaptureBusy(true);
-    try {
-      clearExternalCaptureAutoFinishTimer();
-      await flushSave();
-      const capture = await window.iliad.agent.startExternalCapture({ workspaceSessionId });
-      setExternalCapture(capture);
-      debugExternalCapture("start_succeeded", {
-        captureId: capture.captureId,
-        markdownFileCount: capture.markdownFileCount,
-        resumed: capture.resumed === true,
-        silent: options.silent === true
-      });
-      if (capture.resumed) {
-        scheduleExternalCaptureAutoFinish(externalCaptureAutoRetryDelayMs);
-      }
-      if (!options.silent) {
-        setNotice(strings.assistant.externalCapture.started);
-      }
-    } catch (captureError) {
-      if (import.meta.env.DEV) {
-        console.warn(
-          "[external-capture] start_failed",
-          JSON.stringify({
-            message: captureError instanceof Error ? captureError.message : String(captureError),
-            silent: options.silent === true
-          })
-        );
-      }
-      if (!options.silent) {
-        setError(captureError instanceof Error ? captureError.message : strings.assistant.externalCapture.errorFallback);
-      }
-    } finally {
-      setExternalCaptureBusy(false);
-    }
-  }, [
-    clearExternalCaptureAutoFinishTimer,
-    externalCapture,
-    externalCaptureBusy,
-    flushSave,
-    scheduleExternalCaptureAutoFinish,
-    setError,
-    strings.assistant.externalCapture.errorFallback,
-    strings.assistant.externalCapture.started,
-    workspace?.sessionId
-  ]);
-  const finishExternalCapture = useCallback(async (options: { automatic?: boolean } = {}) => {
-    const automatic = options.automatic === true;
-    const workspaceSessionId = workspace?.sessionId;
-
-    if (!workspaceSessionId || !externalCapture) {
-      return;
-    }
-
-    if (externalCaptureBusy) {
-      if (automatic) {
-        scheduleExternalCaptureAutoFinish(externalCaptureAutoRetryDelayMs);
-      }
-      return;
-    }
-
-    if (saveStatus !== "saved") {
-      if (automatic) {
-        scheduleExternalCaptureAutoFinish(externalCaptureAutoRetryDelayMs);
-      } else {
-        setNotice(strings.assistant.externalCapture.saveBeforeReview);
-      }
-      return;
-    }
-
-    setExternalCaptureBusy(true);
-    try {
-      clearExternalCaptureAutoFinishTimer();
-      const result = await window.iliad.agent.finishExternalCapture({
-        workspaceSessionId,
-        captureId: externalCapture.captureId
-      });
-      debugExternalCapture("finish_result", {
-        captureId: externalCapture.captureId,
-        status: result.status,
-        automatic,
-        unsupportedNoteCount: result.unsupportedNotes.length,
-        proposalFileCount: result.status === "proposal" ? result.proposal.files.length : 0
-      });
-      await refreshTree(workspace.path);
-
-      if (result.status === "proposal") {
-        mergeAgentProposals([result.proposal]);
-
-        const target =
-          activeFile?.kind === "markdown"
-            ? externalReviewTargetForActiveFile([result.proposal], workspace.path, activeFile.relativePath)
-            : null;
-        if (target) {
-          const latestActiveReview = activeReviewRef.current;
-          const alreadyReviewingFile =
-            latestActiveReview?.proposal.id === target.proposalId && latestActiveReview.file.id === target.fileId;
-          const targetFile = result.proposal.files.find((file) => file.id === target.fileId);
-          const autoSelectDecision = externalActiveFileAutoSelectionDecision({
-            hasActiveReview: Boolean(latestActiveReview),
-            alreadyReviewingFile
-          });
-
-          logReviewNavigation("external_capture_active_file_target", {
-            target,
-            targetProposalId: target.proposalId,
-            targetFileId: target.fileId,
-            targetKind: targetFile?.kind ?? null,
-            targetRel: targetFile?.relativePath ?? null,
-            alreadyReviewingFile,
-            autoSelectDecision,
-            hasActiveReview: Boolean(latestActiveReview),
-            activeRel: activeFile?.relativePath ?? null,
-            activeRelativePath: activeFile?.relativePath ?? null
-          });
-
-          if (autoSelectDecision === "allow") {
-            await selectAgentReviewTarget(target);
-          } else if (autoSelectDecision === "block_different_target") {
-            logReviewNavigation("external_capture_active_file_target_suppressed", {
-              target,
-              targetProposalId: target.proposalId,
-              targetFileId: target.fileId,
-              targetKind: targetFile?.kind ?? null,
-              targetRel: targetFile?.relativePath ?? null,
-              autoSelectDecision,
-              activeReviewProposalId: latestActiveReview?.proposal.id ?? null,
-              activeReviewFileId: latestActiveReview?.file.id ?? null,
-              activeReviewRel: latestActiveReview?.file.relativePath ?? null,
-              activeReviewKind: latestActiveReview?.file.kind ?? null,
-              activeRel: activeFile?.relativePath ?? null,
-              activeRelativePath: activeFile?.relativePath ?? null
-            });
-          }
-        }
-
-      } else if (result.status === "git_baseline_changed") {
-        setNotice(strings.assistant.externalCapture.gitBaselineChanged);
-      } else if (result.status === "unsafe") {
-        setError(result.message || strings.assistant.externalCapture.unsafe);
-      } else {
-        if (result.status === "empty") {
-          const hadExternalFilesystemReview = hasPendingExternalFilesystemReview;
-          setAgentProposals((current) =>
-            current.filter((proposal) => proposal.metadata?.kind !== "external_filesystem")
-          );
-          setAgentReviewTarget((current) => {
-            if (!current) {
-              return current;
-            }
-
-            const proposal = agentProposals.find((candidate) => candidate.id === current.proposalId);
-            return proposal?.metadata?.kind === "external_filesystem" ? null : current;
-          });
-
-          if (hadExternalFilesystemReview && activeFile?.kind === "markdown") {
-            try {
-              const text = await window.iliad.readMarkdown(workspace.path, activeFile.path);
-              loadDocument(text);
-            } catch {
-              setActiveFile(null);
-              setSelectedTreePath(null);
-              clearDocument();
-            }
-          }
-
-          if (automatic) {
-            return;
-          }
-        }
-
-        setNotice(
-          result.status === "unsupported_restored"
-            ? strings.assistant.externalCapture.unsupportedRestored
-            : strings.assistant.externalCapture.noChanges
-        );
-      }
-
-    } catch (captureError) {
-      if (automatic) {
-        scheduleExternalCaptureAutoFinish(externalCaptureAutoRetryDelayMs);
-      } else {
-        setError(captureError instanceof Error ? captureError.message : strings.assistant.externalCapture.errorFallback);
-      }
-    } finally {
-      setExternalCaptureBusy(false);
-    }
-  }, [
-    clearExternalCaptureAutoFinishTimer,
-    externalCapture,
-    externalCaptureBusy,
-    activeFile,
-    agentProposals,
-    clearDocument,
-    hasPendingExternalFilesystemReview,
-    loadDocument,
-    mergeAgentProposals,
-    refreshTree,
-    saveStatus,
-    scheduleExternalCaptureAutoFinish,
-    selectAgentReviewTarget,
-    setActiveFile,
-    setAgentProposals,
-    setAgentReviewTarget,
-    setError,
-    setSelectedTreePath,
-    strings.assistant.externalCapture,
-    workspace
-  ]);
-  useEffect(() => {
-    finishExternalCaptureRef.current = finishExternalCapture;
-  }, [finishExternalCapture]);
-  useEffect(() => {
-    return () => clearExternalCaptureAutoFinishTimer();
-  }, [clearExternalCaptureAutoFinishTimer]);
-  useEffect(() => {
-    if (!externalCapture || externalCaptureBusy || !workspace || !lastWorkspaceChange?.markdownChanged) {
-      return;
-    }
-
-    if (lastWorkspaceChange.workspaceRoot !== workspace.path) {
-      return;
-    }
-
-    debugExternalCapture("workspace_change_scheduled_finish", {
-      workspaceRootMatches: true,
-      treeChanged: lastWorkspaceChange.treeChanged,
-      markdownChanged: lastWorkspaceChange.markdownChanged
-    });
-    scheduleExternalCaptureAutoFinish();
-  }, [externalCapture, externalCaptureBusy, lastWorkspaceChange, scheduleExternalCaptureAutoFinish, workspace]);
-  useEffect(() => {
-    debugExternalCapture("arm_gate", {
-      hasCapture: Boolean(externalCapture),
-      externalCaptureBusy,
-      hasWorkspaceSession: Boolean(workspace?.sessionId),
-      proposalLoadState,
-      saveStatus,
-      runningAssistantRunId
-    });
-
-    if (
-      externalCapture ||
-      externalCaptureBusy ||
-      !workspace?.sessionId ||
-      proposalLoadState !== "loaded" ||
-      saveStatus !== "saved" ||
-      runningAssistantRunId
-    ) {
-      return;
-    }
-
-    void startExternalCapture({ silent: true });
-  }, [
-    externalCapture,
-    externalCaptureBusy,
-    proposalLoadState,
-    runningAssistantRunId,
-    saveStatus,
-    startExternalCapture,
-    workspace?.sessionId
-  ]);
-  useEffect(() => {
-    if (
-      externalCapture ||
-      externalCaptureBusy ||
-      !workspace?.sessionId ||
-      !lastWorkspaceChange?.markdownChanged ||
-      lastWorkspaceChange.workspaceRoot !== workspace.path ||
-      proposalLoadState !== "loaded" ||
-      saveStatus !== "saved" ||
-      runningAssistantRunId
-    ) {
-      return;
-    }
-
-    debugExternalCapture("reclaim_on_workspace_change", {
-      hasCapture: false,
-      proposalLoadState,
-      saveStatus,
-      runningAssistantRunId
-    });
-    void startExternalCapture({ silent: true });
-  }, [
-    externalCapture,
-    externalCaptureBusy,
-    lastWorkspaceChange,
-    proposalLoadState,
-    runningAssistantRunId,
-    saveStatus,
-    startExternalCapture,
-    workspace
-  ]);
-  useEffect(() => {
-    if (!externalCapture || externalCaptureBusy) {
-      return;
-    }
-
-    if (runningAssistantRunId) {
-      void finishExternalCapture({ automatic: true });
-    }
-  }, [
-    externalCapture,
-    externalCaptureBusy,
-    finishExternalCapture,
-    runningAssistantRunId
-  ]);
-  useEffect(() => {
-    if (externalCapture) {
-      return;
-    }
-
-    clearExternalCaptureAutoFinishTimer();
-  }, [clearExternalCaptureAutoFinishTimer, externalCapture]);
-  const cancelExternalCapture = useCallback(async (options: { silent?: boolean } = {}) => {
-    const workspaceSessionId = workspace?.sessionId;
-
-    if (!workspaceSessionId || !externalCapture || externalCaptureBusy) {
-      return;
-    }
-
-    if (saveStatus === "saving") {
-      if (!options.silent) {
-        setNotice(strings.assistant.externalCapture.saveBeforeCancel);
-      }
-      return;
-    }
-
-    if (saveStatus !== "saved" && !options.silent) {
-      setNotice(strings.assistant.externalCapture.saveBeforeCancel);
-      return;
-    }
-
-    setExternalCaptureBusy(true);
-    try {
-      clearExternalCaptureAutoFinishTimer();
-      const result = await window.iliad.agent.cancelExternalCapture({
-        workspaceSessionId,
-        captureId: externalCapture.captureId
-      });
-      await refreshTree(workspace.path);
-      await reloadActiveFileAfterExternalCapture({
-        restoredRelativePaths: result.restoredRelativePaths,
-        restoredCreateRelativePaths: result.restoredCreateRelativePaths
-      });
-      setExternalCapture(null);
-      if (!options.silent) {
-        setNotice(strings.assistant.externalCapture.canceled);
-      }
-    } catch (captureError) {
-      setError(captureError instanceof Error ? captureError.message : strings.assistant.externalCapture.errorFallback);
-    } finally {
-      setExternalCaptureBusy(false);
-    }
-  }, [
-    clearExternalCaptureAutoFinishTimer,
-    externalCapture,
-    externalCaptureBusy,
-    refreshTree,
-    reloadActiveFileAfterExternalCapture,
-    saveStatus,
-    setError,
-    strings.assistant.externalCapture,
-    workspace
-  ]);
-  useEffect(() => {
-    if (!externalCapture || externalCaptureBusy || saveStatus !== "unsaved") {
-      return;
-    }
-
-    void cancelExternalCapture({ silent: true });
-  }, [cancelExternalCapture, externalCapture, externalCaptureBusy, saveStatus]);
   const createMarkdownFileWithNavigation = useCallback(() => {
     markEditorNavigationDuringRun();
     return createMarkdownFile();
@@ -1128,21 +779,55 @@ export default function App() {
     markEditorNavigationDuringRun();
     setPendingReviewDiscarding(true);
 
+    const failures: string[] = [];
+    const externalProposalIds = new Set<string>();
+    let stale = false;
+
     try {
       for (const item of items) {
+        // Outside items are restored as one batch in main, which continues
+        // past individual failures and reports them; internal proposals are
+        // rejected per file. One failure must never stop the rest.
+        if (item.source === "external_filesystem") {
+          if (externalProposalIds.has(item.proposalId)) {
+            continue;
+          }
+
+          externalProposalIds.add(item.proposalId);
+
+          try {
+            stale = (await rejectAgentProposal(item.proposalId)) === "stale" || stale;
+          } catch (rejectError) {
+            failures.push(rejectError instanceof Error ? rejectError.message : String(rejectError));
+          }
+
+          continue;
+        }
+
         for (const fileId of [item.fileId, ...item.duplicateFileIds]) {
-          await rejectAgentProposalFile(item.proposalId, fileId);
+          try {
+            await rejectAgentProposalFile(item.proposalId, fileId);
+          } catch (rejectError) {
+            failures.push(rejectError instanceof Error ? rejectError.message : String(rejectError));
+          }
         }
       }
 
-      setNotice(strings.assistant.status.discarded);
+      if (failures.length > 0) {
+        setError(failures.join(" "));
+      } else if (!stale) {
+        // On a stale outcome the hook already showed the refreshed-review
+        // notice; nothing was discarded.
+        setNotice(strings.assistant.status.discarded);
+      }
     } finally {
       setPendingReviewDiscarding(false);
-      logReviewNavigation("bulk_reject_pending_changes_finish", { count: items.length });
+      logReviewNavigation("bulk_reject_pending_changes_finish", { count: items.length, failures: failures.length });
     }
   }, [
     markEditorNavigationDuringRun,
     pendingReviewDiscarding,
+    rejectAgentProposal,
     rejectAgentProposalFile,
     reviewQueue.visibleItems,
     setNotice,
@@ -1399,8 +1084,6 @@ export default function App() {
     closeTreeContextMenu();
     setAgentProposals([]);
     setAgentReviewTarget(null);
-    setExternalCapture(null);
-    setExternalCaptureBusy(false);
     clearDocument();
     clearHistory();
     setError(null);
@@ -1430,10 +1113,6 @@ export default function App() {
 
     switchInFlightRef.current = true;
     try {
-      if (externalCapture) {
-        await cancelExternalCapture({ silent: true });
-      }
-
       await flushSave();
       const nextWorkspace = await window.iliad.openWorkspaceDialog(language);
 
@@ -1449,8 +1128,6 @@ export default function App() {
       switchInFlightRef.current = false;
     }
   }, [
-    cancelExternalCapture,
-    externalCapture,
     flushSave,
     isInitializing,
     language,
@@ -1468,10 +1145,6 @@ export default function App() {
 
       switchInFlightRef.current = true;
       try {
-        if (externalCapture) {
-          await cancelExternalCapture({ silent: true });
-        }
-
         await flushSave();
         const result = await window.iliad.readDirectory(target.path);
 
@@ -1489,8 +1162,6 @@ export default function App() {
       }
     },
     [
-      cancelExternalCapture,
-      externalCapture,
       flushSave,
       isInitializing,
       pruneRecentWorkspace,
@@ -2210,6 +1881,7 @@ export default function App() {
         <EditorErrorBoundary labels={strings.editor} resetKey={editorFile?.path ?? "empty"}>
           <EditorPane
             file={editorFile}
+            conflict={editorConflict}
             value={editorValue}
             editorFontSize={editorFontSize}
             editorFontPreset={editorFontPreset}

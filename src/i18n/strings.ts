@@ -21,7 +21,8 @@ export const appStrings = {
         saved: (time: string) => `Saved ${time}`,
         saving: "Saving...",
         unsaved: "Unsaved",
-        error: "Error"
+        error: "Error",
+        conflict: "Changed outside Iliad"
       }
     },
     documentClose: {
@@ -205,6 +206,14 @@ export const appStrings = {
         noSuggestion: "No suggestion yet.",
         unavailableInDocument: "Autocomplete needs more writable text here."
       },
+      conflictBanner: {
+        title: "This file changed outside Iliad while you were editing.",
+        orphanTitle: "This file on disk no longer matches what Iliad last read.",
+        restore: "Restore previous version",
+        keep: "Keep outside changes",
+        reload: "Reload from disk",
+        confirmDiscard: "Your unsaved edits in this file will be discarded. Keep the outside changes?"
+      },
       reviewToolbar: {
         changes: (count: number) => (count === 1 ? "1 change" : `${count} changes`),
         previous: "Previous change",
@@ -376,26 +385,8 @@ export const appStrings = {
       discard: "Discard",
       noTextResponse: "The agent returned no text.",
       errorFallback: "Agent request failed.",
+      outsideChangeStale: "That file changed again outside Iliad. The review was refreshed; look at the new version before deciding.",
       fileChanged: "Reopen the original document before applying this proposal.",
-      externalCapture: {
-        title: "External agent changes",
-        start: "Track external changes",
-        active: "Watching external changes",
-        fileCount: (count: number) => (count === 1 ? "1 Markdown file tracked" : `${count} Markdown files tracked`),
-        review: "Review",
-        cancel: "Stop",
-        started: "Watching for external Markdown changes.",
-        proposalReady: "External changes are ready for review.",
-        noChanges: "No external Markdown changes detected.",
-        unsupportedRestored: "Unsupported external changes were restored.",
-        gitBaselineChanged: "External Git changes were accepted outside Iliad.",
-        unsafe: "External changes could not be restored safely.",
-        canceled: "External changes were discarded.",
-        saveBeforeReview: "Save or wait for the current document before reviewing external changes.",
-        saveBeforeCancel: "Save or wait for the current document before canceling capture.",
-        finishBeforeWorkspaceSwitch: "Review or cancel external changes before switching workspaces.",
-        errorFallback: "Could not capture external changes."
-      },
       context: {
         label: "Context for next message",
         auto: "Auto",
@@ -522,7 +513,8 @@ export const appStrings = {
       launchWorkspaceFallback: "Unable to read launch workspace.",
       missingWorkspace: "The last workspace is no longer available. Choose a folder to continue.",
       readWorkspaceFallback: "Unable to read workspace.",
-      recentMissing: "That folder is no longer available."
+      recentMissing: "That folder is no longer available.",
+      watcherDegraded: "Iliad stopped receiving file changes for this folder. Reopen the workspace to watch it again."
     },
     documentMessages: {
       saveDocumentFallback: "Unable to save document."
@@ -579,7 +571,8 @@ export const appStrings = {
         saved: (time: string) => `Guardado ${time}`,
         saving: "Guardando...",
         unsaved: "Sin guardar",
-        error: "Error"
+        error: "Error",
+        conflict: "Cambiado fuera de Iliad"
       }
     },
     documentClose: {
@@ -765,6 +758,14 @@ export const appStrings = {
         noSuggestion: "Sin sugerencia por ahora.",
         unavailableInDocument: "Autocompletar necesita más texto editable aquí."
       },
+      conflictBanner: {
+        title: "Este archivo cambió fuera de Iliad mientras lo editabas.",
+        orphanTitle: "El archivo en disco ya no coincide con lo último que leyó Iliad.",
+        restore: "Restaurar versión anterior",
+        keep: "Conservar cambios externos",
+        reload: "Recargar desde disco",
+        confirmDiscard: "Tus ediciones sin guardar en este archivo se descartarán. ¿Conservar los cambios externos?"
+      },
       reviewToolbar: {
         changes: (count: number) => (count === 1 ? "1 cambio" : `${count} cambios`),
         previous: "Cambio anterior",
@@ -939,26 +940,8 @@ export const appStrings = {
       discard: "Descartar",
       noTextResponse: "El agente no devolvió texto.",
       errorFallback: "Falló la solicitud al agente.",
+      outsideChangeStale: "Ese archivo volvió a cambiar fuera de Iliad. La revisión se actualizó; mira la nueva versión antes de decidir.",
       fileChanged: "Vuelve a abrir el documento original antes de aplicar esta propuesta.",
-      externalCapture: {
-        title: "Cambios de agente externo",
-        start: "Observar cambios externos",
-        active: "Observando cambios externos",
-        fileCount: (count: number) => (count === 1 ? "1 archivo Markdown observado" : `${count} archivos Markdown observados`),
-        review: "Revisar",
-        cancel: "Detener",
-        started: "Observando cambios Markdown externos.",
-        proposalReady: "Los cambios externos están listos para revisar.",
-        noChanges: "No se detectaron cambios Markdown externos.",
-        unsupportedRestored: "Se restauraron cambios externos no compatibles.",
-        gitBaselineChanged: "Git aceptó cambios externos fuera de Iliad.",
-        unsafe: "No se pudieron restaurar los cambios externos de forma segura.",
-        canceled: "Se descartaron los cambios externos.",
-        saveBeforeReview: "Guarda o espera el documento actual antes de revisar cambios externos.",
-        saveBeforeCancel: "Guarda o espera el documento actual antes de cancelar la captura.",
-        finishBeforeWorkspaceSwitch: "Revisa o cancela los cambios externos antes de cambiar de workspace.",
-        errorFallback: "No se pudieron capturar los cambios externos."
-      },
       context: {
         label: "Contexto del próximo mensaje",
         auto: "Auto",
@@ -1087,7 +1070,8 @@ export const appStrings = {
       launchWorkspaceFallback: "No se pudo leer el espacio de trabajo de inicio.",
       missingWorkspace: "El último espacio de trabajo ya no está disponible. Elige una carpeta para continuar.",
       readWorkspaceFallback: "No se pudo leer el espacio de trabajo.",
-      recentMissing: "Esa carpeta ya no está disponible."
+      recentMissing: "Esa carpeta ya no está disponible.",
+      watcherDegraded: "Iliad dejó de recibir cambios de archivos en esta carpeta. Vuelve a abrir el espacio de trabajo para observarla de nuevo."
     },
     documentMessages: {
       saveDocumentFallback: "No se pudo guardar el documento."

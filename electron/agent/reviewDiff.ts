@@ -276,6 +276,24 @@ export function markUnresolvedHunksStale(file: AgentEditFileProposal) {
   }
 }
 
+/**
+ * Disk matches what the proposal expects again (an outside change was
+ * restored, or the writer undid a manual edit): hunks that went stale can be
+ * reviewed once more. Accepted and rejected hunks are left alone.
+ */
+export function reviveStaleHunks(file: AgentEditFileProposal) {
+  let revived = false;
+
+  for (const hunk of file.hunks ?? []) {
+    if (hunk.status === "stale") {
+      hunk.status = "pending";
+      revived = true;
+    }
+  }
+
+  return revived;
+}
+
 export function resolveHunkStatus(decision: "accept" | "reject"): AgentReviewHunkStatus {
   return decision === "accept" ? "accepted" : "rejected";
 }

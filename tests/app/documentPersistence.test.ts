@@ -7,7 +7,8 @@ describe("documentCloseRequiresChoice", () => {
       saved: false,
       saving: false,
       unsaved: true,
-      error: true
+      error: true,
+      conflict: true
     };
 
     for (const [status, expected] of Object.entries(statuses) as Array<[SaveStatus, boolean]>) {

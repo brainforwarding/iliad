@@ -34,6 +34,7 @@ function externalEditProposal(): AgentChangeProposal {
       kind: "external_filesystem",
       baselineId: "baseline-1",
       snapshotId: "snapshot-1",
+      revision: 1,
       liveDisk: true,
       sessionScoped: true
     },
