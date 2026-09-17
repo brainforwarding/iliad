@@ -63,3 +63,16 @@ The fixed pre-request pause is reduced by 450 ms. Direct model latency and perce
 6. **Evaluate actual writing:** compare Flash and the existing provider on English and Spanish fiction, essays, dialogue, and middle-of-paragraph edits. Measure pause-to-visible p50/p95, acceptance and partial acceptance, timeouts, and immediate undo. Target under a second for short suggestions as a product goal, not an observed result. Keep document contents out of diagnostics.
 
 Avoid automatic paragraphs, repeated unrequested retries, animated word-by-word “thinking” displays, and suggestions that repeatedly restate the previous sentence. Those can make the feature busier while reducing the writer's control.
+
+## Follow-up implementation
+
+Implemented the six follow-up areas as follows:
+
+- Compact Example / Transition / Tension actions and a custom direction field. Phrase, sentence, and paragraph remain explicit actions. Helper paragraphs were removed from the controls.
+- Collapsed Writing notes with a voice/audience field and facts/characters field. Notes are local to the workspace path plus document path, can be disabled, and are never inferred from unrelated files. Prompts include up to six relevant fact lines plus voice, bounded to 1,800 characters. Renaming a document currently leaves its notes under the old path; there is no workspace-wide story index.
+- Another requests a fresh candidate using the previous candidates as exclusions. Up to three are retained for the unchanged context and cycle locally. Edits, cursor moves, and document changes invalidate this cache. No background candidate generation.
+- Gemini uses streamGenerateContent SSE. UTF-8 and chunk boundaries are handled incrementally; thoughts are excluded. Only complete-word prefixes are displayed, with small updates coalesced. Typing along, accepting, dismissing, moving, changing focus, or reconfiguring cancels stale work. Acceptance inserts only the visible preview. Other providers continue delivering completed suggestions.
+- Automatic / On demand, an explicit ten-minute pause, configurable generation shortcuts chosen from nonduplicated combinations, and opt-in screen-reader announcements. A compact toolbar offers Accept, Another, previous/next, and dismiss. Notes and shortcut controls use progressive disclosure.
+- Added an eight-case English/Spanish benchmark covering fiction, essays, dialogue, and middle-of-sentence inserts. `npm run benchmark:autocomplete -- --dry-run` verifies the setup without paid requests. Live runs compare Gemini streaming against the existing OpenAI text path, report first-visible p50/p95, completion times, cleaner acceptance, and timeouts. Session-only counters also track acceptance, word acceptance, immediate undo, and pause-to-visible latency, with no prose, filenames, or telemetry transmission. Human writing-quality ratings and live latency measurements still require credentials and a writing session.
+
+The real editor and menu are also available in an isolated synthetic preview at `tests/manual/autocomplete.html` for keyboard, streaming, document-isolation, localization, and responsive checks. No production document or provider is used by this preview.

@@ -41,6 +41,9 @@ interface AutocompleteIdeaRequest {
   trigger?: unknown;
   suggestionKind?: unknown;
   autocompleteApiFallbackEnabled?: unknown;
+  direction?: unknown;
+  guidance?: unknown;
+  avoid?: unknown;
 }
 
 interface WritingAssistStatusRequest {
@@ -59,6 +62,10 @@ interface AutocompleteRuntimeService {
     trigger: IdeaAutocompleteTrigger;
     suggestionKind: IdeaAutocompleteSuggestionKind;
     allowApiFallback: boolean;
+    direction?: string;
+    guidance?: string;
+    avoid?: string[];
+    onPartial?: (raw: string) => void;
     signal: AbortSignal;
   }): Promise<string>;
   writingAssistStatus(request: { autocompleteApiFallbackEnabled: boolean }): Promise<unknown>;
@@ -149,8 +156,14 @@ export async function handleAutocompleteIpc(
   try {
     const rawText = await deps.service.autocompleteIdea({
       ...normalized.request,
-      signal: controller.signal
+      signal: controller.signal,
+      onPartial: (raw) => {
+        if (controller.signal.aborted || deps.controllers.get(key) !== controller || event.sender.isDestroyed()) return;
+        const insert = cleanAutocompleteOutput(raw, normalized.request);
+        if (insert) event.sender.send("autocomplete:partial", { requestId: normalized.request.requestId, insert });
+      }
     });
+    controller.signal.throwIfAborted();
     const insert = cleanAutocompleteOutput(rawText, {
       prefix: normalized.request.prefix,
       suffix: normalized.request.suffix,
@@ -188,6 +201,9 @@ async function normalizeAutocompleteRequest(
         trigger: IdeaAutocompleteTrigger;
         suggestionKind: IdeaAutocompleteSuggestionKind;
         allowApiFallback: boolean;
+        direction?: string;
+        guidance?: string;
+        avoid?: string[];
       };
     }
   | { ok: false; reason: AutocompleteFailureReason }
@@ -238,7 +254,10 @@ async function normalizeAutocompleteRequest(
       nearbyHeadings: sanitizeStringList(request.nearbyHeadings, AUTOCOMPLETE_MAX_HEADING_COUNT),
       trigger: normalizeAutocompleteTrigger(request.trigger),
       suggestionKind: normalizeAutocompleteSuggestionKind(request.suggestionKind),
-      allowApiFallback: request.autocompleteApiFallbackEnabled === true
+      allowApiFallback: request.autocompleteApiFallbackEnabled === true,
+      direction: sanitizeString(request.direction, 240),
+      guidance: sanitizeString(request.guidance, 1800),
+      avoid: Array.isArray(request.avoid) ? request.avoid.filter((text): text is string => typeof text === "string").slice(-3).map((text) => text.slice(0, 700)) : []
     }
   };
 }

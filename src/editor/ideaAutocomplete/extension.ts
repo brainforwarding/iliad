@@ -3,11 +3,16 @@ import { isolateHistory } from "@codemirror/commands";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { buildAutocompleteContext, type BlockedLineRange } from "../writingAssistContext";
 import type { IdeaAutocompleteFailureReason, IdeaAutocompleteResult } from "../../types/iliad";
+import { selectWritingGuidance, type AutocompletePreferences, type WritingGuidance } from "./options";
+import { recordAutocompleteMetric } from "./metrics";
 
 export type IdeaAutocompleteTrigger = "automatic" | "manual";
 export type IdeaAutocompleteSuggestionKind = "inline" | "sentence" | "paragraph";
 
 export interface IdeaAutocompleteRequestPayload {
+  direction?: string;
+  guidance?: string;
+  avoid?: string[];
   requestId: string;
   workspaceSessionId: string;
   documentRelativePath: string;
@@ -24,6 +29,10 @@ export interface IdeaAutocompleteRequestPayload {
 }
 
 export interface IdeaAutocompleteExtensionOptions {
+  preferences?: AutocompletePreferences;
+  guidance?: WritingGuidance;
+  snoozedUntil?: number;
+  onPartial?: (listener: (event: { requestId: string; insert: string }) => void) => () => void;
   enabled: boolean;
   language: "en" | "es";
   workspaceSessionId?: string;
@@ -39,7 +48,7 @@ export interface IdeaAutocompleteExtensionOptions {
 export type IdeaAutocompleteStatus =
   | { state: "idle" }
   | { state: "requesting" }
-  | { state: "shown" }
+  | { state: "shown"; insert?: string; streaming?: boolean; alternativeIndex?: number; alternativeCount?: number }
   | { state: "failed"; reason: IdeaAutocompleteFailureReason };
 
 interface ActiveSuggestion {
@@ -51,6 +60,11 @@ interface ActiveSuggestion {
 }
 
 const refreshAutocompleteEffect = StateEffect.define<void>();
+export type AutocompleteAction = { kind: IdeaAutocompleteSuggestionKind; direction?: string } | "previous" | "next" | "new" | "accept" | "dismiss";
+const controllers = new WeakMap<EditorView, { action(action: AutocompleteAction): boolean }>();
+export function runAutocompleteAction(view: EditorView, action: AutocompleteAction) {
+  return controllers.get(view)?.action(action) ?? false;
+}
 export const ideaAutocompleteDebounceMs = 450;
 export const ideaAutocompleteManualKey = "Mod-Enter";
 export const ideaAutocompleteFallbackManualKey = "Ctrl-Space";
@@ -245,8 +259,51 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
       private cooldownUntil = 0;
       private automaticPausedUntil = 0;
       private dismissals: number[] = [];
+      private unsubscribePartial?: () => void;
+      private variants: string[] = [];
+      private variantIndex = 0;
+      private variantKey = "";
+      private lastKind: IdeaAutocompleteSuggestionKind = "sentence";
+      private direction = "";
+      private requestContext: { from: number; prefix: string; suffix: string } | null = null;
+      private requestStartedAt = 0;
+      private lastEditAt = 0;
+      private measuredVisible = false;
+      private lastEditAccepted = false;
 
-      constructor(private readonly view: EditorView) {}
+      constructor(private readonly view: EditorView) {
+        controllers.set(view, this);
+        this.unsubscribePartial = options.onPartial?.((event) => {
+          if (event.requestId !== this.inFlightRequestId || !this.requestContext || !this.view.hasFocus || this.composing) return;
+          const selection = this.view.state.selection;
+          if (selection.ranges.length !== 1 || !selection.main.empty || selection.main.from !== this.requestContext.from) return;
+          if (this.suggestion && !event.insert.startsWith(this.suggestion.insert)) return;
+          this.suggestion = { requestId: event.requestId, ...this.requestContext, insert: event.insert };
+          this.renderSuggestion(true);
+        });
+      }
+
+      action(action: AutocompleteAction) {
+        if (typeof action === "object") return this.triggerManual(action.kind, action.direction ?? "");
+        if (action === "accept") return this.accept();
+        if (action === "dismiss") return this.dismiss();
+        if (action === "new") return this.triggerManual(this.lastKind, this.direction);
+        if (!this.suggestion || this.variants.length < 2 || this.inFlightRequestId) return false;
+        this.variantIndex = (this.variantIndex + (action === "previous" ? -1 : 1) + this.variants.length) % this.variants.length;
+        this.suggestion = { ...this.suggestion, insert: this.variants[this.variantIndex] };
+        this.renderSuggestion();
+        return true;
+      }
+
+      private renderSuggestion(streaming = false) {
+        if (!this.measuredVisible && this.requestStartedAt) {
+          recordAutocompleteMetric("shown", Date.now() - this.requestStartedAt);
+          this.measuredVisible = true;
+        }
+        this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
+        this.setStatus({ state: "shown", insert: this.suggestion?.insert, streaming,
+          alternativeIndex: this.variantIndex, alternativeCount: this.variants.length });
+      }
 
       update(update: ViewUpdate) {
         if (update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(refreshAutocompleteEffect)))) {
@@ -255,6 +312,15 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         }
 
         const meaningfulEdit = hasMeaningfulAutocompleteEdit(update.transactions);
+        if (update.docChanged) {
+          if (this.lastEditAccepted && update.transactions.some((transaction) => transaction.isUserEvent("undo"))) recordAutocompleteMetric("undone");
+          this.lastEditAccepted = this.acceptedSuggestionChange;
+          if (meaningfulEdit) this.lastEditAt = Date.now();
+        }
+        if (update.docChanged || update.selectionSet) {
+          this.variants = [];
+          this.variantKey = "";
+        }
 
         if (this.suggestion && update.docChanged && !this.composing && this.view.hasFocus &&
             update.state.selection.ranges.length === 1 && update.state.selection.main.empty &&
@@ -263,13 +329,16 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           update.changes.iterChanges((from, to, _fromB, _toB, insert) => changes.push({ from, to, insert: insert.toString() }));
           const remaining = consumeAutocompleteSuggestion(this.suggestion, changes, update.state.selection.main.from);
           if (remaining) {
+            this.cancelInFlight();
             this.suggestion = remaining;
             this.decorations = buildDecorations(remaining);
+            this.setStatus({ state: "shown", insert: remaining.insert });
             return;
           }
         }
 
-        if (update.docChanged || update.selectionSet || update.focusChanged) {
+        const lostFocus = update.focusChanged && !this.view.hasFocus;
+        if (update.docChanged || update.selectionSet || lostFocus) {
           this.clearTimer();
           this.clearSuggestion();
         }
@@ -288,15 +357,18 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           }
         }
 
-        if (update.selectionSet || update.focusChanged) {
+        if (update.selectionSet || lostFocus) {
           this.pendingAutomaticTrigger = false;
           this.dismissedUntilEdit = true;
         }
       }
 
       destroy() {
+        controllers.delete(this.view);
+        this.unsubscribePartial?.();
         this.clearTimer();
         this.cancelInFlight();
+        this.setStatus({ state: "idle" });
       }
 
       setComposing(composing: boolean) {
@@ -304,6 +376,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         this.clearTimer();
         this.clearSuggestion();
         this.pendingAutomaticTrigger = false;
+        this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
       }
 
       accept(wordOnly = false) {
@@ -314,6 +387,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         }
 
         const original = this.suggestion;
+        recordAutocompleteMetric(wordOnly ? "wordsAccepted" : "accepted");
         const insert = wordOnly ? autocompleteWordPrefix(original.insert) : original.insert;
         this.clearTimer();
         this.clearSuggestion();
@@ -328,8 +402,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         if (insert.length < original.insert.length) {
           this.suggestion = { ...original, from: selection.from + insert.length,
             insert: original.insert.slice(insert.length), prefix: original.prefix + insert };
-          this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
-          this.setStatus({ state: "shown" });
+          this.renderSuggestion();
           return true;
         }
         this.setStatus({ state: "idle" });
@@ -344,14 +417,18 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         this.registerDismissal();
         this.clearTimer();
         this.clearSuggestion();
+        this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
         this.dismissedUntilEdit = true;
         this.setStatus({ state: "idle" });
         return true;
       }
 
-      triggerManual(kind: IdeaAutocompleteSuggestionKind = "sentence") {
+      triggerManual(kind: IdeaAutocompleteSuggestionKind = "sentence", direction = "") {
+        this.lastKind = kind;
+        this.direction = direction;
         this.clearTimer();
         this.clearSuggestion();
+        this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
         this.pendingAutomaticTrigger = false;
 
         if (!this.canRequest("manual")) {
@@ -388,7 +465,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           return false;
         }
 
-        if (trigger === "automatic" && (!this.pendingAutomaticTrigger || this.dismissedUntilEdit || Date.now() < this.automaticPausedUntil)) {
+        if (trigger === "automatic" && (options.preferences?.manualOnly || Date.now() < (options.snoozedUntil ?? 0) || !this.pendingAutomaticTrigger || this.dismissedUntilEdit || Date.now() < this.automaticPausedUntil)) {
           return false;
         }
 
@@ -425,6 +502,19 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         }
 
         const requestId = `idea-autocomplete-${Date.now()}-${++requestSequence}`;
+        const direction = trigger === "manual" ? this.direction : "";
+        this.lastKind = suggestionKind;
+        this.direction = direction;
+        const guidance = selectWritingGuidance(options.guidance, `${context.prefix.slice(-700)} ${context.headingPath.join(" ")}`);
+        const variantKey = JSON.stringify([selection.from, context, suggestionKind, direction, guidance]);
+        if (variantKey !== this.variantKey) {
+          this.variants = [];
+          this.variantKey = variantKey;
+        }
+        this.requestContext = { from: selection.from, prefix: context.prefix, suffix: context.suffix };
+        this.requestStartedAt = trigger === "automatic" && this.lastEditAt ? this.lastEditAt : Date.now();
+        this.measuredVisible = false;
+        recordAutocompleteMetric("requested");
         this.inFlightRequestId = requestId;
         this.pendingAutomaticTrigger = false;
         this.setStatus({ state: "requesting" });
@@ -443,6 +533,9 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
             nearbyHeadings: context.nearbyHeadings,
             trigger,
             suggestionKind,
+            direction,
+            guidance,
+            avoid: trigger === "manual" ? this.variants : [],
             autocompleteApiFallbackEnabled: options.autocompleteApiFallbackEnabled
           });
 
@@ -453,6 +546,9 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           this.inFlightRequestId = null;
 
           if (!result.ok) {
+            if (result.reason === "timeout") recordAutocompleteMetric("timeouts");
+            this.suggestion = null;
+            this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
             const cooldownMs = autocompleteCooldownMsForFailure(result.reason);
             if (cooldownMs > 0) {
               this.cooldownUntil = applySharedAutocompleteCooldown(result.reason);
@@ -483,6 +579,13 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
             return;
           }
 
+          // Never rewrite a visible streamed prefix underneath the writer.
+          if (this.suggestion && !result.insert.startsWith(this.suggestion.insert)) {
+            this.suggestion = null;
+            this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
+            this.setStatus({ state: "failed", reason: "no_suggestion" });
+            return;
+          }
           this.suggestion = {
             requestId,
             from: selection.from,
@@ -490,12 +593,15 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
             prefix: context.prefix,
             suffix: context.suffix
           };
-          this.decorations = buildDecorations(this.suggestion);
-          this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
-          this.setStatus({ state: "shown" });
+          if (!this.variants.includes(result.insert)) this.variants = [...this.variants.slice(-2), result.insert];
+          this.variantIndex = this.variants.indexOf(result.insert);
+          this.lastKind = suggestionKind;
+          this.renderSuggestion();
         } catch {
           if (this.inFlightRequestId !== requestId) return;
           this.inFlightRequestId = null;
+          this.suggestion = null;
+          this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
 
           this.cooldownUntil = applySharedAutocompleteCooldown("provider");
           this.setStatus({ state: "failed", reason: "provider" });
@@ -578,16 +684,24 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           run: (view) => view.plugin(plugin)?.dismiss() ?? false
         },
         {
-          key: ideaAutocompleteManualKey,
+          key: options.preferences?.shortcuts.sentence ?? ideaAutocompleteManualKey,
           run: (view) => view.plugin(plugin)?.triggerManual() ?? false
         },
         {
-          key: ideaAutocompleteFallbackManualKey,
+          key: options.preferences?.shortcuts.inline ?? ideaAutocompleteFallbackManualKey,
           run: (view) => view.plugin(plugin)?.triggerManual("inline") ?? false
         },
         {
-          key: ideaAutocompleteParagraphKey,
+          key: options.preferences?.shortcuts.paragraph ?? ideaAutocompleteParagraphKey,
           run: (view) => view.plugin(plugin)?.triggerManual("paragraph") ?? false
+        },
+        {
+          key: "Alt-ArrowUp",
+          run: (view) => view.plugin(plugin)?.action("previous") ?? false
+        },
+        {
+          key: "Alt-ArrowDown",
+          run: (view) => view.plugin(plugin)?.action("next") ?? false
         }
       ])
     )

@@ -10,7 +10,9 @@ import { reviewHunksForDisplay, type DisplayReviewHunk } from "../editor/aiRevie
 import type { EditorReviewState } from "../editor/aiReview/types";
 import { CodeMirrorHost } from "../editor/CodeMirrorHost";
 import { imageDropPasteExtension } from "../editor/imageDropPaste";
-import { ideaAutocompleteExtension, type IdeaAutocompleteStatus } from "../editor/ideaAutocomplete/extension";
+import { ideaAutocompleteExtension, runAutocompleteAction, type IdeaAutocompleteStatus } from "../editor/ideaAutocomplete/extension";
+import type { AutocompletePreferences, WritingGuidance } from "../editor/ideaAutocomplete/options";
+import { Check, ChevronLeft, ChevronRight, RotateCw, X } from "lucide-react";
 import {
   selectionCommentsExtension,
   type SelectionCommentPositionUpdate,
@@ -68,6 +70,10 @@ export interface EditorTightenProps {
 }
 
 export interface EditorWritingAssistsProps {
+  preferences?: AutocompletePreferences;
+  guidance?: WritingGuidance;
+  snoozedUntil?: number;
+  onPartial?: (listener: (event: { requestId: string; insert: string }) => void) => () => void;
   correctorEnabled: boolean;
   autocompleteEnabled: boolean;
   autocompleteApiFallbackEnabled: boolean;
@@ -85,6 +91,7 @@ export interface EditorWritingAssistsProps {
       openActions: string;
     };
     autocomplete: {
+      accept: string; another: string; previous: string; next: string; dismiss: string; suggestion: string;
       working: string;
       noProvider: string;
       invalidApiKey: string;
@@ -737,23 +744,29 @@ export function EditorPane({
 
     const surfaceRect = surface.getBoundingClientRect();
     const maxLeft = surface.scrollLeft + surface.clientWidth - 340;
+    const ghostBottom = view.dom.querySelector(".cm-idea-autocomplete-ghost")?.getBoundingClientRect().bottom ?? coords.bottom;
     setAutocompleteStatusAnchor({
       left: Math.max(12, Math.min(maxLeft, coords.left - surfaceRect.left + surface.scrollLeft)),
-      top: Math.max(12, coords.bottom - surfaceRect.top + surface.scrollTop + 10)
+      top: Math.max(12, Math.max(coords.bottom, ghostBottom) - surfaceRect.top + surface.scrollTop + 10)
     });
   }, [editorView]);
   const handleAutocompleteStatusChange = useCallback(
     (status: IdeaAutocompleteStatus) => {
       setAutocompleteStatus(status);
 
-      if (status.state === "requesting" || status.state === "failed") {
-        updateAutocompleteStatusAnchor();
-      } else {
+      if (status.state === "idle") {
         setAutocompleteStatusAnchor(null);
       }
     },
-    [updateAutocompleteStatusAnchor]
+    []
   );
+  useEffect(() => {
+    if (autocompleteStatus.state === "idle") return;
+    // A matching keystroke updates the ghost from inside CodeMirror's update.
+    // Measure only after that update has completed and the ghost has laid out.
+    const frame = window.requestAnimationFrame(updateAutocompleteStatusAnchor);
+    return () => window.cancelAnimationFrame(frame);
+  }, [autocompleteStatus, updateAutocompleteStatusAnchor]);
   const autocompleteStatusMessage = useMemo(() => {
     if (!writingAssists?.autocompleteEnabled) {
       return null;
@@ -789,6 +802,23 @@ export function EditorPane({
         return writingAssists.labels.autocomplete.unavailable;
     }
   }, [autocompleteStatus, writingAssists]);
+
+  // Preserve the autocomplete controller when unrelated decorations (such as
+  // spelling issues or selection comments) are refreshed.
+  const autocompleteExtensions = useMemo(() => {
+    if (!file || !writingAssists?.autocompleteEnabled || !writingAssists.workspaceSessionId ||
+        !writingAssists.documentRelativePath || activeWritingIssue || review || readOnly) return [];
+    return ideaAutocompleteExtension({
+      preferences: writingAssists.preferences, guidance: writingAssists.guidance,
+      snoozedUntil: writingAssists.snoozedUntil, onPartial: writingAssists.onPartial,
+      enabled: true, language: writingAssists.language,
+      workspaceSessionId: writingAssists.workspaceSessionId, documentRelativePath: writingAssists.documentRelativePath,
+      documentTitle: file.name.replace(/\.(md|markdown|mdown|mkd)$/i, ""),
+      autocompleteApiFallbackEnabled: writingAssists.autocompleteApiFallbackEnabled,
+      blockedLineRanges, requestAutocomplete: writingAssists.autocompleteIdea,
+      cancelAutocomplete: writingAssists.cancelAutocompleteIdea, onStatusChange: handleAutocompleteStatusChange
+    });
+  }, [file?.path, file?.name, writingAssists, activeWritingIssue, review, readOnly, blockedLineRanges, handleAutocompleteStatusChange]);
 
   const extensions = useMemo(
     () => {
@@ -837,30 +867,7 @@ export function EditorPane({
         );
       }
 
-      if (
-        file &&
-        writingAssists?.autocompleteEnabled &&
-        writingAssists.workspaceSessionId &&
-        writingAssists.documentRelativePath &&
-        !activeWritingIssue &&
-        !review &&
-        !readOnly
-      ) {
-        nextExtensions.push(
-          ...ideaAutocompleteExtension({
-            enabled: true,
-            language: writingAssists.language,
-            workspaceSessionId: writingAssists.workspaceSessionId,
-            documentRelativePath: writingAssists.documentRelativePath,
-            documentTitle: file.name.replace(/\.(md|markdown|mdown|mkd)$/i, ""),
-            autocompleteApiFallbackEnabled: writingAssists.autocompleteApiFallbackEnabled,
-            blockedLineRanges,
-            requestAutocomplete: writingAssists.autocompleteIdea,
-            cancelAutocomplete: writingAssists.cancelAutocompleteIdea,
-            onStatusChange: handleAutocompleteStatusChange
-          })
-        );
-      }
+      nextExtensions.push(...autocompleteExtensions);
 
       if (review?.mode === "edit_file" && editReviewDisplay && !editReviewDisplay.stale) {
         if (review.readOnly) {
@@ -923,6 +930,7 @@ export function EditorPane({
       return nextExtensions;
     },
     [
+      autocompleteExtensions,
       editReviewDisplay,
       blockedLineRanges,
       activeWritingIssue,
@@ -1167,6 +1175,26 @@ export function EditorPane({
             </div>
           </div>
         ) : null}
+        {autocompleteStatus.state === "shown" && writingAssists && autocompleteStatusAnchor ? (
+          <div className="editor-autocomplete-toolbar" role="group" aria-label={writingAssists.labels.autocomplete.suggestion}
+            style={{ left: autocompleteStatusAnchor.left, top: autocompleteStatusAnchor.top }}
+            onMouseDown={(event) => event.preventDefault()}>
+            {([
+              ["accept", writingAssists.labels.autocomplete.accept, <Check size={13} />],
+              ["new", writingAssists.labels.autocomplete.another, <RotateCw size={13} />]
+            ] as const).map(([action, label, icon]) => <button type="button" key={action} onClick={() => editorView && runAutocompleteAction(editorView, action)}>{icon}{label}{action === "accept" ? <kbd>Tab</kbd> : null}</button>)}
+            {(autocompleteStatus.alternativeCount ?? 0) > 1 ? <>
+              <button type="button" aria-label={writingAssists.labels.autocomplete.previous} onClick={() => editorView && runAutocompleteAction(editorView, "previous")}><ChevronLeft size={13} /></button>
+              <span>{(autocompleteStatus.alternativeIndex ?? 0) + 1}/{autocompleteStatus.alternativeCount}</span>
+              <button type="button" aria-label={writingAssists.labels.autocomplete.next} onClick={() => editorView && runAutocompleteAction(editorView, "next")}><ChevronRight size={13} /></button>
+            </> : null}
+            <button type="button" aria-label={writingAssists.labels.autocomplete.dismiss} onClick={() => editorView && runAutocompleteAction(editorView, "dismiss")}><X size={13} /></button>
+          </div>
+        ) : null}
+        <span className="autocomplete-announcement" role="status" aria-live="polite" aria-atomic="true">
+          {writingAssists?.preferences?.announce && autocompleteStatus.state === "shown" && !autocompleteStatus.streaming
+            ? `${writingAssists.labels.autocomplete.suggestion}: ${autocompleteStatus.insert ?? ""}` : ""}
+        </span>
         {autocompleteStatusMessage ? (
           <div
             className={autocompleteStatusAnchor ? "editor-autocomplete-status is-anchored" : "editor-autocomplete-status"}

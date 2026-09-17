@@ -306,6 +306,37 @@ describe("agent IPC trust validation", () => {
     expect(service.autocompleteIdea).not.toHaveBeenCalled();
   });
 
+  it("bounds writing guidance and sends previews only to the requesting live window", async () => {
+    const { handleAutocompleteIpc } = await import("../../electron/ipc/autocomplete");
+    const workspaceRoot = await tempWorkspace();
+    electronMock.fromWebContents.mockReturnValue({});
+    const send = vi.fn();
+    const controllers = new Map<string, AbortController>();
+    const service = {
+      autocompleteIdea: vi.fn(async (request) => {
+        expect(request.direction.length).toBe(240);
+        expect(request.guidance.length).toBe(1800);
+        expect(request.avoid).toHaveLength(3);
+        expect(request.avoid.every((text: string) => text.length <= 700)).toBe(true);
+        request.onPartial(" next useful words ");
+        controllers.get("19:stream-test")!.abort();
+        request.onPartial(" late words must not appear ");
+        return " late result";
+      }),
+      writingAssistStatus: vi.fn()
+    };
+    const response = await handleAutocompleteIpc({ sender: { id: 19, send, isDestroyed: () => false },
+      senderFrame: { url: "file:///Applications/Iliad.app/index.html" } } as never, {
+      requestId: "stream-test", workspaceSessionId: "session", documentRelativePath: "draft.md",
+      prefix: "This paragraph has enough context", suffix: "", language: "en", suggestionKind: "sentence",
+      direction: "x".repeat(1000), guidance: "y".repeat(5000), avoid: Array(5).fill("z".repeat(1000))
+    }, { service, controllers, resolveWorkspaceRootForSession: () => workspaceRoot });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith("autocomplete:partial", { requestId: "stream-test", insert: " next useful words " });
+    expect(response).toEqual({ ok: false, reason: "aborted" });
+    expect(controllers.size).toBe(0);
+  });
+
   it("passes autocomplete API fallback only when explicitly enabled", async () => {
     const { handleAutocompleteIpc } = await import("../../electron/ipc/autocomplete");
     const workspaceRoot = await tempWorkspace();

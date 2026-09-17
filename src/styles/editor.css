@@ -194,6 +194,56 @@
   bottom: auto;
 }
 
+.editor-autocomplete-toolbar {
+  position: absolute;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  max-width: calc(100% - 24px);
+  padding: 4px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--overlay);
+  box-shadow: var(--shadow-sm);
+  color: var(--muted-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+}
+
+.editor-autocomplete-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.editor-autocomplete-toolbar button:hover,
+.editor-autocomplete-toolbar button:focus-visible {
+  background: var(--card);
+  color: var(--ink-1);
+}
+
+.editor-autocomplete-toolbar kbd {
+  opacity: 0.55;
+  font: inherit;
+}
+
+.autocomplete-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .editor-surface .cm-theme {
   display: flex;
   min-height: 100%;

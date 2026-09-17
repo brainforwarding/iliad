@@ -66,6 +66,23 @@ Automatic suggestions wait for a 450 ms pause at a word boundary. Typing along
 with a suggestion keeps its remaining words visible. See the
 [research and follow-up design](docs/research/writing-autocomplete-2026-09.md).
 
+The Writing assists menu offers Example, Transition, Tension, and a custom
+direction. Writing notes retain voice and selected facts for the current
+document in local app storage. Automatic / On demand and a ten-minute pause
+control when suggestions appear. Shortcuts can be reassigned, and screen-reader
+announcements enabled, in the collapsed shortcut settings.
+
+Gemini previews stream at whole-word boundaries. Accepting or typing into a
+preview stops the stream. Another requests an alternative; the arrow controls
+or Option/Alt+Up/Down cycle up to three requested alternatives instantly.
+
+For a synthetic, credential-free UI preview, run Vite and open
+`/tests/manual/autocomplete.html`. For latency comparisons on eight English and
+Spanish writing cases, run `npm run benchmark:autocomplete -- --dry-run` first.
+Set `GEMINI_API_KEY` and/or `OPENAI_API_KEY`, then omit `--dry-run` to make paid
+requests (three trials by default; `--trials=1` makes eight requests per provider).
+Benchmark output includes timings and validity counts, not document text or keys.
+
 ## Local CLI Development
 
 To test the desktop CLI workflow locally, build and link the package, then invoke `iliad` from the folder you want to open:

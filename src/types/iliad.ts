@@ -482,6 +482,9 @@ export type TightenResult =
   | { ok: false; reason: TightenFailureReason };
 
 export interface IdeaAutocompleteRequest {
+  direction?: string;
+  guidance?: string;
+  avoid?: string[];
   requestId: string;
   workspaceSessionId: string;
   documentRelativePath: string;
@@ -1004,6 +1007,7 @@ export interface IliadApi {
   tightenSelection: (request: TightenSelectionRequest) => Promise<TightenResult>;
   cancelTighten: (requestId: string) => void;
   autocompleteIdea: (request: IdeaAutocompleteRequest) => Promise<IdeaAutocompleteResult>;
+  onAutocompletePartial: (listener: (event: { requestId: string; insert: string }) => void) => () => void;
   cancelAutocompleteIdea: (requestId: string) => void;
   getWritingAssistStatus: (request: { autocompleteApiFallbackEnabled: boolean }) => Promise<WritingAssistStatus>;
   assetUrl: (absolutePath: string) => string;

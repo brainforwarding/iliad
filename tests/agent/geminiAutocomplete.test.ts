@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateGeminiAutocomplete } from "../../electron/agent/geminiAutocomplete";
+import { generateGeminiAutocomplete, readGeminiAutocompleteStream, stableAutocompletePrefix } from "../../electron/agent/geminiAutocomplete";
 import { AgentService } from "../../electron/agent/agentService";
 import { AgentSettingsStore } from "../../electron/agent/settingsStore";
 import type { IdeaAutocompleteTextRequest } from "../../electron/agent/autocomplete";
@@ -19,6 +19,30 @@ const reply = (text = "waited.") => Response.json({ candidates: [{
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe("Gemini autocomplete", () => {
+  it("streams complete words across fragmented UTF-8 and SSE boundaries", async () => {
+    const events = [
+      { candidates: [{ content: { parts: [{ thought: true, text: "hidden reasoning" }] } }] },
+      { candidates: [{ content: { parts: [{ text: "Entró en la habitación y " }] } }] },
+      { candidates: [{ content: { parts: [{ text: "esperó." }] }, finishReason: "STOP" }] }
+    ];
+    const bytes = new TextEncoder().encode(events.map((event) => `data: ${JSON.stringify(event)}\r\n\r\n`).join(""));
+    const stream = new ReadableStream({ start(controller) {
+      for (let i = 0; i < bytes.length; i += 7) controller.enqueue(bytes.slice(i, i + 7));
+      controller.close();
+    } });
+    const onPartial = vi.fn();
+    expect(await readGeminiAutocompleteStream(new Response(stream), { ...request(), onPartial })).toBe("Entró en la habitación y esperó.");
+    expect(onPartial).toHaveBeenCalledWith("Entró en la habitación ");
+    expect(stableAutocompletePrefix("a partial")).toBe("");
+  });
+
+  it("discards streamed output without a successful finish", async () => {
+    const stream = new ReadableStream({ start(controller) {
+      controller.enqueue(new TextEncoder().encode('data: {"candidates":[{"content":{"parts":[{"text":"a quiet room"}]},"finishReason":"MAX_TOKENS"}]}\n\n'));
+      controller.close();
+    } });
+    expect(await readGeminiAutocompleteStream(new Response(stream), request())).toBe("");
+  });
   it("sends a cancellable direct request with low thinking and returns only prose", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(reply());
     const input = request();

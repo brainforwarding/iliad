@@ -65,6 +65,8 @@ import {
   useSidebarWidth
 } from "./preferences/sidebarPreferences";
 import { useWritingAssistPreferences } from "./preferences/writingAssistPreferences";
+import { useAutocompletePreferences } from "./preferences/autocompletePreferences";
+import { runAutocompleteAction } from "./editor/ideaAutocomplete/extension";
 import type { EditorView } from "@codemirror/view";
 import type {
   AgentChangeProposal,
@@ -176,6 +178,7 @@ export default function App() {
     setAutocompleteEnabled,
     setAutocompleteApiFallbackEnabled
   } = useWritingAssistPreferences();
+  const autocompleteOptions = useAutocompletePreferences(workspace?.path, activeFile?.kind === "markdown" ? activeFile.relativePath : undefined);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [runningAssistantRunId, setRunningAssistantRunId] = useState<string | null>(null);
@@ -1486,6 +1489,10 @@ export default function App() {
       correctorEnabled,
       autocompleteEnabled,
       autocompleteApiFallbackEnabled,
+      preferences: autocompleteOptions.preferences,
+      guidance: autocompleteOptions.guidance,
+      snoozedUntil: autocompleteOptions.snoozedUntil,
+      onPartial: window.iliad.onAutocompletePartial,
       language,
       workspaceSessionId,
       documentRelativePath,
@@ -1520,6 +1527,9 @@ export default function App() {
     autocompleteApiFallbackEnabled,
     autocompleteEnabled,
     correctorEnabled,
+    autocompleteOptions.preferences,
+    autocompleteOptions.guidance,
+    autocompleteOptions.snoozedUntil,
     editorFile,
     language,
     strings.editor.ideaAutocomplete,
@@ -1717,6 +1727,19 @@ export default function App() {
               open={typographyOpen}
             />
             <WritingAssistsMenu
+              preferences={autocompleteOptions.preferences}
+              onPreferencesChange={autocompleteOptions.setPreferences}
+              guidance={autocompleteOptions.guidance}
+              onGuidanceChange={autocompleteOptions.setGuidance}
+              hasDocument={activeFile?.kind === "markdown"}
+              snoozed={autocompleteOptions.snoozedUntil > Date.now()}
+              onToggleSnooze={autocompleteOptions.toggleSnooze}
+              onResetShortcuts={autocompleteOptions.resetShortcuts}
+              onAutocompleteAction={(action) => {
+                setWritingAssistsOpen(false);
+                const view = editorViewRef.current;
+                if (view) { view.focus(); runAutocompleteAction(view, action); }
+              }}
               labels={strings.writingAssists}
               menuRef={writingAssistsMenuRef}
               open={writingAssistsOpen}

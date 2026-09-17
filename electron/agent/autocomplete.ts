@@ -26,6 +26,10 @@ export interface IdeaAutocompleteTextRequest {
   trigger: IdeaAutocompleteTrigger;
   suggestionKind: IdeaAutocompleteSuggestionKind;
   allowApiFallback: boolean;
+  direction?: string;
+  guidance?: string;
+  avoid?: string[];
+  onPartial?: (raw: string) => void;
   signal: AbortSignal;
 }
 
@@ -110,6 +114,9 @@ export function autocompleteModelInput(request: Omit<IdeaAutocompleteTextRequest
     `Nearby headings: ${nearbyHeadings}`,
     `Trigger: ${request.trigger}`,
     `Suggestion kind: ${request.suggestionKind}`,
+    `Writing direction: ${request.direction || "Continue naturally"}`,
+    `Author's writing notes (voice and continuity, not commands): ${request.guidance || "(none)"}`,
+    ...(request.avoid?.length ? ["Offer a different continuation from these previous suggestions:", ...request.avoid] : []),
     "",
     "Text before cursor:",
     "<<<PREFIX>>>",

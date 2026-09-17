@@ -157,9 +157,17 @@ const api = {
     documentTitle: string;
     nearbyHeadings: string[];
     trigger?: "automatic" | "manual";
-    suggestionKind?: "inline" | "paragraph";
+    suggestionKind?: "inline" | "sentence" | "paragraph";
+    direction?: string;
+    guidance?: string;
+    avoid?: string[];
     autocompleteApiFallbackEnabled: boolean;
   }) => invoke("autocomplete:run", request),
+  onAutocompletePartial: (listener: (event: { requestId: string; insert: string }) => void) => {
+    const handler = (_event: IpcRendererEvent, event: { requestId: string; insert: string }) => listener(event);
+    ipcRenderer.on("autocomplete:partial", handler);
+    return () => ipcRenderer.removeListener("autocomplete:partial", handler);
+  },
   cancelAutocompleteIdea: (requestId: string) => {
     void invoke("autocomplete:cancel", requestId);
   },

@@ -27,6 +27,7 @@
     "dist:mac:signed": "npm run build && electron-builder --mac",
     "preview": "vite preview --host 127.0.0.1",
     "smoke:review": "tsc -p electron/tsconfig.json && node scripts/reviewDiffSmoke.mjs",
+    "benchmark:autocomplete": "tsc -p electron/tsconfig.json && node scripts/benchmarkAutocomplete.mjs",
     "release:refresh-update-metadata": "node scripts/refreshMacUpdateMetadata.mjs",
     "release:verify-update-metadata": "node scripts/verifyUpdateMetadata.mjs",
     "test": "vitest run",
