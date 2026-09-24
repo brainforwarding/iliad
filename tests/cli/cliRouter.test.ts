@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, symlink, writeFile, mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,6 +30,9 @@ describe("routeArgv", () => {
     expect(routeArgv(["open", "a.md", "--line"]).kind).toBe("usage");
     expect(routeArgv(["open", "a.md", "--line", "0"]).kind).toBe("usage");
     expect(routeArgv(["open", "a.md", "--line", "x"]).kind).toBe("usage");
+    expect(routeArgv(["open", "a.md", "--line", "9".repeat(400)]).kind).toBe("usage");
+    expect(routeArgv(["open", "a.md", "--line", "9007199254740992"]).kind).toBe("usage");
+    expect(routeArgv(["open", "a.md", "--line", "9007199254740991"])).toMatchObject({ line: 9007199254740991 });
     expect(routeArgv(["open", "a.md", "b.md"]).kind).toBe("usage");
   });
 
@@ -49,8 +52,9 @@ describe("paths", () => {
     expect(userDataDirectory({ env: { VITE_DEV_SERVER_URL: "http://x" }, platform: "darwin", home })).toBe(
       "/Users/w/Library/Application Support/iliad-dev"
     );
+    // Same rule as electron/main.ts: only VITE_DEV_SERVER_URL selects the dev profile.
     expect(userDataDirectory({ env: { ILIAD_DEV: "1" }, platform: "darwin", home })).toBe(
-      "/Users/w/Library/Application Support/iliad-dev"
+      "/Users/w/Library/Application Support/Iliad MD"
     );
     expect(cliSocketPath({ env: { ILIAD_USER_DATA: "/tmp/p" }, platform: "darwin", home })).toBe("/tmp/p/iliad.sock");
     expect(userDataDirectory({ env: {}, platform: "linux", home })).toBe("/Users/w/.config/Iliad MD");
@@ -164,6 +168,32 @@ describe("runCli", () => {
     expect(await runCli(["open", "a.md"], { ...io(), send, launch: vi.fn(), sleep, now: () => clock })).toBe(1);
     expect(err).toEqual(["iliad: Iliad did not start in time."]);
     expect(clock).toBeGreaterThanOrEqual(10_000);
+  });
+
+  it("open: never cold-starts on a hidden or ignored folder", async () => {
+    await mkdir(path.join(dir, ".private"));
+    await writeFile(path.join(dir, ".private", "draft.md"), "# D\n");
+    await mkdir(path.join(dir, "node_modules"));
+    await writeFile(path.join(dir, "node_modules", "x.md"), "# X\n");
+    const send = vi.fn().mockRejectedValue(new NotRunningError());
+    const launch = vi.fn();
+
+    expect(await runCli(["open", ".private/draft.md"], { ...io(), send, launch })).toBe(1);
+    expect(await runCli(["open", "node_modules/x.md"], { ...io(), send, launch })).toBe(1);
+    expect(launch).not.toHaveBeenCalled();
+    expect(err[0]).toMatch(/hidden or ignored/);
+  });
+
+  it("open: refuses a visible symlink that resolves into a hidden folder", async () => {
+    await mkdir(path.join(dir, ".private"));
+    await writeFile(path.join(dir, ".private", "draft.md"), "# D\n");
+    await symlink(path.join(dir, ".private"), path.join(dir, "visible"));
+    const launch = vi.fn();
+
+    expect(
+      await runCli(["open", "visible/draft.md"], { ...io(), send: vi.fn().mockRejectedValue(new NotRunningError()), launch })
+    ).toBe(1);
+    expect(launch).not.toHaveBeenCalled();
   });
 
   it("launch: passes folder arguments through", async () => {

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { access, lstat, mkdir, rm, symlink } from "node:fs/promises";
+import { access, lstat, mkdir, readlink, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -23,11 +23,28 @@ async function isWritableDirectory(directory: string) {
   }
 }
 
-/** A symlink (ours or stale) may be replaced; a real file is never overwritten. */
-async function linkSlotIsFree(linkPath: string) {
+/**
+ * True for a link to an Iliad wrapper: this one, or the `iliad` wrapper of any
+ * (possibly moved or deleted) Iliad app bundle.
+ */
+export function isIliadWrapperTarget(linkTarget: string, linkDirectory: string, wrapperPath: string) {
+  const resolved = path.resolve(linkDirectory, linkTarget);
+  return resolved === path.resolve(wrapperPath) || /\.app\/Contents\/Resources\/bin\/iliad$/.test(resolved);
+}
+
+/**
+ * Free when nothing is there or when it is our own earlier link. Real files
+ * and links to anything else (another tool's `iliad`) are never replaced.
+ */
+async function linkSlotIsFree(linkPath: string, wrapperPath: string) {
   try {
     const stats = await lstat(linkPath);
-    return stats.isSymbolicLink();
+
+    if (!stats.isSymbolicLink()) {
+      return false;
+    }
+
+    return isIliadWrapperTarget(await readlink(linkPath), path.dirname(linkPath), wrapperPath);
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "ENOENT";
   }
@@ -67,7 +84,7 @@ export async function installCliCommand({
 
     const linkPath = path.join(directory, "iliad");
 
-    if (!(await linkSlotIsFree(linkPath))) {
+    if (!(await linkSlotIsFree(linkPath, wrapperPath))) {
       continue;
     }
 

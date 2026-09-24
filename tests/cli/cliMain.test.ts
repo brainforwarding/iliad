@@ -1,8 +1,8 @@
-import { lstat, mkdir, mkdtemp, readlink, realpath, writeFile, chmod } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readlink, realpath, symlink, writeFile, chmod } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { directoryIsOnPath, installCliCommand } from "../../electron/cli/installCommand";
+import { directoryIsOnPath, installCliCommand, isIliadWrapperTarget } from "../../electron/cli/installCommand";
 import { runCliOpenRequest, type CliOpenSteps } from "../../src/app/useCliBridge";
 import type { FileTreeNode } from "../../src/types/iliad";
 
@@ -78,6 +78,29 @@ describe("installCliCommand", () => {
     await expect(
       installCliCommand({ wrapperPath: "/w", directories: [taken], pathValue: "", createMissingDirectory: null })
     ).rejects.toThrow(/No writable folder/);
+  });
+
+  it("replaces only links to an Iliad wrapper, never another tool's `iliad` link", async () => {
+    const foreign = path.join(dir, "foreign");
+    const ours = path.join(dir, "ours");
+    await mkdir(foreign);
+    await mkdir(ours);
+    await symlink("/usr/local/lib/other-tool/iliad", path.join(foreign, "iliad"));
+    await symlink("/Applications/Old Iliad.app/Contents/Resources/bin/iliad", path.join(ours, "iliad"));
+    const wrapper = "/Applications/Iliad MD.app/Contents/Resources/bin/iliad";
+
+    const result = await installCliCommand({
+      wrapperPath: wrapper,
+      directories: [foreign, ours],
+      pathValue: "",
+      createMissingDirectory: null
+    });
+
+    expect(result.directory).toBe(ours);
+    expect(await readlink(path.join(ours, "iliad"))).toBe(wrapper);
+    expect(await readlink(path.join(foreign, "iliad"))).toBe("/usr/local/lib/other-tool/iliad");
+    expect(isIliadWrapperTarget("../lib/iliad", "/usr/local/bin", wrapper)).toBe(false);
+    expect(isIliadWrapperTarget(wrapper, "/usr/local/bin", wrapper)).toBe(true);
   });
 
   it("matches PATH entries exactly", () => {

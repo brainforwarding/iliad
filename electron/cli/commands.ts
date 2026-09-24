@@ -24,8 +24,9 @@ export function isPathInside(root: string, candidate: string) {
   return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
-function hasIgnoredSegment(relativePath: string) {
-  return relativePath.split(path.sep).some(isIgnoredWorkspaceName);
+/** True when any name along the path (relative or absolute) is hidden or ignored. */
+export function hasIgnoredSegment(somePath: string) {
+  return somePath.split(path.sep).filter(Boolean).some(isIgnoredWorkspaceName);
 }
 
 async function openDocument(
@@ -53,19 +54,30 @@ async function openDocument(
     return { ok: false, error: `Not a Markdown file: ${request.path}` };
   }
 
+  const hiddenError: CliResponse = { ok: false, error: `Iliad does not show hidden or ignored files: ${request.path}` };
+  const requestedPath = path.resolve(request.path);
   let target = host.findWindowForPath(filePath);
 
   if (target) {
-    if (hasIgnoredSegment(path.relative(target.workspaceRoot, filePath))) {
-      return { ok: false, error: `Iliad does not show hidden or ignored files: ${request.path}` };
-    }
+    // Inside an open workspace, only the part below its root must be visible
+    // (for both the canonical and the requested spelling of the path).
+    const root = target.workspaceRoot;
 
+    if (
+      hasIgnoredSegment(path.relative(root, filePath)) ||
+      (isPathInside(root, requestedPath) && hasIgnoredSegment(path.relative(root, requestedPath)))
+    ) {
+      return hiddenError;
+    }
+  } else if (hasIgnoredSegment(requestedPath) || hasIgnoredSegment(filePath)) {
+    // A new window would open the file's own folder: never a hidden or
+    // ignored one, whichever spelling of the path shows it.
+    return hiddenError;
+  }
+
+  if (target) {
     host.focusWindow(target.webContentsId);
   } else {
-    if (isIgnoredWorkspaceName(path.basename(filePath))) {
-      return { ok: false, error: `Iliad does not show hidden or ignored files: ${request.path}` };
-    }
-
     // No window shows this file: open its own folder (never the git root).
     target = host.openWorkspaceWindow(await canonicalizeWorkspace(path.dirname(filePath)));
   }

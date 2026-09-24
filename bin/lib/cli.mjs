@@ -28,11 +28,30 @@ function usageError(error) {
 }
 
 function parseLine(value) {
-  if (value === undefined || !/^\d+$/.test(value) || Number(value) < 1) {
+  if (value === undefined || !/^\d+$/.test(value)) {
     return null;
   }
 
-  return Number(value);
+  const line = Number(value);
+  return Number.isSafeInteger(line) && line >= 1 ? line : null;
+}
+
+// Mirrors isIgnoredWorkspaceName in electron/fs/pathSafety.ts.
+const ignoredNames = new Set(["node_modules", "dist", "dist-electron"]);
+
+export function isIgnoredName(name) {
+  return (
+    name.startsWith(".") ||
+    ignoredNames.has(name) ||
+    /^__tmp(?:[-_.]|$)/i.test(name) ||
+    name.endsWith(".tmp") ||
+    name.endsWith("~")
+  );
+}
+
+/** True when any folder or file name along an absolute path is hidden or ignored. */
+export function hasIgnoredSegment(absolutePath) {
+  return absolutePath.split(path.sep).filter(Boolean).some(isIgnoredName);
 }
 
 /**
@@ -174,6 +193,13 @@ async function runOpen(route, context) {
   } catch (error) {
     if (!(error instanceof NotRunningError)) {
       context.stderr(`iliad: ${errorMessage(error)}`);
+      return exitCodes.error;
+    }
+
+    // With the app closed no window can contain the file, so it would open
+    // the file's own folder: refuse hidden/ignored paths like main does.
+    if (hasIgnoredSegment(requestedPath) || hasIgnoredSegment(filePath)) {
+      context.stderr(`iliad: Iliad does not show hidden or ignored files: ${route.file}`);
       return exitCodes.error;
     }
 

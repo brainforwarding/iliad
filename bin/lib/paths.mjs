@@ -22,10 +22,9 @@ export function appDataDirectory({ env = process.env, platform = process.platfor
 
 /**
  * The app's userData folder, which holds the CLI socket. Mirrors
- * electron/main.ts: `ILIAD_USER_DATA` overrides, dev runs
- * (`VITE_DEV_SERVER_URL`, or `ILIAD_DEV=1` from a plain shell) use
- * `iliad-dev`, everything else (packaged app and checkout launches) uses
- * `Iliad MD`.
+ * electron/main.ts exactly: `ILIAD_USER_DATA` overrides, dev runs
+ * (`VITE_DEV_SERVER_URL` set) use `iliad-dev`, everything else (packaged
+ * app and checkout launches) uses `Iliad MD`.
  */
 export function userDataDirectory(options = {}) {
   const env = options.env ?? process.env;
@@ -34,7 +33,7 @@ export function userDataDirectory(options = {}) {
     return path.resolve(env.ILIAD_USER_DATA);
   }
 
-  const name = env.VITE_DEV_SERVER_URL || env.ILIAD_DEV === "1" ? devUserDataName : packagedUserDataName;
+  const name = env.VITE_DEV_SERVER_URL ? devUserDataName : packagedUserDataName;
   return path.join(appDataDirectory(options), name);
 }
 

@@ -1,5 +1,5 @@
 import { existsSync, statSync } from "node:fs";
-import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -156,6 +156,31 @@ describe("CLI socket server", () => {
     expect(host.requestOpenDocument).not.toHaveBeenCalled();
   });
 
+  it("never opens a new window on a hidden or ignored folder, whichever spelling of the path", async () => {
+    await mkdir(path.join(dir, ".private"));
+    await writeFile(path.join(dir, ".private", "draft.md"), "# d\n");
+    await mkdir(path.join(dir, "outside", "dist"), { recursive: true });
+    await writeFile(path.join(dir, "outside", "dist", "x.md"), "# x\n");
+    await symlink(path.join(dir, ".private"), path.join(dir, "visible-link"));
+    await symlink(path.join(dir, "loose"), path.join(dir, ".hidden-link"));
+    await start();
+
+    for (const file of [
+      path.join(dir, ".private", "draft.md"),
+      path.join(dir, "outside", "dist", "x.md"),
+      path.join(dir, "visible-link", "draft.md"),
+      path.join(dir, ".hidden-link", "b.md")
+    ]) {
+      expect(await sendRequest(socketPath, { cmd: "open", path: file })).toMatchObject({
+        ok: false,
+        error: expect.stringMatching(/hidden or ignored/)
+      });
+    }
+
+    expect(host.openWorkspaceWindow).not.toHaveBeenCalled();
+    expect(host.requestOpenDocument).not.toHaveBeenCalled();
+  });
+
   it("answers garbage with an error line", async () => {
     await start();
     const reply = await new Promise<string>((resolve) => {
@@ -185,21 +210,47 @@ describe("CliOpenRequestQueue", () => {
     await expect(reply).resolves.toEqual({ ok: true });
   });
 
-  it("times out, supersedes older requests, and fails when the window closes", async () => {
+  it("keeps a taken request until its ack and serves later ones in order", async () => {
+    const notify = vi.fn();
+    let id = 0;
+    const queue = new CliOpenRequestQueue({ notify, createId: () => `r${++id}` });
+    const first = queue.request(1, { path: "/a.md", line: null });
+    expect(queue.take(1)).toMatchObject({ id: "r1" });
+
+    const second = queue.request(1, { path: "/b.md", line: 2 });
+    const third = queue.request(1, { path: "/c.md", line: null });
+    // r1 is still in flight: nothing else is handed out yet.
+    expect(queue.take(1)).toBeNull();
+
+    notify.mockClear();
+    expect(queue.complete(1, "r1", { ok: true })).toBe(true);
+    await expect(first).resolves.toEqual({ ok: true });
+    expect(notify).toHaveBeenCalledWith(1);
+
+    expect(queue.take(1)).toMatchObject({ id: "r2", path: "/b.md" });
+    queue.complete(1, "r2", { ok: false, error: "E" });
+    await expect(second).resolves.toEqual({ ok: false, error: "E" });
+    expect(queue.take(1)).toMatchObject({ id: "r3" });
+    queue.complete(1, "r3", { ok: true });
+    await expect(third).resolves.toEqual({ ok: true });
+    expect(queue.take(1)).toBeNull();
+  });
+
+  it("times out each request, and settles in-flight and waiting ones when the window closes", async () => {
     vi.useFakeTimers();
 
     try {
       const queue = new CliOpenRequestQueue({ notify: () => undefined, timeoutMs: 10_000 });
-      const first = queue.request(1, { path: "/a.md", line: null });
-      const second = queue.request(1, { path: "/b.md", line: null });
-      await expect(first).resolves.toMatchObject({ ok: false, error: expect.stringMatching(/newer/) });
-
+      const lonely = queue.request(1, { path: "/a.md", line: null });
       vi.advanceTimersByTime(10_000);
-      await expect(second).resolves.toEqual({ ok: false, error: "Iliad did not open the document in time." });
+      await expect(lonely).resolves.toEqual({ ok: false, error: "Iliad did not open the document in time." });
 
-      const third = queue.request(2, { path: "/c.md", line: null });
+      const taken = queue.request(2, { path: "/b.md", line: null });
+      expect(queue.take(2)).not.toBeNull();
+      const waiting = queue.request(2, { path: "/c.md", line: null });
       queue.dropWindow(2);
-      await expect(third).resolves.toMatchObject({ ok: false, error: expect.stringMatching(/closed/) });
+      await expect(taken).resolves.toMatchObject({ ok: false, error: expect.stringMatching(/closed/) });
+      await expect(waiting).resolves.toMatchObject({ ok: false, error: expect.stringMatching(/closed/) });
     } finally {
       vi.useRealTimers();
     }
