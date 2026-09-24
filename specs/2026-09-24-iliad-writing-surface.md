@@ -536,10 +536,11 @@ integrated by the main agent, committed on the branch with tests green.
 - [x] v1 spec written
 - [x] Review panel (UI/UX, architecture, Codex) → v2
 - [x] Codex go/no-go on v2 (V4 fixed as prescribed)
-- [ ] A removal
-- [ ] C Gemini tighten + key UI
-- [ ] B per-chunk
-- [ ] E CLI + skill
+- [x] A removal (1de8393) — app-verified: no panel, outside review works, key row
+- [x] C Gemini tighten + key UI (with A)
+- [x] B per-chunk (7e16291) — app-verified: Keep one chunk + Restore other → disk correct
+- [x] E CLI + skill (branch worktree-agent-acd2d817aa39f4f0d, f58dade; merges
+  cleanly with B — verified in qa-integration: status/open/errors against the app)
 - [ ] D companion files
 - [ ] F docs + ADR
 - [ ] G release 0.3.0 + install + site
