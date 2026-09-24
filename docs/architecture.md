@@ -192,10 +192,11 @@ The app manages Markdown documents and folders in the sidebar.
   `*.comments.md`) is rejected: those names belong to companion files.
 - Move to Trash uses the operating system Trash and requires confirmation.
 - A document's companion files follow it inside the same `runIliadMutation`
-  (see "Companion Files"): rename and move check every target of the group
-  first, move the document, then move each companion with a hard link and
-  remove the source (never overwriting), and put back whatever moved if a step
-  fails; duplicate picks a `name copy[-N]` stem free for the whole group and
+  (see "Companion Files"): rename and move check the document target and
+  both companion names at the destination first (an unrelated
+  `name.notes.md`/`name.comments.md` there is never attached), then move the
+  document and each companion with a hard link and remove the source (never
+  overwriting), and put back whatever moved if a step fails; duplicate picks a `name copy[-N]` stem free for the whole group and
   copies the companions; Move to Trash trashes the document, then its
   companions, and reports any that stayed (no rollback). A companion whose
   document exists cannot be renamed, moved, or duplicated on its own.
@@ -225,9 +226,12 @@ Markdown that the writer and outside agents read and edit directly.
   disabled when the open file is itself a companion.
 - Companions never enter outside-change review: the baseline scan, `classify`,
   every baseline record, and `noteDiskChange` skip them. They are still
-  written only through the compare-and-swap `writeMarkdownIfUnchanged`; the
-  last comment deleted removes the file through `file:remove-companion`
-  (the guarded remove, limited to companion paths). An agent deleting a handled
+  written only through the compare-and-swap `writeMarkdownIfUnchanged`, which
+  for companions holds the current file at a hidden path, verifies its hash,
+  and publishes the new text with a no-clobber hard link (a mismatch puts the
+  file back and answers `disk_changed`); the last comment deleted removes the
+  file through `file:remove-companion`, which verifies the held file the same
+  way and moves it to the Trash. An agent deleting a handled
   comment is metadata, not document text; the document text it changed is
   still reviewed per chunk.
 - Main annotates `FileTreeNode.companion = {kind, documentPath}` when the
@@ -249,9 +253,11 @@ Markdown that the writer and outside agents read and edit directly.
   file; an outside deletion wins unless the comment text was edited here) and
   retried once. A duplicate quote re-anchors only when its stored prefix still
   matches its occurrence; otherwise the comment is detached and listed in the
-  "N detached comments" toolbar (Delete only). Comments an outside tool
-  removed come back if the writer restores that document's outside edit and
-  the quote is found again.
+  "N detached comments" toolbar (Delete only). An outside change to a
+  comment's quote, occurrence, or prefix re-anchors it from the file. Comments
+  an outside tool removed come back if the writer restores that document's
+  outside edit and the quote is found again (applied the next time the
+  document is opened if it was not open).
 - Notes: the whole `name.notes.md` is autocomplete guidance
   (`selectWritingGuidance` ranks its lines when it is long). Writing assists
   has one "Open notes" action that creates an empty file (exclusive create) if

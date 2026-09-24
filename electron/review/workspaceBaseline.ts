@@ -435,6 +435,19 @@ export class WorkspaceBaselineService {
 
       markWorkspaceMutation(key, [absolutePath]);
 
+      if (!reviewed && expected.kind === "hash") {
+        // Companions are edited by outside agents while Iliad writes them:
+        // never check-then-truncate; hold, verify, and publish no-clobber.
+        try {
+          const outcome = await this.guardedCompanionReplace(absolutePath, expected.hash, request.content);
+          return outcome === "written"
+            ? { status: "written", savedAt: new Date().toISOString() }
+            : { status: "conflict", reason: "disk_changed" };
+        } finally {
+          markWorkspaceMutation(key, [absolutePath]);
+        }
+      }
+
       try {
         await mkdir(path.dirname(absolutePath), { recursive: true });
 
@@ -507,7 +520,15 @@ export class WorkspaceBaselineService {
       markWorkspaceMutation(key, [absolutePath]);
 
       try {
-        await rm(absolutePath);
+        if (isCompanionPath(relativePath)) {
+          const outcome = await this.guardedCompanionReplace(absolutePath, hashMarkdown(current.content), null);
+
+          if (outcome !== "written") {
+            return { status: "conflict", reason: "disk_changed" };
+          }
+        } else {
+          await rm(absolutePath);
+        }
       } finally {
         markWorkspaceMutation(key, [absolutePath]);
       }
@@ -1257,6 +1278,109 @@ export class WorkspaceBaselineService {
     await rm(temp, { force: true }).catch(() => undefined);
     await this.retireHeldOriginal(held, holdingDirectory);
     return null;
+  }
+
+  /**
+   * Compare-and-swap for companion files (notes, comments), which outside
+   * agents edit while Iliad writes them. The current file is renamed to a
+   * hidden holding path and its bytes verified against `expectedHash`; on a
+   * mismatch it is put back no-clobber and the caller reports `disk_changed`
+   * (the renderer re-reads and merges). On a match the new text is published
+   * with a no-clobber hard link (`content`), or nothing is published (`null`,
+   * a removal). The held original then goes to the Trash for a removal; for a
+   * write it is deleted only if it still hashes as verified, otherwise it is
+   * kept beside the file as an outside copy.
+   */
+  private async guardedCompanionReplace(
+    absolutePath: string,
+    expectedHash: string,
+    content: string | null
+  ): Promise<"written" | "changed"> {
+    const directory = path.dirname(absolutePath);
+    const token = randomUUID();
+    const holdingDirectory = path.join(directory, `.iliad-restore-${token}`);
+    const held = path.join(holdingDirectory, path.basename(absolutePath));
+    const temp = path.join(directory, `.iliad-restore-${token}.tmp`);
+    await mkdir(holdingDirectory);
+
+    try {
+      await rename(absolutePath, held);
+    } catch (error) {
+      await rmdir(holdingDirectory).catch(() => undefined);
+
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return "changed";
+      }
+
+      throw error;
+    }
+
+    const readHeld = async () => {
+      try {
+        const stats = await lstat(held);
+        return stats.isFile() && !stats.isSymbolicLink() ? { content: await readFile(held, "utf8"), mode: stats.mode & 0o777 } : null;
+      } catch {
+        return null;
+      }
+    };
+    const heldState = await readHeld();
+
+    if (!heldState || hashMarkdown(heldState.content) !== expectedHash) {
+      await this.returnHeldFile(held, absolutePath);
+      await rmdir(holdingDirectory).catch(() => undefined);
+      return "changed";
+    }
+
+    if (content !== null) {
+      try {
+        await writeNoFollow(temp, content, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, heldState.mode);
+        await this.beforeRestorePublish?.(absolutePath);
+        await link(temp, absolutePath);
+      } catch (error) {
+        await rm(temp, { force: true }).catch(() => undefined);
+        await this.returnHeldFile(held, absolutePath);
+        await rmdir(holdingDirectory).catch(() => undefined);
+
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+          return "changed";
+        }
+
+        throw error;
+      }
+
+      await rm(temp, { force: true }).catch(() => undefined);
+      const after = await readHeld();
+
+      if (after && hashMarkdown(after.content) === expectedHash) {
+        await rm(held, { force: true }).catch(() => undefined);
+        await rmdir(holdingDirectory).catch(() => undefined);
+      } else {
+        // A writer that had the file open wrote into the held copy: keep it.
+        await this.returnHeldFile(held, absolutePath);
+        await rmdir(holdingDirectory).catch(() => undefined);
+      }
+
+      return "written";
+    }
+
+    if (this.trashItem) {
+      await this.retireHeldOriginal(held, holdingDirectory);
+      return "written";
+    }
+
+    // No Trash in this environment: delete the held copy only if it still
+    // holds the verified bytes.
+    const last = await readHeld();
+
+    if (last && hashMarkdown(last.content) === expectedHash) {
+      await rm(held, { force: true }).catch(() => undefined);
+      await rmdir(holdingDirectory).catch(() => undefined);
+      return "written";
+    }
+
+    await this.returnHeldFile(held, absolutePath);
+    await rmdir(holdingDirectory).catch(() => undefined);
+    return "changed";
   }
 
   /**

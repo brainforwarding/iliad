@@ -84,10 +84,17 @@ export function mergeCommentEntries(
     }
 
     const editedLocally = !baseEntry || localComment.comment !== baseEntry.comment;
-    const quoteChangedOutside = Boolean(baseEntry && freshEntry.quote !== baseEntry.quote);
+    // An outside edit of the anchor (quote, occurrence, or prefix) re-anchors
+    // from the fresh entry instead of keeping the in-memory position.
+    const anchorChangedOutside = Boolean(
+      baseEntry &&
+        (freshEntry.quote !== baseEntry.quote ||
+          freshEntry.occurrence !== baseEntry.occurrence ||
+          (freshEntry.prefix ?? "") !== (baseEntry.prefix ?? ""))
+    );
     const entry = editedLocally ? { ...freshEntry, comment: localComment.comment } : freshEntry;
 
-    entries.push({ entry, local: quoteChangedOutside ? null : localComment });
+    entries.push({ entry, local: anchorChangedOutside ? null : localComment });
   }
 
   for (const localComment of local) {
@@ -135,4 +142,35 @@ export function readdRestoredComments(removed: SelectionComment[], current: Sele
   }
 
   return { readded, stillRemoved };
+}
+
+export interface PendingRestore {
+  /** Buffer text when the restore was noticed (open document), or null (applied on next open). */
+  textAtNotice: string | null;
+  expiresAt: number | null;
+}
+
+/**
+ * Decides what to do with a recorded restore once the document's comments are
+ * loaded: `wait` (open document, restored text not in the buffer yet),
+ * `drop` (expired), or `apply` with the comments to re-add.
+ */
+export function planRestoredReadd(
+  pending: PendingRestore,
+  removed: SelectionComment[],
+  current: SelectionComment[],
+  documentText: string,
+  now = Date.now()
+): { action: "wait" } | { action: "drop" } | { action: "apply"; readded: SelectionComment[]; stillRemoved: SelectionComment[] } {
+  if (pending.expiresAt !== null && now > pending.expiresAt) {
+    return { action: "drop" };
+  }
+
+  const { readded, stillRemoved } = readdRestoredComments(removed, current, documentText);
+
+  if (readded.length === 0 && pending.textAtNotice !== null && documentText === pending.textAtNotice) {
+    return { action: "wait" };
+  }
+
+  return { action: "apply", readded, stillRemoved };
 }

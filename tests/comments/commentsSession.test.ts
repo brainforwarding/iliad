@@ -226,3 +226,35 @@ describe("comments removed outside and a restore (V17)", () => {
     expect(restored.stillRemoved).toEqual([]);
   });
 });
+
+describe("review fixes", () => {
+  it("re-anchors from the fresh entry when an outside tool changed occurrence or prefix", () => {
+    const text = "the cat and the cat";
+    const base = [{ id: "d", quote: "the cat", comment: "x", occurrence: 1, prefix: "" }];
+    const local = [{ ...comment("d", "the cat", "x", text), from: 0, to: 7 }];
+    const fresh = [{ id: "d", quote: "the cat", comment: "x", occurrence: 2, prefix: "the cat and " }];
+
+    const result = mergeCommentEntries(base, local, fresh);
+    expect(result.entries[0].local).toBeNull();
+    expect(result.entries[0].entry).toMatchObject({ occurrence: 2, prefix: "the cat and " });
+
+    const unchanged = mergeCommentEntries(base, local, base);
+    expect(unchanged.entries[0].local).toBe(local[0]);
+  });
+
+  it("plans the V17 re-add for a document restored while it was not open", async () => {
+    const { planRestoredReadd } = await import("../../src/comments/commentsMerge");
+    const removed = [comment("a", "Alpha passage", "tighten", "Alpha passage here.")];
+
+    // Opened later: applied at once against the loaded text.
+    expect(planRestoredReadd({ textAtNotice: null, expiresAt: null }, removed, [], "Alpha passage here.")).toMatchObject({
+      action: "apply",
+      readded: [{ id: "a", from: 0 }]
+    });
+    // The open document before the reload reaches the buffer: wait.
+    expect(planRestoredReadd({ textAtNotice: "Rewritten.", expiresAt: Date.now() + 1000 }, removed, [], "Rewritten.")).toEqual({
+      action: "wait"
+    });
+    expect(planRestoredReadd({ textAtNotice: "x", expiresAt: 1 }, removed, [], "Alpha passage", 2)).toEqual({ action: "drop" });
+  });
+});

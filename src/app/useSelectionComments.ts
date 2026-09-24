@@ -7,7 +7,7 @@ import {
   type CommentsFileIo,
   type CommentsSessionState
 } from "../comments/commentsSession";
-import { readdRestoredComments } from "../comments/commentsMerge";
+import { planRestoredReadd } from "../comments/commentsMerge";
 import { companionPathsFor, isCompanionPath } from "../files/companionFiles";
 import { findNode } from "../files/fileTree";
 import { captureSelectionAnchor, isAnchoredSelectionComment, reanchorSelectionComments } from "./selectionCommentsAnchor";
@@ -102,9 +102,11 @@ export function useSelectionComments({
   const sessionRef = useRef<CommentsSession | null>(null);
   const pendingWritesRef = useRef(new Map<string, Promise<void>>());
   const removedOutsideRef = useRef(new Map<string, SelectionComment[]>());
-  // Set when the writer restored this document's outside edit; resolved once
-  // the restored text reaches the buffer (or soon after, if it never does).
-  const restorePendingRef = useRef<{ textAtNotice: string; expiresAt: number } | null>(null);
+  // Documents whose outside edit the writer restored (spec V17), by
+  // removedOutsideKey. For the open document the re-add waits until the
+  // restored text reaches the buffer (`textAtNotice`); any other document is
+  // handled the next time it is opened and its comments are read.
+  const restoredDocumentsRef = useRef(new Map<string, { textAtNotice: string | null; expiresAt: number | null }>());
   const [restoreTick, setRestoreTick] = useState(0);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
@@ -124,6 +126,8 @@ export function useSelectionComments({
   }
 
   const workspacePath = workspace?.path ?? null;
+  const workspacePathRef = useRef(workspacePath);
+  workspacePathRef.current = workspacePath;
   const commentsEnabled = Boolean(
     workspacePath && activeFile?.kind === "markdown" && !isCompanionPath(activeFile.relativePath)
   );
@@ -297,6 +301,7 @@ export function useSelectionComments({
   // Workspace switch: forget comments remembered for restores.
   useEffect(() => {
     removedOutsideRef.current = new Map();
+    restoredDocumentsRef.current = new Map();
   }, [workspacePath]);
 
   // Outside changes to the comments file (or a degraded watcher): re-read.
@@ -471,43 +476,57 @@ export function useSelectionComments({
    */
   const noteOutsideEditRestored = useCallback((relativePaths: string[]) => {
     const session = sessionRef.current;
+    const workspace = session?.workspacePath ?? workspacePathRef.current;
 
-    if (
-      session &&
-      relativePaths.some((relativePath) => normalizeRelativePath(relativePath).toLowerCase() === session.documentRelativePath.toLowerCase())
-    ) {
-      restorePendingRef.current = { textAtNotice: documentTextRef.current, expiresAt: Date.now() + 5000 };
-      setRestoreTick((tick) => tick + 1);
+    if (!workspace) {
+      return;
     }
+
+    for (const relativePath of relativePaths) {
+      const normalized = normalizeRelativePath(relativePath);
+      const key = removedOutsideKey(workspace, normalized);
+
+      if ((removedOutsideRef.current.get(key) ?? []).length === 0) {
+        continue;
+      }
+
+      const active = Boolean(session && session.documentRelativePath.toLowerCase() === normalized.toLowerCase());
+      restoredDocumentsRef.current.set(
+        key,
+        active ? { textAtNotice: documentTextRef.current, expiresAt: Date.now() + 5000 } : { textAtNotice: null, expiresAt: null }
+      );
+    }
+
+    setRestoreTick((tick) => tick + 1);
   }, []);
 
   useEffect(() => {
     const session = sessionRef.current;
-    const pending = restorePendingRef.current;
 
-    if (!pending || !session) {
-      return;
-    }
-
-    if (Date.now() > pending.expiresAt) {
-      restorePendingRef.current = null;
+    if (!session || !loaded || !session.loaded) {
       return;
     }
 
     const key = removedOutsideKey(session.workspacePath, session.documentRelativePath);
-    const { readded, stillRemoved } = readdRestoredComments(
-      removedOutsideRef.current.get(key) ?? [],
-      session.comments,
-      documentText
-    );
+    const pending = restoredDocumentsRef.current.get(key);
 
-    // Before the restored text reaches the buffer the quotes are not found
-    // yet: keep waiting for the reload.
-    if (readded.length === 0 && documentText === pending.textAtNotice) {
+    if (!pending) {
       return;
     }
 
-    restorePendingRef.current = null;
+    const plan = planRestoredReadd(pending, removedOutsideRef.current.get(key) ?? [], session.comments, documentText);
+
+    if (plan.action === "wait") {
+      return;
+    }
+
+    restoredDocumentsRef.current.delete(key);
+
+    if (plan.action === "drop") {
+      return;
+    }
+
+    const { readded, stillRemoved } = plan;
     removedOutsideRef.current.set(key, stillRemoved);
 
     if (readded.length > 0) {
@@ -515,7 +534,7 @@ export function useSelectionComments({
       publish(session);
       schedulePersist(session);
     }
-  }, [documentText, publish, restoreTick, schedulePersist]);
+  }, [documentText, loaded, publish, restoreTick, schedulePersist]);
 
   const detachedComments = useMemo(
     () => comments.filter((comment) => !isAnchoredSelectionComment(comment)),

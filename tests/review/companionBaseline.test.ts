@@ -92,7 +92,10 @@ describe("companion files never enter outside review (V9)", () => {
     expect(reviewPaths(baseline.currentReview(root))).toEqual([]);
 
     baseline.noteDiskChange(root, { relativePath: "doc.md", eventType: "change" });
-    await sleep(80);
+    const startedAt = Date.now();
+    while (reviewPaths(baseline.currentReview(root)).length === 0 && Date.now() - startedAt < 10_000) {
+      await sleep(10);
+    }
     expect(reviewPaths(baseline.currentReview(root))).toEqual(["edit_file:doc.md"]);
   });
 
@@ -118,5 +121,93 @@ describe("companion files never enter outside review (V9)", () => {
     await baseline.refreshNow(root);
 
     expect(reviewPaths(baseline.currentReview(root))).toEqual([]);
+  });
+});
+
+describe("guarded companion writes", () => {
+  it("does not lose an outside write that lands between the check and the write", async () => {
+    const root = await workspace();
+    await writeFile(path.join(root, "doc.comments.md"), "one\n");
+    let raced = false;
+    const baseline = new WorkspaceBaselineService({
+      beforeRestorePublish: async () => {
+        raced = true;
+      }
+    });
+    services.push(baseline);
+
+    // Outside write already happened when Iliad writes with the old hash.
+    await writeFile(path.join(root, "doc.comments.md"), "agent\n");
+    await expect(
+      baseline.writeMarkdownIfUnchanged(root, {
+        relativePath: "doc.comments.md",
+        content: "mine\n",
+        expected: { kind: "hash", hash: hashMarkdown("one\n") }
+      })
+    ).resolves.toEqual({ status: "conflict", reason: "disk_changed" });
+    expect(raced).toBe(false);
+    const { readFile, readdir } = await import("node:fs/promises");
+    await expect(readFile(path.join(root, "doc.comments.md"), "utf8")).resolves.toBe("agent\n");
+
+    // A file appearing at the path during the publish is never replaced.
+    const racing = new WorkspaceBaselineService({
+      beforeRestorePublish: async (absolutePath) => {
+        await writeFile(absolutePath, "appeared\n");
+      }
+    });
+    services.push(racing);
+    await expect(
+      racing.writeMarkdownIfUnchanged(root, {
+        relativePath: "doc.comments.md",
+        content: "mine\n",
+        expected: { kind: "hash", hash: hashMarkdown("agent\n") }
+      })
+    ).resolves.toEqual({ status: "conflict", reason: "disk_changed" });
+    await expect(readFile(path.join(root, "doc.comments.md"), "utf8")).resolves.toBe("appeared\n");
+    // The held bytes are kept beside it, nothing hidden is left behind.
+    const names = (await readdir(root)).sort();
+    expect(names).toContain("doc.comments (outside copy).md");
+    expect(names.some((name) => name.startsWith(".iliad-restore"))).toBe(false);
+  });
+
+  it("writes through the hold when the hash matches, leaving no holding files", async () => {
+    const root = await workspace();
+    await writeFile(path.join(root, "doc.notes.md"), "one\n");
+    const baseline = service();
+    const { readFile, readdir } = await import("node:fs/promises");
+
+    await expect(
+      baseline.writeMarkdownIfUnchanged(root, {
+        relativePath: "doc.notes.md",
+        content: "two\n",
+        expected: { kind: "hash", hash: hashMarkdown("one\n") }
+      })
+    ).resolves.toMatchObject({ status: "written" });
+    await expect(readFile(path.join(root, "doc.notes.md"), "utf8")).resolves.toBe("two\n");
+    expect(await readdir(root)).toEqual(["doc.notes.md"]);
+  });
+
+  it("removes a companion by moving the verified held file to the Trash", async () => {
+    const root = await workspace();
+    await writeFile(path.join(root, "doc.comments.md"), "one\n");
+    const trashed: string[] = [];
+    const baseline = new WorkspaceBaselineService({
+      trashItem: async (absolutePath) => {
+        const { readFile: read } = await import("node:fs/promises");
+        trashed.push(await read(absolutePath, "utf8"));
+        await rm(absolutePath);
+      }
+    });
+    services.push(baseline);
+    const { readdir } = await import("node:fs/promises");
+
+    await expect(
+      baseline.removeMarkdownIfUnchanged(root, { relativePath: "doc.comments.md", expected: { kind: "hash", hash: hashMarkdown("two\n") } })
+    ).resolves.toEqual({ status: "conflict", reason: "disk_changed" });
+    await expect(
+      baseline.removeMarkdownIfUnchanged(root, { relativePath: "doc.comments.md", expected: { kind: "hash", hash: hashMarkdown("one\n") } })
+    ).resolves.toMatchObject({ status: "written" });
+    expect(trashed).toEqual(["one\n"]);
+    expect(await readdir(root)).toEqual([]);
   });
 });

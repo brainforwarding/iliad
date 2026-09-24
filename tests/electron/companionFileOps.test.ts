@@ -125,6 +125,47 @@ describe("file operations carry companions", () => {
     await expect(exists("chapters/draft.md")).resolves.toBe(false);
   });
 
+  it("refuses to attach an unrelated companion already at the destination", async () => {
+    const doc = await write("draft.md", "doc\n");
+    await write("final.comments.md", "orphan\n");
+
+    await expect(renamePath(root, doc, "final.md")).rejects.toThrow(/comments file named "final.comments.md" already exists/);
+    await expect(exists("draft.md")).resolves.toBe(true);
+    await expect(exists("final.md")).resolves.toBe(false);
+
+    await write("chapters/draft.notes.md", "orphan notes\n");
+    await expect(movePath(root, doc, path.join(root, "chapters"))).rejects.toThrow(/notes file/);
+    await expect(exists("chapters/draft.md")).resolves.toBe(false);
+  });
+
+  it("allows a rename that keeps the stem (companion names unchanged)", async () => {
+    const doc = await write("draft.md", "doc\n");
+    await write("draft.notes.md", "notes\n");
+
+    await renamePath(root, doc, "draft.markdown");
+
+    expect((await readdir(root)).sort()).toEqual(["draft.markdown", "draft.notes.md"]);
+  });
+
+  it("never replaces a document that appears at the destination after the checks", async () => {
+    const doc = await write("draft.md", "doc\n");
+    const target = path.join(root, "final.md");
+    linkHook.before = async (_from, to) => {
+      if (to === target) {
+        await writeFile(target, "appeared\n", "utf8");
+      }
+    };
+
+    try {
+      await expect(renamePath(root, doc, "final.md")).rejects.toThrow(/already exists/);
+    } finally {
+      linkHook.before = null;
+    }
+
+    await expect(readFile(target, "utf8")).resolves.toBe("appeared\n");
+    await expect(readFile(doc, "utf8")).resolves.toBe("doc\n");
+  });
+
   it("rolls back completed moves when a companion move fails midway", async () => {
     const doc = await write("draft.md", "doc\n");
     await write("draft.notes.md", "notes\n");

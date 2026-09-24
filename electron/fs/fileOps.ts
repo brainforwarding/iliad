@@ -337,27 +337,53 @@ function samePath(left: string, right: string) {
 
 /**
  * Moves a Markdown document and its existing companions as one group (spec
- * V13): every target is checked first, the document moves, then each
- * companion moves without overwriting; any failure puts back what moved.
+ * V13). Both companion names at the destination are checked first, even when
+ * the document has no companions yet, so an unrelated `name.notes.md` or
+ * `name.comments.md` there is never silently attached. The document and each
+ * companion then move without overwriting (hard link, then remove the
+ * source); any failure puts back what moved.
  */
 async function moveDocumentGroup(workspaceRoot: string, documentPath: string, targetPath: string) {
   const companions = await existingCompanions(documentPath);
+  const sources = companionPathsFor(documentPath);
   const targets = companionPathsFor(targetPath);
-  const moves = companions
-    .map((companion) => ({ from: companion.path, to: targets ? targets[companion.kind] : null }))
-    .filter((move): move is { from: string; to: string } => move.to !== null && !samePath(move.from, move.to));
 
-  if (companions.length > 0 && !targets) {
+  if (!targets) {
     throw new Error("This document's notes and comments cannot follow that name.");
   }
 
-  for (const move of moves) {
-    ensureVisibleWorkspacePath(workspaceRoot, move.to);
-    await assertPathAvailable(move.to);
+  for (const kind of ["notes", "comments"] as const) {
+    const target = targets[kind];
+    ensureVisibleWorkspacePath(workspaceRoot, target);
+
+    // The group's own companion names (same stem, other extension) are not in the way.
+    if (sources && samePath(sources[kind], target)) {
+      continue;
+    }
+
+    if (await pathExists(target)) {
+      throw new Error(
+        `A ${kind === "notes" ? "notes" : "comments"} file named "${path.basename(target)}" already exists there. Rename or remove it first.`
+      );
+    }
   }
 
-  await rename(documentPath, targetPath);
+  const moves = companions
+    .map((companion) => ({ from: companion.path, to: targets[companion.kind] }))
+    .filter((move) => !samePath(move.from, move.to));
   const done: Array<{ from: string; to: string }> = [];
+
+  // The document itself is published no-clobber too: a file that appeared at
+  // the destination after the checks is never replaced.
+  try {
+    await moveFileNoClobber(documentPath, targetPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error("A file with that name already exists.");
+    }
+
+    throw error;
+  }
 
   try {
     for (const move of moves) {
