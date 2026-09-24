@@ -549,7 +549,15 @@ integrated by the main agent, committed on the branch with tests green.
   updates; Restore brings the deleted comment back (V17)
 - [x] F docs + ADR (e70b26b ADR-0021 + product-vision; 67eaa1a architecture,
   README, CLAUDE.md, release.md, QA matrix, backlog)
-- [ ] G release 0.3.0 + install + site — IN PROGRESS, paused by the owner
+- [x] G release — DONE 2026-09-24. v0.3.0 published (9a2419a); the installed
+  build then showed Cmd+/ toggling an HTML comment with autocomplete off (the
+  default) and a full idea after a list item joining item 3's line → fixed and
+  shipped as **v0.3.1** (2ba5571, latest; updater feed serves 0.3.1). Installed
+  at /Applications/Iliad MD.app and verified there (packaged CLI status/open,
+  chunk Keep/Restore, comment file, ⌘, ⌘/ with Gemini, ⌘/ hint with
+  autocomplete off). iliad.md deployed (site commits dba4590, a18634d; no git
+  remote — S3/CloudFront only) and verified live. Worktrees and merged branches
+  removed. The Handoff section below is historical.
 
 ## Handoff (2026-09-24, paused before building the release)
 
