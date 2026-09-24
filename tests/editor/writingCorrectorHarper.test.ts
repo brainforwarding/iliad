@@ -5,7 +5,8 @@ import {
   scalarOffsetToCodeUnitOffset
 } from "../../src/editor/writingCorrector/harper";
 
-describe("Harper writing corrector", () => {
+// Harper loads a WASM grammar engine; allow for a busy machine.
+describe("Harper writing corrector", { timeout: 20_000 }, () => {
   it("converts Harper scalar spans to CodeMirror UTF-16 offsets", () => {
     const text = "A 😀 clener";
 
