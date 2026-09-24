@@ -1,6 +1,7 @@
 # Architecture Decisions
 
-Status: living decision log. Started 2026-05-26.
+Status: living decision log. Started 2026-05-26. ADR-0001–0020 describe the
+removed internal agent and are kept as history; ADR-0021 supersedes them.
 
 ## ADR-0001: Context Is Built Per Turn
 
@@ -128,7 +129,7 @@ search, shell access, background agents, or direct model writes.
 Amended 2026-06-11: traversal budgets are backstops against pathological trees,
 sized so real workspaces never hit them; output budgets remain the working
 limits. `search_documents` accepts an optional directory scope. Spec:
-[2026-06-11 exhaustive document discovery](../../specs/2026-06-11-exhaustive-document-discovery.md).
+[2026-06-11 exhaustive document discovery](../specs/2026-06-11-exhaustive-document-discovery.md).
 
 ## ADR-0010: Implied Workspace References Trigger Discovery
 
@@ -157,7 +158,7 @@ question that does not depend on a specific workspace item.
 Amended 2026-06-11: when a search is capped with zero results, the smallest
 useful next step is one directory-scoped retry; asking the user comes after
 that. Spec:
-[2026-06-11 exhaustive document discovery](../../specs/2026-06-11-exhaustive-document-discovery.md).
+[2026-06-11 exhaustive document discovery](../specs/2026-06-11-exhaustive-document-discovery.md).
 
 ## ADR-0011: Codex Is A Runtime Boundary
 
@@ -234,7 +235,7 @@ Consequence: document content is never re-sent automatically — only paths. Eve
 indexed path appears in the run's context manifest as a reference row, and the
 omission count appears as an excluded row, so the receipt mirrors the prompt.
 
-Spec: [2026-06-11 conversation history budget and turn receipts](../../specs/2026-06-11-conversation-history-budget-and-turn-receipts.md).
+Spec: [2026-06-11 conversation history budget and turn receipts](../specs/2026-06-11-conversation-history-budget-and-turn-receipts.md).
 
 ## ADR-0015: Long-Thread Compaction Summaries
 
@@ -265,7 +266,7 @@ discarded. Receipts: a "Summary of N earlier messages" row (counted in
 estimated input tokens) plus the gap-only omitted row. Any failure degrades to
 the plain omission note.
 
-Spec: [2026-06-11 conversation compaction summaries](../../specs/2026-06-11-conversation-compaction-summaries.md).
+Spec: [2026-06-11 conversation compaction summaries](../specs/2026-06-11-conversation-compaction-summaries.md).
 
 ## ADR-0016: UI Navigation Is A Receipted Tool
 
@@ -285,7 +286,7 @@ Consequence: injection-driven opens are bounded by the shared tool budget,
 validated like reads, visible in receipts, and reversible through navigation
 history. Failed opens loop back to the model as tool errors.
 
-Spec: [2026-06-11 open document and answer streaming](../../specs/2026-06-11-open-document-and-answer-streaming.md).
+Spec: [2026-06-11 open document and answer streaming](../specs/2026-06-11-open-document-and-answer-streaming.md).
 
 ## ADR-0017: Editor Selection Is One-Turn Context
 
@@ -301,7 +302,7 @@ Why: pointing is the cheapest instruction there is; describing a passage in
 prose is slow and lossy. Cursor and Claude Code treat the live selection as
 first-class context for the same reason.
 
-Spec: [2026-06-11 editor selection as context](../../specs/2026-06-11-editor-selection-as-context.md).
+Spec: [2026-06-11 editor selection as context](../specs/2026-06-11-editor-selection-as-context.md).
 
 ## ADR-0018: Workspace Rules Live In AGENTS.md
 
@@ -330,7 +331,7 @@ exposes project-doc discovery), so bounded duplication is accepted over rules
 silently not applying; revisit when the protocol exposes a switch (ADR-0012
 covers native-access honesty).
 
-Spec: [2026-06-11 workspace rules AGENTS.md](../../specs/2026-06-11-workspace-rules-agents-md.md).
+Spec: [2026-06-11 workspace rules AGENTS.md](../specs/2026-06-11-workspace-rules-agents-md.md).
 
 ## ADR-0019: Targeted Edits Are Anchored
 
@@ -361,7 +362,7 @@ demands surrounding lines to disambiguate); CRLF-on-disk documents fail
 anchored matching closed (documented limitation); the streaming cutoff and
 Telegram marker guard both recognize the anchored opener.
 
-Spec: [2026-06-11 anchored edits search replace](../../specs/2026-06-11-anchored-edits-search-replace.md).
+Spec: [2026-06-11 anchored edits search replace](../specs/2026-06-11-anchored-edits-search-replace.md).
 
 ## ADR-0020: Tighten Is A Stateless, Selection-Scoped Rewrite
 
@@ -403,4 +404,43 @@ next launch; main still re-checks and fails closed). It is not multi-selection,
 multi-file, remote, or document-wide; modes (shorten/clarify) and word-level
 diffs are explicitly future work, not v1.
 
-Spec: [2026-06-13 tighten selection](../../specs/2026-06-13-tighten-selection.md).
+Spec: [2026-06-13 tighten selection](../specs/2026-06-13-tighten-selection.md).
+
+## ADR-0021: Iliad Has No Internal Agent; Outside Agents Write, Iliad Reviews
+
+Status: accepted (2026-09-24). Supersedes ADR-0001–0019 and the agent parts of
+ADR-0020.
+
+Iliad removes its built-in agent: the chat panel, the Codex and OpenAI runtimes,
+agent proposals, chat history, context manifests, dictation, and the Telegram
+remote. Iliad is the writing surface and the review surface:
+
+- **Writing one document at a time** stays built in and runs on one Gemini key:
+  inline completion (sentence, paragraph, full idea) and the ✦ AI menu on a
+  selection (Tighten/Edit, now Gemini). Both are review-first: nothing lands
+  without Tab/Accept.
+- **Larger or multi-document work** is done by outside agents (Claude Code,
+  Codex, or any tool) writing Markdown directly in the folder. Iliad derives
+  their changes from a per-session baseline and the writer keeps or restores
+  them chunk by chunk (file level for creates and deletes). Model-authored
+  changes therefore *do* reach disk before acceptance; the guarantee becomes
+  "every outside change is visible and reversible", enforced by the baseline,
+  compare-and-swap writes, and no-clobber restores.
+- **Context for outside agents lives in files**, not app data: per-document
+  companion files `name.notes.md` (writing notes) and `name.comments.md`
+  (comments anchored by quoted passage). Companions are excluded from review.
+- **The bridge** is an `iliad` CLI (`status`, `open`, `skill install`) over a
+  local user-only socket, plus a bundled skill that tells agents how to work
+  with Iliad (read notes, address and delete handled comments, make minimal
+  edits, open the result).
+
+Why: Claude Code and Codex are stronger agents than Iliad can maintain, and the
+internal agent carried most of the code and maintenance. The distinct value is
+the calm writing surface and seeing exactly what an agent changed.
+
+Consequence: no agent UI or provider settings other than the Gemini key; old
+proposals, chat history and Codex data in `userData/assistant/` are no longer
+read (comments and notes are migrated to companion files). The product guardrail
+moves from `agent-vision.md` to `product-vision.md`.
+
+Spec: [2026-09-24 Iliad writing surface](../specs/2026-09-24-iliad-writing-surface.md).
