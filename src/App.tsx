@@ -10,6 +10,7 @@ import {
   PanelLeftOpen,
   X
 } from "lucide-react";
+import { useCliBridge, type CliOpenSteps } from "./app/useCliBridge";
 import { useDocumentHistory, type DocumentHistoryDirection } from "./app/useDocumentHistory";
 import {
   documentCloseRequiresChoice,
@@ -909,6 +910,58 @@ export default function App() {
     [markLatestFileTreeContentSearchRequest, openContentSearchMatch, searchMarkdownContentForFileTree]
   );
 
+  // `iliad open` (electron/cli): open through the normal path and reveal the
+  // line with the content-search reveal, then acknowledge to main.
+  const cliRevealWaitersRef = useRef(new Map<number, (revealed: boolean) => void>());
+  const cliTreeRef = useRef(tree);
+  cliTreeRef.current = tree;
+  const cliOpenSteps = useMemo<CliOpenSteps>(
+    () => ({
+      findNode: async (absolutePath) => {
+        const current = findNode(cliTreeRef.current, absolutePath);
+
+        if (current || !workspace) {
+          return current;
+        }
+
+        return findNode(await refreshTree(workspace.path), absolutePath);
+      },
+      prepareNavigation: (node) => clearReviewForNormalNavigation(node),
+      openNode: (node) => openNode(node),
+      revealLine: (absolutePath, line) =>
+        new Promise<boolean>((resolve) => {
+          const waiters = cliRevealWaitersRef.current;
+          contentSearchRevealRequestIdRef.current += 1;
+          const requestId = contentSearchRevealRequestIdRef.current;
+          const timer = window.setTimeout(() => {
+            waiters.delete(requestId);
+            resolve(false);
+          }, 5000);
+
+          waiters.set(requestId, (revealed) => {
+            window.clearTimeout(timer);
+            waiters.delete(requestId);
+            resolve(revealed);
+          });
+          setContentSearchRevealTarget({
+            filePath: absolutePath,
+            startOffset: 0,
+            endOffset: 0,
+            lineNumber: line,
+            matchedText: "",
+            requestId
+          });
+        })
+    }),
+    [clearReviewForNormalNavigation, openNode, refreshTree, workspace]
+  );
+  useCliBridge({
+    workspacePath: workspace?.path ?? null,
+    tree,
+    activeDocumentPath: activeFile?.kind === "markdown" ? activeFile.path : null,
+    steps: cliOpenSteps
+  });
+
   const resetForWorkspaceSwitch = useCallback(() => {
     setActiveFile(null);
     setSelectedTreePath(null);
@@ -1704,6 +1757,7 @@ export default function App() {
             onEditorViewChange={handleEditorViewChange}
             contentSearchRevealTarget={contentSearchRevealTarget}
             onContentSearchRevealHandled={(requestId) => {
+              cliRevealWaitersRef.current.get(requestId)?.(true);
               setContentSearchRevealTarget((current) => (current?.requestId === requestId ? null : current));
             }}
           />

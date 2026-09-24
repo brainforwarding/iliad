@@ -41,6 +41,11 @@ describe("preload API surface", () => {
     ]);
   });
 
+  it("exposes the CLI bridge (active document and open requests)", () => {
+    const cli = exposed.api?.cli as Record<string, unknown>;
+    expect(Object.keys(cli).sort()).toEqual(["completeOpenRequest", "onOpenRequested", "setActiveDocument", "takeOpenRequest"]);
+  });
+
   it("exposes the Gemini key state and setter", () => {
     expect(typeof exposed.api?.getGeminiKeyState).toBe("function");
     expect(typeof exposed.api?.setGeminiApiKey).toBe("function");

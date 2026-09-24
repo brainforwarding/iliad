@@ -1,5 +1,10 @@
 import { BrowserWindow } from "electron";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
+import { isPathInside, type CliWindowTarget } from "../cli/commands.js";
+import { cliOpenRequestedChannel } from "../cli/ipc.js";
+import { CliOpenRequestQueue } from "../cli/openRequests.js";
+import type { CliWindowStatus } from "../cli/protocol.js";
 import type { WorkspaceInfo } from "../launch/workspace.js";
 import { workspaceKey } from "../launch/workspace.js";
 import { createWindow } from "./createWindow.js";
@@ -15,7 +20,18 @@ export class IliadWindowManager {
   private readonly webContentsIdsByWorkspaceKey = new Map<string, number>();
   private readonly windowsByWebContentsId = new Map<number, BrowserWindow>();
   private readonly workspaceKeysByWebContentsId = new Map<number, string>();
+  private readonly activeDocumentsByWebContentsId = new Map<number, string>();
   private activeWebContentsIds: number[] = [];
+  /** Pending `iliad open` requests, one per window (see electron/cli). */
+  readonly cliOpenRequests = new CliOpenRequestQueue({
+    notify: (webContentsId) => {
+      const window = this.windowsByWebContentsId.get(webContentsId);
+
+      if (window && !window.isDestroyed()) {
+        window.webContents.send(cliOpenRequestedChannel);
+      }
+    }
+  });
 
   createIliadWindow({ launchWorkspace = null }: CreateIliadWindowOptions = {}) {
     if (launchWorkspace) {
@@ -149,6 +165,11 @@ export class IliadWindowManager {
     }
 
     const nextWorkspaceKey = workspaceKey(workspace.path);
+
+    if (previousWorkspaceKey !== nextWorkspaceKey) {
+      this.activeDocumentsByWebContentsId.delete(webContentsId);
+    }
+
     this.workspaceKeysByWebContentsId.set(webContentsId, nextWorkspaceKey);
     this.webContentsIdsByWorkspaceKey.set(nextWorkspaceKey, webContentsId);
 
@@ -165,6 +186,83 @@ export class IliadWindowManager {
     }
 
     return workspaceWithSession;
+  }
+
+  /** The renderer reports the document it shows (absolute path) or null. */
+  setActiveDocument(webContentsId: number, documentPath: string | null) {
+    const workspace = this.currentWorkspacesByWebContentsId.get(webContentsId);
+
+    if (!documentPath || !workspace || !isPathInside(workspace.path, path.resolve(documentPath))) {
+      this.activeDocumentsByWebContentsId.delete(webContentsId);
+      return;
+    }
+
+    this.activeDocumentsByWebContentsId.set(webContentsId, path.resolve(documentPath));
+  }
+
+  getActiveDocument(webContentsId: number) {
+    return this.activeDocumentsByWebContentsId.get(webContentsId) ?? null;
+  }
+
+  /** Windows for `iliad status`, most recently used first; that one is "focused". */
+  listWindowStatus(): CliWindowStatus[] {
+    const liveIds = [
+      ...this.activeWebContentsIds,
+      ...[...this.windowsByWebContentsId.keys()].filter((id) => !this.activeWebContentsIds.includes(id))
+    ].filter((id) => {
+      const window = this.windowsByWebContentsId.get(id);
+      return Boolean(window && !window.isDestroyed());
+    });
+
+    return liveIds.map((webContentsId, index) => {
+      const workspace = this.currentWorkspacesByWebContentsId.get(webContentsId)?.path ?? null;
+      const document = this.activeDocumentsByWebContentsId.get(webContentsId) ?? null;
+
+      return {
+        workspace,
+        document,
+        relativePath: workspace && document ? path.relative(workspace, document).split(path.sep).join("/") : null,
+        focused: index === 0
+      };
+    });
+  }
+
+  /** The open window whose workspace contains the file (longest root wins). */
+  findWindowForPath(absolutePath: string): CliWindowTarget | null {
+    let best: CliWindowTarget | null = null;
+
+    for (const [webContentsId, workspace] of this.currentWorkspacesByWebContentsId) {
+      const window = this.windowsByWebContentsId.get(webContentsId);
+
+      if (!window || window.isDestroyed() || !isPathInside(workspace.path, absolutePath)) {
+        continue;
+      }
+
+      if (!best || workspace.path.length > best.workspaceRoot.length) {
+        best = { webContentsId, workspaceRoot: workspace.path };
+      }
+    }
+
+    return best;
+  }
+
+  focusWindowById(webContentsId: number) {
+    const window = this.windowsByWebContentsId.get(webContentsId);
+
+    if (window && !window.isDestroyed()) {
+      this.focusWindow(window);
+    }
+  }
+
+  /** Hands the renderer its queued `iliad open` once it shows a workspace containing the file. */
+  takeCliOpenRequest(webContentsId: number) {
+    const workspace = this.currentWorkspacesByWebContentsId.get(webContentsId);
+
+    if (!workspace) {
+      return null;
+    }
+
+    return this.cliOpenRequests.take(webContentsId, (request) => isPathInside(workspace.path, request.path));
   }
 
   private getMostRecentWindow() {
@@ -190,6 +288,8 @@ export class IliadWindowManager {
     this.windowsByWebContentsId.delete(webContentsId);
     this.launchWorkspacesByWebContentsId.delete(webContentsId);
     this.currentWorkspacesByWebContentsId.delete(webContentsId);
+    this.activeDocumentsByWebContentsId.delete(webContentsId);
+    this.cliOpenRequests.dropWindow(webContentsId);
     this.activeWebContentsIds = this.activeWebContentsIds.filter(
       (activeWebContentsId) => activeWebContentsId !== webContentsId
     );
