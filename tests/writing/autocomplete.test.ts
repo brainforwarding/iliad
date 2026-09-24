@@ -43,6 +43,11 @@ describe("agent autocomplete helpers", () => {
     // An item with text continues on the same line, never as a new paragraph.
     expect(cleanAutocompleteOutput("Luego cambian de roles.", { prefix: `${list}4. Repitan.`, suffix: "", suggestionKind: "paragraph" }))
       .toBe(" Luego cambian de roles.");
+    // The model opening the next item starts a new line instead of joining item 3.
+    expect(cleanAutocompleteOutput("4. La persona que habló confirma.\n5. Cambien de roles.", { prefix: `${list.trimEnd()}`, suffix: "", suggestionKind: "idea" }))
+      .toBe("\n4. La persona que habló confirma.\n5. Cambien de roles.");
+    expect(cleanAutocompleteOutput("4. La persona que habló confirma.", { prefix: `${list.trimEnd()}`, suffix: "", suggestionKind: "paragraph" }))
+      .toBe("\n4. La persona que habló confirma.");
     expect(autocompleteInstructions("es", "paragraph")).toContain("elemento de lista");
   });
 

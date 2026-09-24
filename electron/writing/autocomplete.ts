@@ -287,6 +287,11 @@ function normalizeParagraphBoundary(text: string, prefix: string, multiple = fal
   const currentLine = prefix.slice(prefix.lastIndexOf("\n") + 1);
   const listItem = /^\s*(?:[-*+]|\d+[.)])(?:\s+\[[ xX]\])?(\s+|$)(.*)$/.exec(currentLine);
   if (listItem) {
+    // The model opening the next item ("4. …") starts a new line; anything else
+    // continues the current item.
+    if (/^(?:[-*+]|\d+[.)])\s/.test(body)) {
+      return `\n${multiple ? body : body.split("\n")[0]}`;
+    }
     const inline = multiple ? body : body.replace(/\s*\n\s*/g, " ");
     return listItem[2].trim() ? normalizeInsertionBoundary(inline, prefix) : /\s$/.test(prefix) ? inline : ` ${inline}`;
   }
