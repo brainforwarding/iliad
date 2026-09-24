@@ -593,3 +593,16 @@ Docs wholly about the removed agent: `docs/agent-panel-v1-architecture.md`,
   could clobber a concurrently created file; deletion restore). V4 now
   specifies no-clobber publish, held-file recovery, exclusive create — exactly
   the fix given; treated as GO without a third pass.
+- Implementation reviews (Codex gpt-6-sol high): Stage B NO-GO → fixed
+  (69ecdc1: buffer safety, held original to Trash, no-clobber recovery names);
+  CLI NO-GO → fixed (49d5b2e: hidden paths, queue, install link check, dev
+  profile, --line); Stage D NO-GO → fixed (5038522: destination companion
+  preflight, no-clobber document move, guarded companion write/remove, restore
+  re-add for inactive docs, anchor field changes). Final pass: live buffer
+  recheck and CLI requested-path validation → fixed. **Rejected (accepted
+  risk):** retiring every held companion original to Trash on each comment save
+  — an outside process would need an already-open descriptor writing within the
+  microseconds between hash check and delete; agents open-truncate-write, and
+  filling the Trash on every comment save costs more than the risk.
+- Owner testing: paragraph suggestion on an empty list item ("4. ") started a
+  new paragraph (marker period read as sentence end) → fixed (f7226fe).

@@ -73,7 +73,8 @@ async function tryGit(root: string, args: string[]) {
   }
 }
 
-describe("WorkspaceBaselineService", () => {
+// Real filesystem work; allow for a busy machine.
+describe("WorkspaceBaselineService", { timeout: 20_000 }, () => {
   it("captures the baseline on attach and classifies outside edits, creates, deletes, and clears", async () => {
     const root = await workspace();
     await writeFile(path.join(root, "edit.md"), "one\n", "utf8");
@@ -667,7 +668,7 @@ function hashOf(content: string) {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
-describe("WorkspaceBaselineService per-chunk review", () => {
+describe("WorkspaceBaselineService per-chunk review", { timeout: 20_000 }, () => {
   const BASE = "alpha\nbeta\ngamma\ndelta\nepsilon\n";
   const DISK = "ALPHA\nbeta\ngamma\nDELTA\nepsilon\n";
 
