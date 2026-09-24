@@ -50,6 +50,7 @@ interface FileActionMessages {
   duplicateItemFallback: string;
   moveItemFallback: string;
   moveToTrashFallback: string;
+  companionsNotTrashed: (names: string) => string;
   copyPathFallback: string;
   copiedPath: string;
   revealInFinderFallback: string;
@@ -479,7 +480,7 @@ export function useFileActions({
 
     try {
       await flushSave();
-      await window.iliad.moveToTrash(workspace.path, node.path);
+      const trashResult = await window.iliad.moveToTrash(workspace.path, node.path);
 
       const currentActiveFile = stateRef.current.activeFile;
 
@@ -497,7 +498,15 @@ export function useFileActions({
       }
 
       await refreshTree(workspace.path);
-      setError(null);
+      const leftBehind = trashResult?.companionFailures ?? [];
+
+      // The document went to the Trash; a companion that could not follow is
+      // reported, not rolled back (spec V13).
+      setError(
+        leftBehind.length > 0
+          ? messages.companionsNotTrashed(leftBehind.map((failure) => failure.path.split(/[\\/]/).pop()).join(", "))
+          : null
+      );
     } catch (trashError) {
       setError(trashError instanceof Error ? trashError.message : messages.moveToTrashFallback);
     }

@@ -6,13 +6,13 @@ import { registerDiagnosticsIpc } from "./ipc/diagnostics.js";
 import { registerFileIpc } from "./ipc/files.js";
 import { registerReviewIpc } from "./ipc/review.js";
 import { registerSearchIpc } from "./ipc/search.js";
-import { registerSelectionCommentsIpc } from "./ipc/selectionComments.js";
 import { registerShellIpc } from "./ipc/shell.js";
 import { registerTightenIpc } from "./ipc/tighten.js";
 import { registerUpdatesIpc, updateCheckRequestedChannel } from "./ipc/updates.js";
 import { registerWorkspaceIpc } from "./ipc/workspace.js";
 import { registerWritingCorrectorMemoryIpc } from "./ipc/writingCorrectorMemory.js";
 import { registerWritingSettingsIpc } from "./ipc/writingSettings.js";
+import { legacyCommentsAttachHook } from "./comments/legacyCommentsMigration.js";
 import { parseLaunchWorkspacePath } from "./launch/argv.js";
 import { canonicalizeWorkspaceDirectory, type WorkspaceInfo } from "./launch/workspace.js";
 import { createDiagnosticsLogger } from "./diagnostics/logger.js";
@@ -235,7 +235,8 @@ app.whenReady().then(async () => {
     getLaunchWorkspace: (webContentsId) => windowManager.getLaunchWorkspace(webContentsId),
     getWindowWorkspace: (webContentsId) => windowManager.getWindowWorkspace(webContentsId),
     setWindowWorkspace: (webContentsId, workspace) => windowManager.setWindowWorkspace(webContentsId, workspace),
-    baselineService
+    baselineService,
+    onWorkspaceAttached: legacyCommentsAttachHook(userDataPath, baselineService)
   });
   registerFileIpc({
     getWindowWorkspace: (webContentsId) => windowManager.getWindowWorkspace(webContentsId),
@@ -251,7 +252,6 @@ app.whenReady().then(async () => {
   registerReviewIpc({ baselineService, resolveWorkspaceRootForSession, diagnostics: diagnosticsLogger });
   const writingAiService = new WritingAiService(userDataPath, { diagnostics: diagnosticsLogger });
   registerWritingSettingsIpc({ service: writingAiService });
-  registerSelectionCommentsIpc({ resolveWorkspaceRootForSession });
   registerWritingCorrectorMemoryIpc({ resolveWorkspaceRootForSession });
   registerAutocompleteIpc({ service: writingAiService, resolveWorkspaceRootForSession });
   registerTightenIpc({ service: writingAiService });

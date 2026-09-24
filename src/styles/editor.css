@@ -29,6 +29,64 @@
   white-space: normal;
 }
 
+.editor-detached-comments {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.editor-detached-comments__toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted-1);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.editor-detached-comments__list {
+  display: grid;
+  width: 100%;
+  max-height: 220px;
+  margin: 0 0 4px;
+  padding: 0;
+  gap: 6px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.editor-detached-comments__list li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.editor-detached-comments__text {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  font-size: var(--text-xs);
+}
+
+.editor-detached-comments__text q {
+  color: var(--muted-2);
+  font-family: var(--font-serif);
+}
+
+.editor-detached-comments__list button {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-control);
+  border-radius: 6px;
+  background: var(--editor);
+  color: var(--ink-3);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
 .editor-review-title {
   display: flex;
   min-width: 0;

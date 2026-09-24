@@ -40,36 +40,44 @@ export function captureSelectionAnchor(documentText: string, from: number, to: n
   };
 }
 
-function reanchorOne(comment: SelectionComment, documentText: string): SelectionComment {
-  const candidates = occurrenceIndices(documentText, comment.quote);
+/**
+ * Finds the range a comment's quote covers now (spec V15). A unique quote
+ * anchors directly. A quote that appears more than once anchors only when the
+ * stored occurrence still has the stored prefix right before it; otherwise
+ * the comment is detached. It never guesses between duplicates.
+ */
+export function findQuoteAnchor(
+  documentText: string,
+  anchor: { quote: string; occurrence?: number; prefix?: string }
+): { from: number; to: number } | null {
+  const candidates = occurrenceIndices(documentText, anchor.quote);
 
   if (candidates.length === 0) {
-    return { ...comment, from: 0, to: 0 };
+    return null;
   }
 
   if (candidates.length === 1) {
-    return { ...comment, from: candidates[0], to: candidates[0] + comment.quote.length };
+    return { from: candidates[0], to: candidates[0] + anchor.quote.length };
   }
 
-  // Prefix tiebreaker: a unique candidate whose preceding text ends with the
-  // stored prefix wins over the occurrence ordinal.
-  if (comment.prefix) {
-    const prefixMatches = candidates.filter((index) => documentText.slice(0, index).endsWith(comment.prefix));
+  const ordinal = anchor.occurrence ?? 0;
 
-    if (prefixMatches.length === 1) {
-      return { ...comment, from: prefixMatches[0], to: prefixMatches[0] + comment.quote.length };
-    }
+  if (ordinal < 1 || ordinal > candidates.length) {
+    return null;
   }
 
-  const ordinal = Math.max(1, comment.occurrence);
+  const index = candidates[ordinal - 1];
+  const prefix = anchor.prefix ?? "";
+  const prefixMatches = prefix ? documentText.slice(0, index).endsWith(prefix) : index === 0;
 
-  if (ordinal <= candidates.length) {
-    const index = candidates[ordinal - 1];
-    return { ...comment, from: index, to: index + comment.quote.length };
-  }
+  return prefixMatches ? { from: index, to: index + anchor.quote.length } : null;
+}
 
-  // Never mis-anchor: ambiguous failures become "sin ancla".
-  return { ...comment, from: 0, to: 0 };
+function reanchorOne(comment: SelectionComment, documentText: string): SelectionComment {
+  const range = findQuoteAnchor(documentText, comment);
+
+  // Never mis-anchor: ambiguous or missing quotes become detached.
+  return range ? { ...comment, ...range } : { ...comment, from: 0, to: 0 };
 }
 
 /**

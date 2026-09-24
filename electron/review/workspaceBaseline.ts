@@ -5,6 +5,7 @@ import path from "node:path";
 import { buildLineReviewHunks, reconstructContent } from "./reviewDiff.js";
 import { captureGitAdvisorySnapshot, checkGitAdvisorySnapshot, type GitAdvisorySnapshot } from "./gitAdvisory.js";
 import { hashMarkdown } from "./hash.js";
+import { isCompanionPath } from "../fs/companionFiles.js";
 import { ensureInsideWorkspace, isIgnoredWorkspaceName, markdownExtensions } from "../fs/pathSafety.js";
 import { markWorkspaceMutation } from "../fs/workspaceMutationMarkers.js";
 import {
@@ -251,6 +252,11 @@ export class WorkspaceBaselineService {
       return;
     }
 
+    // Companion files (notes, comments) never enter outside review (spec V9).
+    if (hint.relativePath && isCompanionPath(hint.relativePath)) {
+      return;
+    }
+
     const relativePath = hint.relativePath ? normalizeMarkdownRelativePath(hint.relativePath) : null;
     const scoped =
       hint.eventType === "change" &&
@@ -338,18 +344,18 @@ export class WorkspaceBaselineService {
     } finally {
       state.mutationsInFlight -= 1;
       markWorkspaceMutation(key, absolutePaths.length > 0 ? absolutePaths : undefined);
-      const touched = new Set(options.paths.map(normalizeMarkdownRelativePath).filter((value): value is string => value !== null));
+      const touched = new Set(options.paths.map(reviewedMarkdownRelativePath).filter((value): value is string => value !== null));
 
       for (const record of records) {
         if (record.op === "move") {
           for (const value of [record.fromRelativePath, record.toRelativePath]) {
-            const normalized = normalizeMarkdownRelativePath(value);
+            const normalized = reviewedMarkdownRelativePath(value);
             if (normalized) {
               touched.add(normalized);
             }
           }
         } else {
-          const normalized = normalizeMarkdownRelativePath(record.relativePath);
+          const normalized = reviewedMarkdownRelativePath(record.relativePath);
           if (normalized) {
             touched.add(normalized);
           }
@@ -400,15 +406,23 @@ export class WorkspaceBaselineService {
 
       const expected = request.expected;
 
+      // Companions are written only through this compare-and-swap, but they
+      // never join the baseline or the review (spec V9).
+      const reviewed = !isCompanionPath(relativePath);
+
       if (expected.kind === "absent" && current.status !== "absent") {
-        this.scheduleRefreshFor(state, relativePath);
+        if (reviewed) {
+          this.scheduleRefreshFor(state, relativePath);
+        }
         return { status: "conflict", reason: "disk_changed" };
       }
 
       if (expected.kind === "hash" && (current.status !== "present" || hashMarkdown(current.content) !== expected.hash)) {
         // The renderer's idea of disk is stale; make sure the review reflects
         // whatever is there now so the conflict has something to act on.
-        this.scheduleRefreshFor(state, relativePath);
+        if (reviewed) {
+          this.scheduleRefreshFor(state, relativePath);
+        }
         return { status: "conflict", reason: "disk_changed" };
       }
 
@@ -436,7 +450,7 @@ export class WorkspaceBaselineService {
         markWorkspaceMutation(key, [absolutePath]);
       }
 
-      if (state) {
+      if (state && reviewed) {
         state.baseline.set(relativePath, { content: request.content, hash: hashMarkdown(request.content) });
       }
 
@@ -977,7 +991,7 @@ export class WorkspaceBaselineService {
 
     for (const record of records) {
       if (record.op === "set") {
-        const relativePath = normalizeMarkdownRelativePath(record.relativePath);
+        const relativePath = reviewedMarkdownRelativePath(record.relativePath);
         if (relativePath) {
           state.baseline.set(relativePath, { content: record.content, hash: hashMarkdown(record.content) });
           state.review.delete(relativePath);
@@ -995,7 +1009,7 @@ export class WorkspaceBaselineService {
       }
 
       if (record.op === "reconcile") {
-        const relativePath = normalizeMarkdownRelativePath(record.relativePath);
+        const relativePath = reviewedMarkdownRelativePath(record.relativePath);
         if (relativePath) {
           const current = await readDiskPathState(state.workspaceRoot, relativePath);
           if (current.status === "present") {
@@ -1022,13 +1036,13 @@ export class WorkspaceBaselineService {
       } else {
         const entry = state.baseline.get(from);
         state.baseline.delete(from);
-        if (entry && normalizeMarkdownRelativePath(to)) {
+        if (entry && reviewedMarkdownRelativePath(to)) {
           state.baseline.set(to, entry);
         }
 
         const item = state.review.get(from);
         state.review.delete(from);
-        if (item && normalizeMarkdownRelativePath(to)) {
+        if (item && reviewedMarkdownRelativePath(to)) {
           state.review.set(to, { ...item, relativePath: to });
         }
       }
@@ -1402,7 +1416,7 @@ function classify(
 ): ExternalReviewItem | null {
   const baseline = state.baseline.get(relativePath);
 
-  if (current.status === "unsafe") {
+  if (current.status === "unsafe" || isCompanionPath(relativePath)) {
     return null;
   }
 
@@ -1496,7 +1510,7 @@ function movePrefix<T>(map: Map<string, T>, from: string, to: string, rekey?: (v
     map.delete(key);
     const nextKey = `${to}${key.slice(from.length)}`;
 
-    if (normalizeMarkdownRelativePath(nextKey)) {
+    if (reviewedMarkdownRelativePath(nextKey)) {
       map.set(nextKey, rekey ? rekey(value, nextKey) : value);
     }
   }
@@ -1643,7 +1657,7 @@ async function scanDirectory(workspaceRoot: string, directoryPath: string, files
       continue;
     }
 
-    if (!stats.isFile() || !markdownExtensions.has(path.extname(entry.name).toLowerCase())) {
+    if (!stats.isFile() || !markdownExtensions.has(path.extname(entry.name).toLowerCase()) || isCompanionPath(entry.name)) {
       continue;
     }
 
@@ -1706,6 +1720,12 @@ export function normalizeMarkdownRelativePath(rawPath: string): string | null {
   }
 
   return normalized;
+}
+
+/** A Markdown path that takes part in outside review: never a companion file (spec V9). */
+export function reviewedMarkdownRelativePath(rawPath: string): string | null {
+  const normalized = normalizeMarkdownRelativePath(rawPath);
+  return normalized && !isCompanionPath(normalized) ? normalized : null;
 }
 
 function errorMessage(error: unknown) {

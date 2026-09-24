@@ -9,6 +9,7 @@ export interface TreeContextMenuState {
 
 interface TreeContextMenuProps {
   labels: {
+    open: string;
     duplicate: string;
     rename: string;
     moveToWorkspaceRoot: string;
@@ -20,6 +21,8 @@ interface TreeContextMenuProps {
   menuRef: RefObject<HTMLDivElement>;
   canMoveToRoot?: (node: FileTreeNode) => boolean;
   onCopyPath: (node: FileTreeNode) => void | Promise<void>;
+  /** Opens a companion file (notes, comments); companions have no other file actions. */
+  onOpen?: (node: FileTreeNode) => void | Promise<unknown>;
   onDuplicate: (node: FileTreeNode) => void | Promise<void>;
   onMoveToRoot?: (node: FileTreeNode) => void | Promise<unknown>;
   onMoveToTrash: (node: FileTreeNode) => void | Promise<void>;
@@ -43,6 +46,7 @@ export function TreeContextMenu({
   menuRef,
   canMoveToRoot,
   onCopyPath,
+  onOpen,
   onDuplicate,
   onMoveToRoot,
   onMoveToTrash,
@@ -54,6 +58,23 @@ export function TreeContextMenu({
   }
 
   const showMoveToRoot = Boolean(onMoveToRoot && canMoveToRoot?.(menu.node));
+
+  // Companion files follow their document: Open, Reveal in Finder, Move to Trash (spec V11).
+  if (menu.node.companion) {
+    return (
+      <div ref={menuRef} className="tree-context-menu" role="menu" style={contextMenuPosition(menu)}>
+        <button type="button" role="menuitem" onClick={() => void onOpen?.(menu.node)}>
+          {labels.open}
+        </button>
+        <button type="button" role="menuitem" onClick={() => void onRevealInFinder(menu.node)}>
+          {labels.revealInFinder}
+        </button>
+        <button type="button" role="menuitem" className="is-danger" onClick={() => void onMoveToTrash(menu.node)}>
+          {labels.moveToTrash}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div

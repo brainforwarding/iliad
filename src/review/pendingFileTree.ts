@@ -244,10 +244,20 @@ function sortDisplayNodes(nodes: FileTreeDisplayNode[]) {
   for (const node of nodes) {
     const children = displayNodeChildren(node);
 
-    if (children) {
+    // A document's children are its companions, already in Notes, Comments order.
+    if (children && displayNodeKind(node) !== "markdown") {
       sortDisplayNodes(children);
     }
   }
+}
+
+function companionRank(node: FileTreeNode) {
+  return node.companion?.kind === "notes" ? 0 : 1;
+}
+
+/** The companion kind of a tree row attached to its document, or null. */
+export function displayNodeCompanionKind(node: FileTreeDisplayNode): "notes" | "comments" | null {
+  return node.source === "real" && node.node.companion ? node.node.companion.kind : null;
 }
 
 /** Real paths keyed by whether the entry is a folder. */
@@ -397,12 +407,42 @@ export function buildFileTreeDisplayNodes(
     return {
       source: "real",
       node,
-      children: node.children?.map(toDisplayNode),
+      children: node.children ? toDisplayNodes(node.children) : undefined,
       pendingTarget: pendingRealTargetsByPath.get(normalizedRelativePath)
     };
   };
 
-  const displayNodes = nodes.map(toDisplayNode);
+  // Companion files (notes, comments) whose document is a sibling become the
+  // document's children (spec V10/V11); orphans stay ordinary rows.
+  const toDisplayNodes = (siblings: FileTreeNode[]): FileTreeDisplayNode[] => {
+    const siblingPaths = new Set(siblings.map((sibling) => sibling.path));
+    const companionsByDocument = new Map<string, FileTreeNode[]>();
+
+    for (const sibling of siblings) {
+      if (sibling.companion && siblingPaths.has(sibling.companion.documentPath)) {
+        const list = companionsByDocument.get(sibling.companion.documentPath) ?? [];
+        list.push(sibling);
+        companionsByDocument.set(sibling.companion.documentPath, list);
+      }
+    }
+
+    return siblings
+      .filter((sibling) => !(sibling.companion && siblingPaths.has(sibling.companion.documentPath)))
+      .map((sibling) => {
+        const displayNode = toDisplayNode(sibling);
+        const companions = companionsByDocument.get(sibling.path);
+
+        if (companions && displayNode.source === "real") {
+          displayNode.children = companions
+            .sort((left, right) => companionRank(left) - companionRank(right))
+            .map(toDisplayNode);
+        }
+
+        return displayNode;
+      });
+  };
+
+  const displayNodes = toDisplayNodes(nodes);
 
   for (const change of pendingChanges) {
     if ((change.kind === "create_file" || change.kind === "delete_file") && !attachedToRealFile(change)) {

@@ -23,6 +23,9 @@ export interface SelectionCommentsEditorLabels {
   composerPlaceholder: string;
   edit: string;
   delete: string;
+  /** "N detached comments" toolbar (spec V18). */
+  detached?: (count: number) => string;
+  detachedHint?: string;
 }
 
 export interface SelectionCommentsOverlayApi {

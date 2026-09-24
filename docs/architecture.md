@@ -188,7 +188,17 @@ The app manages Markdown documents and folders in the sidebar.
 - Folders can be renamed and moved to Trash; folder duplication is intentionally out of scope.
 - Rename must stay inside the current directory.
 - Rename rejects hidden names, path separators, `..`, and explicit non-Markdown extensions.
+- Creating or renaming a document to a companion-shaped name (`*.notes.md`,
+  `*.comments.md`) is rejected: those names belong to companion files.
 - Move to Trash uses the operating system Trash and requires confirmation.
+- A document's companion files follow it inside the same `runIliadMutation`
+  (see "Companion Files"): rename and move check every target of the group
+  first, move the document, then move each companion with a hard link and
+  remove the source (never overwriting), and put back whatever moved if a step
+  fails; duplicate picks a `name copy[-N]` stem free for the whole group and
+  copies the companions; Move to Trash trashes the document, then its
+  companions, and reports any that stayed (no rollback). A companion whose
+  document exists cannot be renamed, moved, or duplicated on its own.
 - The Electron main process enforces file safety rules, not only the renderer.
 
 Relevant files:
@@ -201,6 +211,66 @@ Relevant files:
 - `electron/fs/fileOps.ts`
 - `electron/fs/pathSafety.ts`
 - `electron/ipc/files.ts`
+
+## Companion Files (Notes and Comments)
+
+Each document `dir/name.md` (any Markdown extension) can have two companion
+files next to it: `dir/name.notes.md` (writing notes) and
+`dir/name.comments.md` (comments anchored to quoted passages). They are plain
+Markdown that the writer and outside agents read and edit directly.
+
+- A path is a companion by name shape alone (`isCompanionPath`, in
+  `electron/shared/companionFiles.ts`, re-exported for main and the renderer).
+  There are no companions of companions: comments and "Open notes" are
+  disabled when the open file is itself a companion.
+- Companions never enter outside-change review: the baseline scan, `classify`,
+  every baseline record, and `noteDiskChange` skip them. They are still
+  written only through the compare-and-swap `writeMarkdownIfUnchanged`; the
+  last comment deleted removes the file through `file:remove-companion`
+  (the guarded remove, limited to companion paths). An agent deleting a handled
+  comment is metadata, not document text; the document text it changed is
+  still reviewed per chunk.
+- Main annotates `FileTreeNode.companion = {kind, documentPath}` when the
+  sibling document exists; `buildFileTreeDisplayNodes` makes those rows
+  children of the document. They show only under the active document (or when
+  a name search reveals them) as "Notes" and "Comments · N", with a context
+  menu of Open, Reveal in Finder, Move to Trash. Orphans are ordinary rows.
+- Comments file format (`electron/shared/commentsFile.ts`, re-exported as
+  `src/comments/commentsFile.ts`): entries separated by a blank line, `---`,
+  and a blank line; each entry is `<!-- iliad:comment id=… -->` (plus
+  `occurrence=N prefix="…"` only when the quote is not unique in the
+  document), the quoted passage as a blockquote, then the comment text.
+  Comment lines that would read as a separator, quote, or metadata are
+  escaped with `\`; text the parser does not recognise is kept as comment text.
+- `useSelectionComments` reads the file when the document opens and when the
+  watcher reports a change to it; positions live in memory and the file is
+  written only when the serialized entries differ from the file's. A
+  `disk_changed` write is merged three ways by id (last read, memory, fresh
+  file; an outside deletion wins unless the comment text was edited here) and
+  retried once. A duplicate quote re-anchors only when its stored prefix still
+  matches its occurrence; otherwise the comment is detached and listed in the
+  "N detached comments" toolbar (Delete only). Comments an outside tool
+  removed come back if the writer restores that document's outside edit and
+  the quote is found again.
+- Notes: the whole `name.notes.md` is autocomplete guidance
+  (`selectWritingGuidance` ranks its lines when it is long). Writing assists
+  has one "Open notes" action that creates an empty file (exclusive create) if
+  needed and opens it.
+- Migrations: comments from the old `userData/assistant/selection-comments.json`
+  move into companion files per workspace when a window attaches (merged by id;
+  entries whose document is gone stay in the store, which is deleted when
+  empty). Old per-document notes in `localStorage` are written to the notes
+  file the first time the document opens, only if that file does not exist.
+
+Relevant files:
+
+- `electron/shared/companionFiles.ts`, `electron/shared/commentsFile.ts`
+- `electron/fs/fileOps.ts`, `electron/ipc/files.ts`
+- `electron/comments/legacyCommentsMigration.ts`
+- `src/app/useSelectionComments.ts`, `src/comments/`
+- `src/app/useWritingNotes.ts`, `src/notes/legacyWritingNotes.ts`
+- `src/review/pendingFileTree.ts`, `src/components/FileTree.tsx`
+- `src/components/DetachedCommentsBar.tsx`
 
 ## Window Chrome and Layout
 
@@ -395,6 +465,8 @@ Rules that must hold:
   conflict banner's confirmed Keep discards it), Esc and Tab never act on
   outside chunks, and a conflicted buffer resumes autosave only when disk
   equals its saved text again.
+- Companion files (`*.notes.md`, `*.comments.md`) are excluded everywhere in
+  the baseline service: scan, classify, records, and disk-change hints.
 - The renderer subscribes (`agent:external-review-changed`) and pulls once
   (`agent:get-external-review`); both carry a revision and older snapshots are
   ignored. The renderer never drives the review lifecycle.
@@ -574,6 +646,10 @@ Relevant files:
 Autosave is part of the writing model. Before opening another file, switching workspaces, creating a file or folder, renaming, duplicating, or moving an item to Trash, the app flushes pending saves.
 
 If a save fails, navigation/create/rename must stop. Do not swallow save errors and then move the user away from dirty content.
+
+The `flushSave` the app passes around also writes pending comment changes
+(the document's `name.comments.md`), so file operations wait for both and stop
+if either fails.
 
 Saves carry the hash of the text the editor last loaded or saved. When the file
 on disk no longer matches (an outside tool wrote it while the writer was

@@ -610,6 +610,24 @@
   font-weight: 400;
 }
 
+/* Companion rows (Notes, Comments) under their document: quieter, smaller. */
+.tree-item.is-companion {
+  min-height: 26px;
+}
+
+.tree-item.is-companion .tree-open-button {
+  min-height: 24px;
+}
+
+.tree-item.is-companion .tree-name {
+  color: var(--muted-1);
+  font-size: var(--text-sm);
+}
+
+.tree-item.is-companion.is-active .tree-name {
+  color: var(--ink-3);
+}
+
 .tree-external-hint {
   display: inline-flex;
   justify-self: center;

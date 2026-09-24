@@ -1,4 +1,5 @@
 import path from "node:path";
+import { companionNameMessage, isCompanionPath } from "./companionFiles.js";
 
 export type FileKind = "directory" | "markdown" | "external";
 
@@ -66,6 +67,10 @@ export function normalizeMarkdownName(name: string) {
     throw new Error("Markdown file names must stay in the current folder.");
   }
 
+  if (isCompanionPath(fileName)) {
+    throw new Error(companionNameMessage);
+  }
+
   return fileName;
 }
 
@@ -86,15 +91,17 @@ export function validateMarkdownRenameName(name: string) {
 
   const extension = path.extname(trimmedName).toLowerCase();
 
-  if (!extension) {
-    return `${trimmedName}.md`;
-  }
+  const fileName = extension ? trimmedName : `${trimmedName}.md`;
 
-  if (!markdownExtensions.has(extension)) {
+  if (extension && !markdownExtensions.has(extension)) {
     throw new Error("Markdown file names must keep a Markdown extension.");
   }
 
-  return trimmedName;
+  if (isCompanionPath(fileName)) {
+    throw new Error(companionNameMessage);
+  }
+
+  return fileName;
 }
 
 export function validateDirectoryName(name: string) {
@@ -128,6 +135,10 @@ export function validateVisibleFileName(name: string) {
 
   if (path.basename(trimmedName) !== trimmedName) {
     throw new Error("File names must stay in the current folder.");
+  }
+
+  if (isCompanionPath(trimmedName)) {
+    throw new Error(companionNameMessage);
   }
 
   return trimmedName;

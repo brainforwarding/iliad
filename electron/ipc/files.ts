@@ -1,21 +1,27 @@
 import { ipcMain, shell } from "electron";
 import path from "node:path";
+import { isCompanionPath } from "../fs/companionFiles.js";
 import {
   assertTrashablePath,
   createFolder,
   createMarkdownFile,
+  documentGroupPaths,
   duplicatePath,
+  existingCompanions,
   movePath,
+  plannedRenamePath,
   readMarkdownFile,
   renamePath,
   type FileTreeNode
 } from "../fs/fileOps.js";
-import { toKind } from "../fs/pathSafety.js";
+import { ensureMarkdownFile, toKind } from "../fs/pathSafety.js";
 import type { WorkspaceInfo } from "../launch/workspace.js";
+import { hashMarkdown } from "../review/hash.js";
 import {
   type BaselineRecord,
   type MarkdownWriteExpectation,
   type MarkdownWriteResult,
+  readDiskPathState,
   WorkspaceBaselineService
 } from "../review/workspaceBaseline.js";
 
@@ -120,9 +126,10 @@ export function registerFileIpc(options: RegisterFileIpcOptions = {}) {
   ipcMain.handle("file:rename", async (event, workspaceRoot: string, filePath: string, requestedName: string) => {
     const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
     const fromRelativePath = workspaceRelativePosix(verifiedWorkspaceRoot, filePath);
+    const plannedPath = plannedRenamePath(filePath, requestedName);
 
     return baseline.runIliadMutation(verifiedWorkspaceRoot, {
-      paths: [fromRelativePath],
+      paths: groupRelativePaths(verifiedWorkspaceRoot, [filePath, plannedPath]),
       operation: () => renamePath(verifiedWorkspaceRoot, filePath, requestedName),
       record: (result) => moveRecords(verifiedWorkspaceRoot, fromRelativePath, result)
     });
@@ -138,9 +145,10 @@ export function registerFileIpc(options: RegisterFileIpcOptions = {}) {
     ): Promise<FileTreeNode> => {
       const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
       const fromRelativePath = workspaceRelativePosix(verifiedWorkspaceRoot, sourcePath);
+      const plannedPath = path.join(targetDirectoryPath, path.basename(sourcePath));
 
       return baseline.runIliadMutation(verifiedWorkspaceRoot, {
-        paths: [fromRelativePath],
+        paths: groupRelativePaths(verifiedWorkspaceRoot, [sourcePath, plannedPath]),
         operation: () => movePath(verifiedWorkspaceRoot, sourcePath, targetDirectoryPath),
         record: (result) => moveRecords(verifiedWorkspaceRoot, fromRelativePath, result)
       });
@@ -151,7 +159,7 @@ export function registerFileIpc(options: RegisterFileIpcOptions = {}) {
     const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
 
     return baseline.runIliadMutation(verifiedWorkspaceRoot, {
-      paths: [],
+      paths: groupRelativePaths(verifiedWorkspaceRoot, [filePath]),
       operation: () => duplicatePath(verifiedWorkspaceRoot, filePath),
       record: (result) =>
         result.kind === "markdown"
@@ -160,19 +168,120 @@ export function registerFileIpc(options: RegisterFileIpcOptions = {}) {
     });
   });
 
-  ipcMain.handle("file:trash", async (event, workspaceRoot: string, filePath: string) => {
+  ipcMain.handle("file:trash", async (event, workspaceRoot: string, filePath: string): Promise<TrashResult> => {
     const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
     const relativePath = workspaceRelativePosix(verifiedWorkspaceRoot, filePath);
 
-    await baseline.runIliadMutation(verifiedWorkspaceRoot, {
-      paths: [relativePath],
-      operation: async () => {
-        await assertTrashablePath(verifiedWorkspaceRoot, filePath);
-        await shell.trashItem(filePath);
-      },
+    return baseline.runIliadMutation(verifiedWorkspaceRoot, {
+      paths: groupRelativePaths(verifiedWorkspaceRoot, [filePath]),
+      operation: () => trashWithCompanions(verifiedWorkspaceRoot, filePath, (target) => shell.trashItem(target)),
       record: () => [{ op: "remove", relativePath }]
     });
   });
+
+  ipcMain.handle("file:read-companion", async (event, workspaceRoot: string, filePath: string): Promise<CompanionReadResult> => {
+    const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
+    return readCompanionFile(verifiedWorkspaceRoot, filePath);
+  });
+
+  ipcMain.handle(
+    "file:remove-companion",
+    async (event, workspaceRoot: string, filePath: string, expectedHash: unknown): Promise<MarkdownWriteResult> => {
+      const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
+      return removeCompanionFile(baseline, verifiedWorkspaceRoot, filePath, expectedHash);
+    }
+  );
+}
+
+export interface TrashResult {
+  /** Companions that stayed in place after their document went to the Trash. */
+  companionFailures: Array<{ path: string; reason: string }>;
+}
+
+export type CompanionReadResult = { status: "present"; content: string; hash: string } | { status: "absent" };
+
+/** Trashes a file; for a document, then its existing companions, reporting (not undoing) failures (spec V13). */
+export async function trashWithCompanions(
+  workspaceRoot: string,
+  filePath: string,
+  trashItem: (absolutePath: string) => Promise<void>
+): Promise<TrashResult> {
+  await assertTrashablePath(workspaceRoot, filePath);
+  const companions = toKind(filePath, false) === "markdown" ? await existingCompanions(filePath) : [];
+  await trashItem(filePath);
+  const companionFailures: TrashResult["companionFailures"] = [];
+
+  for (const companion of companions) {
+    try {
+      await trashItem(companion.path);
+    } catch (error) {
+      companionFailures.push({ path: companion.path, reason: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  return { companionFailures };
+}
+
+function assertCompanionPath(workspaceRoot: string, filePath: string) {
+  if (typeof filePath !== "string" || !isCompanionPath(filePath)) {
+    throw new Error("Only notes and comments files can be used here.");
+  }
+
+  ensureMarkdownFile(workspaceRoot, filePath);
+}
+
+export async function readCompanionFile(workspaceRoot: string, filePath: string): Promise<CompanionReadResult> {
+  assertCompanionPath(workspaceRoot, filePath);
+  // Same path checks as the guarded write: no symlinks, regular files only.
+  const current = await readDiskPathState(workspaceRoot, workspaceRelativePosix(workspaceRoot, filePath));
+
+  if (current.status === "unsafe") {
+    throw new Error("This notes or comments file is not a regular file inside the workspace.");
+  }
+
+  return current.status === "present"
+    ? { status: "present", content: current.content, hash: hashMarkdown(current.content) }
+    : { status: "absent" };
+}
+
+/** `file:remove-companion` (spec V21): the guarded remove, limited to companion paths. */
+export async function removeCompanionFile(
+  baseline: WorkspaceBaselineService,
+  workspaceRoot: string,
+  filePath: string,
+  expectedHash: unknown
+): Promise<MarkdownWriteResult> {
+  assertCompanionPath(workspaceRoot, filePath);
+
+  if (typeof expectedHash !== "string" || !expectedHash) {
+    return { status: "conflict", reason: "disk_changed" };
+  }
+
+  return baseline.removeMarkdownIfUnchanged(workspaceRoot, {
+    relativePath: workspaceRelativePosix(workspaceRoot, filePath),
+    expected: { kind: "hash", hash: expectedHash }
+  });
+}
+
+/** Workspace-relative paths of each file's whole group (document + companion names), for mutation markers. */
+function groupRelativePaths(workspaceRoot: string, filePaths: Array<string | null>) {
+  const paths = new Set<string>();
+
+  for (const filePath of filePaths) {
+    if (!filePath) {
+      continue;
+    }
+
+    for (const groupPath of documentGroupPaths(filePath)) {
+      const relativePath = workspaceRelativePosix(workspaceRoot, groupPath);
+
+      if (relativePath && !relativePath.startsWith("..")) {
+        paths.add(relativePath);
+      }
+    }
+  }
+
+  return [...paths];
 }
 
 function moveRecords(workspaceRoot: string, fromRelativePath: string, result: FileTreeNode): BaselineRecord[] {

@@ -19,6 +19,7 @@ import {
 import { externalReviewTargetForActiveFile, useOutsideReview } from "./app/useOutsideReview";
 import { useSelectionComments } from "./app/useSelectionComments";
 import { useWorkspace } from "./app/useWorkspace";
+import { useWritingNotes } from "./app/useWritingNotes";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
 import {
   EditorPane,
@@ -136,12 +137,44 @@ export default function App() {
     lastSavedAt,
     stateRef,
     clearDocument,
-    flushSave,
+    flushSave: flushDocumentSave,
     handleEditorChange,
     loadDocument,
     resumeAfterConflict
   } = useDocumentPersistence({ activeFile, messages: strings.documentMessages, onError: setError, workspace });
   const activeFileInConflict = saveStatus === "conflict";
+  const {
+    comments: pendingSelectionComments,
+    commentsEnabled,
+    commentCount,
+    detachedComments,
+    createComment: createSelectionComment,
+    updateComment: updateSelectionComment,
+    deleteComment: deleteSelectionComment,
+    applyPositionUpdates: applySelectionCommentPositions,
+    applyFullReplacement: applySelectionCommentFullReplacement,
+    flushPersist: flushSelectionComments,
+    noteOutsideEditRestored
+  } = useSelectionComments({
+    activeFile,
+    documentText,
+    workspace,
+    lastWorkspaceChange,
+    tree,
+    onError: setError,
+    onFileListChanged: () => {
+      if (workspace) {
+        void refreshTree(workspace.path).catch(() => undefined);
+      }
+    },
+    messages: strings.documentMessages
+  });
+  // Every save flush also writes pending comment changes (companion file), so
+  // file operations and navigation wait for both and stop if either fails.
+  const flushSave = useCallback(async () => {
+    await flushDocumentSave();
+    await flushSelectionComments();
+  }, [flushDocumentSave, flushSelectionComments]);
   const {
     editorFontPreset,
     editorFontSize,
@@ -152,7 +185,7 @@ export default function App() {
   const { resetSidebarWidth, setSidebarWidth, sidebarWidth } = useSidebarWidth();
   const { correctorEnabled, autocompleteEnabled, setCorrectorEnabled, setAutocompleteEnabled } =
     useWritingAssistPreferences();
-  const autocompleteOptions = useAutocompletePreferences(workspace?.path, activeFile?.kind === "markdown" ? activeFile.relativePath : undefined);
+  const autocompleteOptions = useAutocompletePreferences();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() =>
@@ -234,6 +267,16 @@ export default function App() {
     tree,
     workspace
   });
+  const { notesText, notesAvailable, openNotes } = useWritingNotes({
+    activeFile,
+    workspace,
+    lastWorkspaceChange,
+    tree,
+    openNode,
+    refreshTree,
+    onError: setError,
+    messages: strings.documentMessages
+  });
 
   const reloadActiveDocumentRef = useRef<() => Promise<void>>(async () => undefined);
   const {
@@ -265,6 +308,7 @@ export default function App() {
     onActiveFileExternalItemCleared: resumeAfterConflict,
     reloadActiveDocument: () => reloadActiveDocumentRef.current(),
     canReplaceActiveBuffer: () => stateRef.current.documentText === stateRef.current.savedText,
+    onOutsideEditRestored: noteOutsideEditRestored,
     strings,
     tree,
     workspace
@@ -405,18 +449,6 @@ export default function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const {
-    comments: pendingSelectionComments,
-    createComment: createSelectionComment,
-    updateComment: updateSelectionComment,
-    deleteComment: deleteSelectionComment,
-    applyPositionUpdates: applySelectionCommentPositions,
-    applyFullReplacement: applySelectionCommentFullReplacement
-  } = useSelectionComments({
-    activeFile,
-    documentText,
-    workspace
-  });
   const editorViewRef = useRef<EditorView | null>(null);
   const handleEditorViewChange = useCallback((view: EditorView) => {
     editorViewRef.current = view;
@@ -1192,7 +1224,8 @@ export default function App() {
   const shouldShowStatus = saveStatus !== "saved";
   const editorFile = virtualReviewFile ?? activeFile;
   const editorSelectionComments = useMemo<EditorSelectionCommentsProps | undefined>(() => {
-    if (!activeFile || activeFile.kind !== "markdown" || editorFile !== activeFile) {
+    // No comments on a notes or comments file itself (spec V12).
+    if (!activeFile || activeFile.kind !== "markdown" || editorFile !== activeFile || !commentsEnabled) {
       return undefined;
     }
 
@@ -1208,12 +1241,27 @@ export default function App() {
     activeFile,
     applySelectionCommentFullReplacement,
     applySelectionCommentPositions,
+    commentsEnabled,
     createSelectionComment,
     deleteSelectionComment,
     editorFile,
     pendingSelectionComments,
     updateSelectionComment
   ]);
+  // "N detached comments" hides while the document has pending outside changes (spec V18).
+  const activeFileHasPendingReview = Boolean(
+    activeFile &&
+      pendingTreeChanges.some(
+        (change) => change.normalizedRelativePath.toLowerCase() === activeFile.relativePath.replace(/\\/g, "/").toLowerCase()
+      )
+  );
+  const editorDetachedComments = useMemo(
+    () =>
+      editorSelectionComments && !activeFileHasPendingReview
+        ? { comments: detachedComments, onDelete: deleteSelectionComment }
+        : undefined,
+    [activeFileHasPendingReview, deleteSelectionComment, detachedComments, editorSelectionComments]
+  );
   const editorTighten = useMemo<EditorTightenProps | undefined>(() => {
     if (!activeFile || activeFile.kind !== "markdown" || editorFile !== activeFile) {
       return undefined;
@@ -1251,7 +1299,7 @@ export default function App() {
       autocompleteEnabled,
       hasAiKey: hasGeminiKey,
       preferences: autocompleteOptions.preferences,
-      guidance: autocompleteOptions.guidance,
+      guidance: notesText,
       snoozedUntil: autocompleteOptions.snoozedUntil,
       onPartial: window.iliad.onAutocompletePartial,
       language,
@@ -1289,7 +1337,7 @@ export default function App() {
     correctorEnabled,
     hasGeminiKey,
     autocompleteOptions.preferences,
-    autocompleteOptions.guidance,
+    notesText,
     autocompleteOptions.snoozedUntil,
     editorFile,
     language,
@@ -1436,9 +1484,12 @@ export default function App() {
             <WritingAssistsMenu
               preferences={autocompleteOptions.preferences}
               onPreferencesChange={autocompleteOptions.setPreferences}
-              guidance={autocompleteOptions.guidance}
-              onGuidanceChange={autocompleteOptions.setGuidance}
-              hasDocument={activeFile?.kind === "markdown"}
+              onOpenNotes={() => {
+                setWritingAssistsOpen(false);
+                void openNotes();
+              }}
+              notesAvailable={notesAvailable}
+              hasNotes={Boolean(notesText.trim())}
               snoozed={autocompleteOptions.snoozedUntil > Date.now()}
               onToggleSnooze={autocompleteOptions.toggleSnooze}
               onResetShortcuts={autocompleteOptions.resetShortcuts}
@@ -1572,6 +1623,7 @@ export default function App() {
               onCancelRename={() => setRenamingPath(null)}
               onCommitRename={renameNode}
               contentSearchProvider={fileTreeContentSearchProvider}
+              companionCommentCount={activeFile && commentsEnabled ? { documentPath: activeFile.path, count: commentCount } : null}
             />
             <div
               ref={sidebarResizeHandleRef}
@@ -1599,6 +1651,7 @@ export default function App() {
         <EditorErrorBoundary labels={strings.editor} resetKey={editorFile?.path ?? "empty"}>
           <EditorPane
             file={editorFile}
+            detachedComments={editorDetachedComments}
             conflict={editorConflict}
             value={editorValue}
             editorFontSize={editorFontSize}
@@ -1628,6 +1681,11 @@ export default function App() {
         menuRef={treeContextMenuRef}
         labels={strings.treeContextMenu}
         onCopyPath={copyNodePath}
+        onOpen={(node) => {
+          closeTreeContextMenu();
+          clearReviewForNormalNavigation(node);
+          return openNode(node);
+        }}
         onDuplicate={duplicateNode}
         onMoveToTrash={moveNodeToTrash}
         onMoveToRoot={(node) => moveNode(node, workspace.path)}

@@ -6,6 +6,8 @@ export interface FileTreeNode {
   relativePath: string;
   kind: FileKind;
   children?: FileTreeNode[];
+  /** Set by main on `stem.notes.md` / `stem.comments.md` when the sibling document exists. */
+  companion?: { kind: "notes" | "comments"; documentPath: string };
 }
 
 export interface WorkspaceInfo {
@@ -336,13 +338,18 @@ export interface SelectionComment {
   status: SelectionCommentStatus;
 }
 
-export interface SelectionCommentsApi {
-  list: (workspaceSessionId: string) => Promise<SelectionComment[]>;
-  save: (
-    workspaceSessionId: string,
-    documentRelativePath: string,
-    comments: SelectionComment[]
-  ) => Promise<SelectionComment[]>;
+export type CompanionReadResult = { status: "present"; content: string; hash: string } | { status: "absent" };
+
+/** Companion files (`stem.notes.md`, `stem.comments.md`); writes go through `writeMarkdown`. */
+export interface CompanionsApi {
+  read: (workspaceRoot: string, filePath: string) => Promise<CompanionReadResult>;
+  /** Removes a companion only if it still hashes to `expectedHash`. */
+  remove: (workspaceRoot: string, filePath: string, expectedHash: string) => Promise<WriteMarkdownResult>;
+}
+
+export interface TrashResult {
+  /** Companions that stayed in place after their document went to the Trash. */
+  companionFailures: Array<{ path: string; reason: string }>;
 }
 
 export interface WritingCorrectorMemorySnapshot {
@@ -480,7 +487,7 @@ export interface IliadApi {
   renamePath: (workspaceRoot: string, filePath: string, requestedName: string) => Promise<FileTreeNode>;
   movePath: (workspaceRoot: string, sourcePath: string, targetDirectoryPath: string) => Promise<FileTreeNode>;
   duplicatePath: (workspaceRoot: string, filePath: string) => Promise<FileTreeNode>;
-  moveToTrash: (workspaceRoot: string, filePath: string) => Promise<void>;
+  moveToTrash: (workspaceRoot: string, filePath: string) => Promise<TrashResult>;
   searchMarkdownContent: (request: MarkdownContentSearchRequest) => Promise<MarkdownContentSearchResponse>;
   openUrl: (url: string) => Promise<void>;
   diagnostics?: {
@@ -498,7 +505,7 @@ export interface IliadApi {
   referenceImageAsset: (request: ReferenceImageAssetRequest) => Promise<SavedImageAsset>;
   referenceImageAssetByRelativePath: (request: ReferenceImageAssetByRelativePathRequest) => Promise<SavedImageAsset>;
   pathForFile?: (file: File) => string;
-  selectionComments?: SelectionCommentsApi;
+  companions: CompanionsApi;
   writingCorrectorMemory?: WritingCorrectorMemoryApi;
   tightenSelection: (request: TightenSelectionRequest) => Promise<TightenResult>;
   cancelTighten: (requestId: string) => void;

@@ -22,6 +22,17 @@ Features fail this rule in one of two ways:
 
 **Out-of-file state.** Information needed to interpret the file is stored outside it — sidecar files, a custom database, editor-only attributes. The file stops being self-describing; a tool reading the `.md` cannot recover the user's view.
 
+## Companion files are part of the contract
+
+A document's writing notes and comments live next to it as plain Markdown:
+`name.notes.md` and `name.comments.md`. They are owned by the writer like any
+other file: readable and editable in any editor, by any agent, moved, copied,
+and trashed with their document. Iliad never hides that state in app data.
+The comments file is a readable list of blockquoted passages with the comment
+under each; a small `<!-- iliad:comment id=… -->` line per entry is the only
+Iliad-specific syntax, and it renders as nothing. Deleting an entry is how an
+agent marks a comment as handled.
+
 ## The decision rule
 
 Before shipping a feature, all four of these must be yes:

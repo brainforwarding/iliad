@@ -45,6 +45,7 @@ import type {
   WritingCorrectorMemorySnapshot
 } from "../types/iliad";
 import { ClipMark } from "./ClipMark";
+import { DetachedCommentsBar } from "./DetachedCommentsBar";
 import { FilePlus } from "lucide-react";
 
 export interface EditorSelectionCommentsProps {
@@ -126,8 +127,16 @@ export interface EditorConflictState {
   onKeep: () => void;
 }
 
+export interface EditorDetachedCommentsProps {
+  /** Comments whose quote is no longer found (or no longer unique) in the document. */
+  comments: SelectionComment[];
+  onDelete: (id: string) => void;
+}
+
 interface EditorPaneProps {
   file: FileTreeNode | null;
+  /** Hidden by the caller while the document has a pending outside review (spec V18). */
+  detachedComments?: EditorDetachedCommentsProps;
   /** Conflict mode: the buffer stays editable while the writer decides. */
   conflict?: EditorConflictState | null;
   /** Reports the live main selection (ADR-0017); null when empty/whitespace. */
@@ -263,6 +272,7 @@ function createEditorTheme(editorFontSize: number, editorFontPreset: EditorFontP
 
 export function EditorPane({
   file,
+  detachedComments,
   conflict = null,
   onActiveSelectionChange,
   value,
@@ -1084,6 +1094,13 @@ export function EditorPane({
             )}
           </div>
         </div>
+      ) : null}
+      {!review && !conflict && detachedComments && detachedComments.comments.length > 0 ? (
+        <DetachedCommentsBar
+          comments={detachedComments.comments}
+          labels={labels.selectionComments}
+          onDelete={detachedComments.onDelete}
+        />
       ) : null}
       {review ? (
         <div className="editor-review-toolbar">

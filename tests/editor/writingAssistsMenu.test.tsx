@@ -2,7 +2,7 @@ import { createRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { WritingAssistsMenu } from "../../src/components/WritingAssistsMenu";
-import { defaultAutocompletePreferences, emptyWritingGuidance } from "../../src/editor/ideaAutocomplete/options";
+import { defaultAutocompletePreferences } from "../../src/editor/ideaAutocomplete/options";
 import { appStrings } from "../../src/i18n/strings";
 import type { GeminiKeyState } from "../../src/types/iliad";
 
@@ -13,12 +13,20 @@ function render({ manualOnly = false, geminiKey = { hasKey: true, last4: "1234" 
       correctorEnabled={false} onSetCorrectorEnabled={noop} correctorAvailable
       autocompleteEnabled onSetAutocompleteEnabled={noop}
       geminiKey={geminiKey} onSaveGeminiKey={async () => undefined} onGetGeminiKey={noop}
-      hasDocument preferences={{ ...defaultAutocompletePreferences, manualOnly }} onPreferencesChange={noop}
-      guidance={emptyWritingGuidance} onGuidanceChange={noop} snoozed={false} onToggleSnooze={noop} onResetShortcuts={noop} />
+      notesAvailable hasNotes={false} onOpenNotes={noop} preferences={{ ...defaultAutocompletePreferences, manualOnly }} onPreferencesChange={noop}
+      snoozed={false} onToggleSnooze={noop} onResetShortcuts={noop} />
   );
 }
 
 describe("Writing assists menu", () => {
+  it("offers one Open notes action instead of inline note fields", () => {
+    const html = render();
+    expect(html).toContain("Open notes");
+    expect(html).not.toContain("Use for this document");
+    expect(html).not.toContain("Voice &amp; audience");
+    expect(html).not.toContain("<textarea");
+  });
+
   it("holds settings only: lengths are key settings, not action buttons", () => {
     const html = render();
     for (const gone of ["Phrase", "Example", "Transition", "Tension", "Continue with", "One word"]) {

@@ -14,6 +14,11 @@ interface WorkspaceIpcOptions {
   getWindowWorkspace?: (webContentsId: number) => WorkspaceInfo | null;
   setWindowWorkspace: (webContentsId: number, workspace: WorkspaceInfo) => WorkspaceInfo | null;
   baselineService?: WorkspaceBaselineService;
+  /**
+   * Runs once a window attaches to a workspace (legacy comment migration);
+   * returns the files it wrote so the renderer re-reads them.
+   */
+  onWorkspaceAttached?: (workspaceRoot: string) => Promise<string[]>;
 }
 
 interface ReadDirectoryRequest {
@@ -317,7 +322,8 @@ export function registerWorkspaceIpc({
   getLaunchWorkspace,
   getWindowWorkspace,
   setWindowWorkspace,
-  baselineService
+  baselineService,
+  onWorkspaceAttached
 }: WorkspaceIpcOptions) {
   ipcMain.handle("workspace:get-launch-workspace", (event): WorkspaceInfo | null => {
     return getLaunchWorkspace(event.sender.id);
@@ -401,6 +407,28 @@ export function registerWorkspaceIpc({
         send: (channel, payload) => sender.send(channel, payload),
         isDestroyed: () => sender.isDestroyed()
       });
+    }
+
+    if (onWorkspaceAttached) {
+      const sender = event.sender;
+      void onWorkspaceAttached(workspace.path)
+        .then((writtenPaths) => {
+          const state = workspaceWatchersByWebContentsId.get(sender.id);
+
+          if (writtenPaths.length === 0 || !state || sender.isDestroyed()) {
+            return;
+          }
+
+          scheduleWorkspaceChanged(sender, state, {
+            workspaceRoot: state.workspaceRoot,
+            treeChanged: true,
+            markdownChanged: true,
+            changedMarkdownPaths: writtenPaths.map((writtenPath) => path.relative(state.workspaceRoot, writtenPath))
+          });
+        })
+        .catch((error: unknown) => {
+          console.warn(`[workspace] Attach task failed for "${workspace.path}".`, error);
+        });
     }
 
     return { status: "ok" };

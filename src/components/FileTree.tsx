@@ -19,6 +19,7 @@ import { FileTreeContentResults } from "./FileTreeContentResults";
 import {
   buildFileTreeDisplayNodes,
   displayNodeChildren,
+  displayNodeCompanionKind,
   displayNodeId,
   displayNodeKind,
   displayNodeName,
@@ -106,6 +107,8 @@ interface FileTreeProps {
   onCancelRename: () => void;
   onCommitRename: (node: FileTreeNode, requestedName: string) => void;
   contentSearchProvider?: FileTreeContentSearchProvider;
+  /** Entries in the active document's comments file, once read ("Comments · N"). */
+  companionCommentCount?: { documentPath: string; count: number | null } | null;
 }
 
 interface FileTreeUpdateLabels {
@@ -119,6 +122,8 @@ interface FileTreeUpdateLabels {
 }
 
 interface FileTreeLabels {
+  companionNotes: string;
+  companionComments: (count: number | null) => string;
   newDocument: string;
   newDocumentIn: (target: string) => string;
   newFolder: string;
@@ -212,6 +217,7 @@ interface TreeRowProps {
   onShowContextMenu: (node: FileTreeNode, position: { x: number; y: number }) => void;
   onCancelRename: () => void;
   onCommitRename: (node: FileTreeNode, requestedName: string) => void;
+  companionCommentCount?: { documentPath: string; count: number | null } | null;
 }
 
 interface FileTreeSearchControlProps {
@@ -760,7 +766,8 @@ function TreeRow({
   onSelectNode,
   onShowContextMenu,
   onCancelRename,
-  onCommitRename
+  onCommitRename,
+  companionCommentCount
 }: TreeRowProps) {
   const pathDescriptionId = useId();
   const nodePath = displayNodePath(node);
@@ -772,7 +779,24 @@ function TreeRow({
   const isActive = activePath === nodePath;
   const isSelected = node.source === "real" && selectedPath === node.node.path && !isActive;
   const isRenaming = node.source === "real" && renamingPath === node.node.path;
-  const displayedName = displayTreeName(node);
+  const companionKind = displayNodeCompanionKind(node);
+  const companionDocumentPath = node.source === "real" ? node.node.companion?.documentPath ?? null : null;
+  const displayedName =
+    companionKind === "notes"
+      ? labels.companionNotes
+      : companionKind === "comments"
+        ? labels.companionComments(
+            companionCommentCount && companionCommentCount.documentPath === companionDocumentPath ? companionCommentCount.count : null
+          )
+        : displayTreeName(node);
+  // A document's children are its companion files: shown only while the
+  // document (or one of them) is open, or when a search reveals them (V11).
+  const companionChildren = nodeKind === "markdown" ? children ?? [] : [];
+  const showCompanions =
+    companionChildren.length > 0 &&
+    (isActive ||
+      companionChildren.some((child) => displayNodePath(child) === activePath) ||
+      (searchOpen && (searchMeta?.descendantMatchCount ?? 0) > 0));
   const fullRelativePath = displayNodeRelativePath(node) || displayNodeName(node);
   const pendingTitle = pendingLabel(node, labels);
   const hasPendingIndicator = fileTreeNodeShowsPendingIndicator(node, isExpanded);
@@ -785,7 +809,7 @@ function TreeRow({
         ? "is-create"
         : "is-edit";
   const canDragImageReference = node.source === "real" && nodeKind === "external" && isImageNode(node.node);
-  const canDragMove = node.source === "real" && !node.pendingTarget && !node.hasPendingDescendant;
+  const canDragMove = node.source === "real" && !node.pendingTarget && !node.hasPendingDescendant && !companionKind;
   const isDragging = node.source === "real" && draggingRelativePath === normalizeDisplayRelativePath(node.node.relativePath);
   const rowDropTargetKey =
     node.source === "real" && node.node.kind === "directory"
@@ -795,13 +819,14 @@ function TreeRow({
   const descendantMatchCount = searchMeta?.descendantMatchCount ?? 0;
   const hasDescendantMatchDescription = searchOpen && descendantMatchCount > 0;
   const showDescendantMatchCount =
-    searchOpen && descendantMatchCount > 0 && (!searchMeta?.selfMatch || !isExpanded);
+    searchOpen && descendantMatchCount > 0 && (!searchMeta?.selfMatch || !isExpanded) && !showCompanions;
   const rowDescription = hasDescendantMatchDescription
     ? `${fullRelativePath}. ${labels.fileTreeDescendantMatches(descendantMatchCount)}`
     : fullRelativePath;
   const rowClassName = [
     "tree-item",
     `is-${displayNodeKind(node)}`,
+    companionKind ? "is-companion" : "",
     node.source === "real" && isAssetNode(node.node) ? "is-asset" : "",
     node.source === "pending-create" || (node.source === "real" && node.pendingTarget?.kind === "create_file")
       ? "is-pending-create"
@@ -932,7 +957,7 @@ function TreeRow({
               </span>
               <span className="tree-name">
                 <span className="tree-name-text">
-                  {renderSearchHighlightedName(displayedName, searchMeta?.selfRanges ?? [])}
+                  {companionKind ? displayedName : renderSearchHighlightedName(displayedName, searchMeta?.selfRanges ?? [])}
                 </span>
                 {showDescendantMatchCount ? (
                   <span
@@ -959,7 +984,7 @@ function TreeRow({
         )}
       </div>
 
-      {isDirectory && isExpanded
+      {(isDirectory && isExpanded) || showCompanions
         ? children?.map((child) => (
             <TreeRow
               key={displayNodePath(child)}
@@ -995,6 +1020,7 @@ function TreeRow({
               onShowContextMenu={onShowContextMenu}
               onCancelRename={onCancelRename}
               onCommitRename={onCommitRename}
+              companionCommentCount={companionCommentCount}
             />
           ))
         : null}
@@ -1091,7 +1117,8 @@ export function FileTree({
   onCloseContextMenu,
   onCancelRename,
   onCommitRename,
-  contentSearchProvider
+  contentSearchProvider,
+  companionCommentCount
 }: FileTreeProps) {
   const [durableExpanded, setDurableExpanded] = useState<Set<string>>(new Set());
   const [searchOpen, setSearchOpen] = useState(false);
@@ -2410,6 +2437,7 @@ export function FileTree({
               onShowContextMenu={onShowContextMenu}
               onCancelRename={onCancelRename}
               onCommitRename={onCommitRename}
+              companionCommentCount={companionCommentCount}
             />
           ))
         ) : (

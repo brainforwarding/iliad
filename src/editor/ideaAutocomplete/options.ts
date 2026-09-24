@@ -1,6 +1,7 @@
 export type AutocompleteDirection = "continue" | "example" | "transition" | "tension";
 export type AutocompleteLength = "sentence" | "paragraph" | "idea";
-export interface WritingGuidance { enabled: boolean; voice: string; facts: string }
+/** The text of the document's `stem.notes.md` companion (spec V20). */
+export type WritingGuidance = string;
 export type AutocompleteShortcutAction = "continue" | AutocompleteLength;
 export interface AutocompletePreferences {
   manualOnly: boolean;
@@ -22,7 +23,6 @@ export const autocompleteShortcutChoices = [
   "Mod-Enter", "Mod-Alt-Enter", "Alt-Enter", "Mod-Shift-Enter", "Mod-Shift-Space", "Ctrl-Space",
   "Mod-,", "Mod-.", "Mod-/", "Mod-1", "Mod-2", "Mod-3", "Mod-Alt-1", "Mod-Alt-2", "Mod-Alt-3"
 ];
-export const emptyWritingGuidance: WritingGuidance = { enabled: true, voice: "", facts: "" };
 
 export function normalizeAutocompletePreferences(value: unknown): AutocompletePreferences {
   const saved = value as { manualOnly?: unknown; announce?: unknown; shortcuts?: Record<string, unknown> } | null;
@@ -46,24 +46,45 @@ export function normalizeAutocompletePreferences(value: unknown): AutocompletePr
   return { manualOnly: saved?.manualOnly === true, announce: saved?.announce === true, shortcuts };
 }
 
-export function normalizeWritingGuidance(value: unknown): WritingGuidance {
-  const saved = value as Partial<WritingGuidance> | null;
-  return { enabled: saved?.enabled !== false,
-    voice: typeof saved?.voice === "string" ? saved.voice.slice(0, 400) : "",
-    facts: typeof saved?.facts === "string" ? saved.facts.slice(0, 4000) : "" };
-}
+const guidanceLimit = 1800;
 
-/** Select a few relevant facts, preserving the author's order and keeping prompts small. */
+/**
+ * Guidance for one request from the whole notes file: short notes go as they
+ * are; longer ones keep the lines most relevant to the text around the
+ * cursor, in the writer's order, within a small budget.
+ */
 export function selectWritingGuidance(notes: WritingGuidance | undefined, context: string): string {
-  if (!notes?.enabled) return "";
+  const lines = (notes ?? "").split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const whole = lines.join("\n");
+
+  if (whole.length <= 1200) {
+    return whole;
+  }
+
   const terms = new Set(context.toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []);
-  const lines = notes.facts.split(/\n+/).map((line) => line.trim()).filter(Boolean);
   const ranked = lines.map((line, index) => ({ line, index,
     score: (line.toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []).filter((term) => terms.has(term)).length
-  })).sort((a, b) => b.score - a.score || a.index - b.index).slice(0, 6).sort((a, b) => a.index - b.index);
-  return [notes.voice.trim(), ...ranked.map(({ line }) => line)].filter(Boolean).join("\n").slice(0, 1800);
+  })).sort((a, b) => b.score - a.score || a.index - b.index);
+  const kept: typeof ranked = [];
+  let length = 0;
+
+  for (const candidate of ranked) {
+    if (kept.length >= 10 || length + candidate.line.length + 1 > guidanceLimit) {
+      continue;
+    }
+
+    kept.push(candidate);
+    length += candidate.line.length + 1;
+  }
+
+  if (kept.length === 0) {
+    return whole.slice(0, guidanceLimit);
+  }
+
+  return kept.sort((a, b) => a.index - b.index).map(({ line }) => line).join("\n").slice(0, guidanceLimit);
 }
 
+/** The localStorage key of a document's notes before notes became a file (read only to migrate). */
 export function writingGuidanceStorageKey(workspacePath: string, documentPath: string) {
   return `iliad:writing-notes:${JSON.stringify([workspacePath, documentPath])}`;
 }

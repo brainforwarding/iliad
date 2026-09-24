@@ -42,6 +42,8 @@ export const appStrings = {
     },
       sidebar: {
       newDocument: "New document",
+      companionNotes: "Notes",
+      companionComments: (count: number | null) => (count === null ? "Comments" : `Comments · ${count}`),
       newDocumentIn: (target: string) => `New document in ${target}`,
       newFolder: "New folder",
       newFolderIn: (target: string) => `New folder in ${target}`,
@@ -110,6 +112,7 @@ export const appStrings = {
         count === 1 ? "1 oversized Markdown file skipped" : `${count} oversized Markdown files skipped`
     },
     treeContextMenu: {
+      open: "Open",
       duplicate: "Duplicate",
       rename: "Rename",
       moveToWorkspaceRoot: "Move to workspace root",
@@ -149,7 +152,7 @@ export const appStrings = {
       autocompleteNeedsKey: "Add a Gemini API key",
       suggestWhileTyping: "Suggest while I type", suggestWhileTypingOff: (key: string) => `Off: only when you press ${key}`,
       snooze: "Pause for 10 min", resume: "Resume suggestions",
-      writingNotes: "Writing notes", useNotes: "Use for this document", voice: "Voice & audience", facts: "Facts, characters, things to remember…",
+      openNotes: "Open notes", openNotesHint: "Notes for this document (voice, facts, things to remember). Autocomplete reads them.",
       shortcuts: "Shortcuts & accessibility", continueKey: "AI key", sentenceKey: "Sentence", paragraphKey: "Paragraph", ideaKey: "Full idea",
       continueKeyHint: "Sentence, Paragraph and Full idea ask for that length at once. The AI key suggests a sentence (press again for longer); with text selected it opens the AI menu.",
       accept: "Accept", alternatives: "Another", dismiss: "Dismiss", reset: "Reset shortcuts", announce: "Announce suggestions"
@@ -179,7 +182,9 @@ export const appStrings = {
         composerLabel: "Comment on selection",
         composerPlaceholder: "Add a comment…",
         edit: "Edit",
-        delete: "Delete"
+        delete: "Delete",
+        detached: (count: number) => (count === 1 ? "1 detached comment" : `${count} detached comments`),
+        detachedHint: "Their passage changed or is no longer unique in the document."
       },
       tighten: {
         action: "Shorten",
@@ -285,7 +290,9 @@ export const appStrings = {
       watcherDegraded: "Iliad stopped receiving file changes for this folder. Reopen the workspace to watch it again."
     },
     documentMessages: {
-      saveDocumentFallback: "Unable to save document."
+      saveDocumentFallback: "Unable to save document.",
+      saveCommentsFailed: "Comments could not be saved.",
+      openNotesFailed: "Notes could not be opened."
     },
     fileMessages: {
       readImageFallback: "Unable to read image.",
@@ -297,6 +304,7 @@ export const appStrings = {
       duplicateItemFallback: "Unable to duplicate item.",
       moveItemFallback: "Unable to move item.",
       moveToTrashFallback: "Unable to move item to Trash.",
+      companionsNotTrashed: (names: string) => `Moved to Trash, but these stayed in place: ${names}`,
       copyPathFallback: "Unable to copy path.",
       copiedPath: "Copied path.",
       revealInFinderFallback: "Unable to reveal item.",
@@ -360,6 +368,8 @@ export const appStrings = {
     },
     sidebar: {
       newDocument: "Nuevo documento",
+      companionNotes: "Notas",
+      companionComments: (count: number | null) => (count === null ? "Comentarios" : `Comentarios · ${count}`),
       newDocumentIn: (target: string) => `Nuevo documento en ${target}`,
       newFolder: "Nueva carpeta",
       newFolderIn: (target: string) => `Nueva carpeta en ${target}`,
@@ -430,6 +440,7 @@ export const appStrings = {
         count === 1 ? "1 archivo Markdown demasiado grande omitido" : `${count} archivos Markdown demasiado grandes omitidos`
     },
     treeContextMenu: {
+      open: "Abrir",
       duplicate: "Duplicar",
       rename: "Renombrar",
       moveToWorkspaceRoot: "Mover a la raíz del espacio",
@@ -469,7 +480,7 @@ export const appStrings = {
       autocompleteNeedsKey: "Agrega una clave API de Gemini",
       suggestWhileTyping: "Sugerir mientras escribo", suggestWhileTypingOff: (key: string) => `Desactivado: solo al presionar ${key}`,
       snooze: "Pausar 10 min", resume: "Reanudar sugerencias",
-      writingNotes: "Notas de escritura", useNotes: "Usar para este documento", voice: "Voz y audiencia", facts: "Hechos, personajes, cosas que recordar…",
+      openNotes: "Abrir notas", openNotesHint: "Notas de este documento (voz, hechos, cosas que recordar). El autocompletado las lee.",
       shortcuts: "Atajos y accesibilidad", continueKey: "Tecla de IA", sentenceKey: "Oración", paragraphKey: "Párrafo", ideaKey: "Idea completa",
       continueKeyHint: "Oración, Párrafo e Idea completa piden ese largo de una vez. La tecla de IA sugiere una oración (presiona de nuevo para alargar); con texto seleccionado abre el menú de IA.",
       accept: "Aceptar", alternatives: "Otra", dismiss: "Descartar", reset: "Restablecer atajos", announce: "Anunciar sugerencias"
@@ -499,7 +510,9 @@ export const appStrings = {
         composerLabel: "Comentar la selección",
         composerPlaceholder: "Añade un comentario…",
         edit: "Editar",
-        delete: "Eliminar"
+        delete: "Eliminar",
+        detached: (count: number) => (count === 1 ? "1 comentario sin pasaje" : `${count} comentarios sin pasaje`),
+        detachedHint: "Su pasaje cambió o ya no es único en el documento."
       },
       tighten: {
         action: "Acortar",
@@ -605,7 +618,9 @@ export const appStrings = {
       watcherDegraded: "Iliad dejó de recibir cambios de archivos en esta carpeta. Vuelve a abrir el espacio de trabajo para observarla de nuevo."
     },
     documentMessages: {
-      saveDocumentFallback: "No se pudo guardar el documento."
+      saveDocumentFallback: "No se pudo guardar el documento.",
+      saveCommentsFailed: "No se pudieron guardar los comentarios.",
+      openNotesFailed: "No se pudieron abrir las notas."
     },
     fileMessages: {
       readImageFallback: "No se pudo leer la imagen.",
@@ -617,6 +632,7 @@ export const appStrings = {
       duplicateItemFallback: "No se pudo duplicar el elemento.",
       moveItemFallback: "No se pudo mover el elemento.",
       moveToTrashFallback: "No se pudo mover el elemento a la papelera.",
+      companionsNotTrashed: (names: string) => `Se movió a la papelera, pero estos quedaron en su lugar: ${names}`,
       copyPathFallback: "No se pudo copiar la ruta.",
       copiedPath: "Ruta copiada.",
       revealInFinderFallback: "No se pudo mostrar el elemento.",

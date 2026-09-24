@@ -169,10 +169,10 @@ const api = {
   getWritingAssistStatus: () => invoke("writing-assist:status"),
   getGeminiKeyState: () => invoke("writing:get-gemini-key-state"),
   setGeminiApiKey: (key: string | null) => invoke("writing:set-gemini-key", key),
-  selectionComments: {
-    list: (workspaceSessionId: string) => invoke("selection-comments:list", workspaceSessionId),
-    save: (workspaceSessionId: string, documentRelativePath: string, comments: unknown) =>
-      invoke("selection-comments:save", workspaceSessionId, documentRelativePath, comments)
+  companions: {
+    read: (workspaceRoot: string, filePath: string) => invoke("file:read-companion", workspaceRoot, filePath),
+    remove: (workspaceRoot: string, filePath: string, expectedHash: string) =>
+      invoke("file:remove-companion", workspaceRoot, filePath, expectedHash)
   },
   writingCorrectorMemory: {
     get: (request: {

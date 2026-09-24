@@ -41,6 +41,8 @@ interface UseOutsideReviewOptions {
    * conflict and no unsaved edits (spec V5). Defaults to "not in conflict".
    */
   canReplaceActiveBuffer?: () => boolean;
+  /** The writer restored outside edits of these paths (file or chunk); comments removed outside may come back (V17). */
+  onOutsideEditRestored?: (relativePaths: string[]) => void;
   strings: AppStrings;
   tree: FileTreeNode[];
   workspace: WorkspaceInfo | null;
@@ -263,6 +265,7 @@ export function useOutsideReview({
   onActiveFileExternalItemCleared,
   reloadActiveDocument,
   canReplaceActiveBuffer,
+  onOutsideEditRestored,
   strings,
   tree,
   workspace
@@ -285,6 +288,8 @@ export function useOutsideReview({
   activeFileInConflictRef.current = activeFileInConflict;
   const canReplaceActiveBufferRef = useRef(canReplaceActiveBuffer);
   canReplaceActiveBufferRef.current = canReplaceActiveBuffer;
+  const onOutsideEditRestoredRef = useRef(onOutsideEditRestored);
+  onOutsideEditRestoredRef.current = onOutsideEditRestored;
   const bufferReplaceable = useCallback(
     () => !activeFileInConflictRef.current && (canReplaceActiveBufferRef.current?.() ?? true),
     []
@@ -542,6 +547,9 @@ export function useOutsideReview({
             return "stale" as const;
           }
 
+          onOutsideEditRestoredRef.current?.(
+            proposal.files.filter((file) => file.status !== "stale").map((file) => file.relativePath)
+          );
           const activeRelativePath = activeFileRelativePathRef.current;
           const activePath = activeFilePathRef.current;
           const touchedActive = proposal.files.some(
@@ -620,6 +628,10 @@ export function useOutsideReview({
           // editable buffer holding unreviewed text.
           setNotice(strings.review.outsideChangeStale);
           return "stale" as const;
+        }
+
+        if (previousFile) {
+          onOutsideEditRestoredRef.current?.([previousFile.relativePath]);
         }
 
         // In conflict mode the buffer holds the writer's edits; restoring the
@@ -716,6 +728,10 @@ export function useOutsideReview({
           if (result.status === "stale") {
             setNotice(strings.review.outsideChangeStale);
             return "stale" as const;
+          }
+
+          if (action === "restore") {
+            onOutsideEditRestoredRef.current?.([file.relativePath]);
           }
 
           const activePath = activeFilePathRef.current;

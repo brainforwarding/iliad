@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultAutocompletePreferences, normalizeAutocompletePreferences, normalizeWritingGuidance, selectWritingGuidance, writingGuidanceStorageKey } from "../../src/editor/ideaAutocomplete/options";
+import { defaultAutocompletePreferences, normalizeAutocompletePreferences, selectWritingGuidance, writingGuidanceStorageKey } from "../../src/editor/ideaAutocomplete/options";
 
 describe("autocomplete preferences and writing memory", () => {
   it("keeps document notes distinct across workspaces and file names", () => {
@@ -27,13 +27,21 @@ describe("autocomplete preferences and writing memory", () => {
     expect(taken.continue).toBe("Mod-,");
   });
 
-  it("uses opt-in notes with a bounded selection of relevant facts", () => {
-    const notes = normalizeWritingGuidance({ enabled: true, voice: "Close third person, past tense.", facts: Array.from({ length: 8 }, (_, i) => `Detail ${i}`).join("\n") + "\nMara has an injured hand." });
-    const selected = selectWritingGuidance(notes, "Mara opened the door.");
-    expect(selected).toContain(notes.voice);
+  it("uses short notes whole and ranks long notes by relevance within a budget", () => {
+    const short = "Close third person, past tense.\n\nMara has an injured hand.\n";
+    expect(selectWritingGuidance(short, "anything")).toBe("Close third person, past tense.\nMara has an injured hand.");
+
+    const long = [
+      "Close third person, past tense.",
+      ...Array.from({ length: 40 }, (_, i) => `Detail ${i} ${"filler ".repeat(12)}`),
+      "Mara has an injured hand."
+    ].join("\n");
+    const selected = selectWritingGuidance(long, "Mara opened the door.");
     expect(selected).toContain("Mara has an injured hand.");
-    expect(selected).not.toContain("Detail 7");
-    expect(selectWritingGuidance({ ...notes, enabled: false }, "Mara")).toBe("");
-    expect(selectWritingGuidance(normalizeWritingGuidance({ facts: "x".repeat(8000) }), "").length).toBeLessThanOrEqual(1800);
+    expect(selected.length).toBeLessThanOrEqual(1800);
+    expect(selected).not.toContain("Detail 39");
+    expect(selectWritingGuidance("", "Mara")).toBe("");
+    expect(selectWritingGuidance(undefined, "Mara")).toBe("");
+    expect(selectWritingGuidance("x".repeat(8000), "").length).toBeLessThanOrEqual(1800);
   });
 });

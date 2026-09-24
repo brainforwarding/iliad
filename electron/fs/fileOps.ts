@@ -1,5 +1,12 @@
-import { cp, lstat, mkdir, readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { copyFile, cp, link, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  companionKindOf,
+  companionPathsFor,
+  documentNamesForCompanion,
+  type CompanionKind
+} from "./companionFiles.js";
 import {
   ensureInsideWorkspace,
   ensureMarkdownFile,
@@ -22,6 +29,8 @@ export interface FileTreeNode {
   relativePath: string;
   kind: FileKind;
   children?: FileTreeNode[];
+  /** Set on `stem.notes.md` / `stem.comments.md` when the sibling document exists (spec V10). */
+  companion?: { kind: CompanionKind; documentPath: string };
 }
 
 export interface SaveImageAssetRequest {
@@ -70,6 +79,8 @@ export async function readDirectory(rootPath: string, currentPath = rootPath): P
     })
   );
 
+  annotateCompanions(nodes);
+
   return nodes.sort((a, b) => {
     const rank = (node: FileTreeNode) => {
       const isAssetDirectory = node.kind === "directory" && node.name === "assets";
@@ -98,17 +109,40 @@ export async function readDirectory(rootPath: string, currentPath = rootPath): P
   });
 }
 
+/**
+ * Marks companion files whose document exists in the same folder. Orphans
+ * (no document) stay ordinary rows.
+ */
+function annotateCompanions(siblings: FileTreeNode[]) {
+  const documents = new Map<string, FileTreeNode>();
+
+  for (const node of siblings) {
+    if (node.kind === "markdown" && !companionKindOf(node.name)) {
+      documents.set(node.name.toLowerCase(), node);
+    }
+  }
+
+  for (const node of siblings) {
+    const kind = node.kind === "markdown" ? companionKindOf(node.name) : null;
+
+    if (!kind) {
+      continue;
+    }
+
+    const document = documentNamesForCompanion(node.name)
+      .map((name) => documents.get(name.toLowerCase()))
+      .find((candidate): candidate is FileTreeNode => Boolean(candidate));
+
+    if (document) {
+      node.companion = { kind, documentPath: document.path };
+    }
+  }
+}
+
 export async function readMarkdownFile(workspaceRoot: string, filePath: string) {
   ensureMarkdownFile(workspaceRoot, filePath);
 
   return readFile(filePath, "utf8");
-}
-
-export async function writeMarkdownFile(workspaceRoot: string, filePath: string, content: string) {
-  ensureMarkdownFile(workspaceRoot, filePath);
-  await writeFile(filePath, content, "utf8");
-
-  return { savedAt: new Date().toISOString() };
 }
 
 function duplicateName(name: string) {
@@ -205,6 +239,146 @@ export async function createFolder(workspaceRoot: string, directoryPath: string,
   return fileTreeNode(workspaceRoot, folderPath, true);
 }
 
+async function regularFileExists(filePath: string) {
+  try {
+    const stats = await lstat(filePath);
+    return stats.isFile() && !stats.isSymbolicLink();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+async function pathExists(filePath: string) {
+  try {
+    await lstat(filePath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+/** The companion files that exist next to a Markdown document (absolute paths). */
+export async function existingCompanions(documentPath: string): Promise<Array<{ kind: CompanionKind; path: string }>> {
+  const paths = companionPathsFor(documentPath);
+
+  if (!paths) {
+    return [];
+  }
+
+  const existing: Array<{ kind: CompanionKind; path: string }> = [];
+
+  for (const kind of ["notes", "comments"] as const) {
+    if (await regularFileExists(paths[kind])) {
+      existing.push({ kind, path: paths[kind] });
+    }
+  }
+
+  return existing;
+}
+
+/** Every path a document's group can occupy: the document plus both companion names. */
+export function documentGroupPaths(documentPath: string) {
+  const paths = companionPathsFor(documentPath);
+  return paths ? [documentPath, paths.notes, paths.comments] : [documentPath];
+}
+
+/** Rejects acting on a companion whose document exists: it follows its document. */
+async function assertNotAttachedCompanion(filePath: string) {
+  if (!companionKindOf(filePath)) {
+    return;
+  }
+
+  const directory = path.dirname(filePath);
+
+  for (const name of documentNamesForCompanion(path.basename(filePath))) {
+    if (await regularFileExists(path.join(directory, name))) {
+      throw new Error("Notes and comments files move with their document.");
+    }
+  }
+}
+
+/**
+ * Moves one file without ever replacing a file at the target: a hard link
+ * fails with EEXIST if anything is there (copy-exclusive across devices),
+ * then the source is removed.
+ */
+async function moveFileNoClobber(from: string, to: string) {
+  try {
+    await link(from, to);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+
+    if (code !== "EXDEV" && code !== "EPERM" && code !== "ENOTSUP") {
+      throw error;
+    }
+
+    await copyFile(from, to, fsConstants.COPYFILE_EXCL);
+  }
+
+  try {
+    await unlink(from);
+  } catch (error) {
+    await rm(to, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+function samePath(left: string, right: string) {
+  return path.resolve(left) === path.resolve(right);
+}
+
+/**
+ * Moves a Markdown document and its existing companions as one group (spec
+ * V13): every target is checked first, the document moves, then each
+ * companion moves without overwriting; any failure puts back what moved.
+ */
+async function moveDocumentGroup(workspaceRoot: string, documentPath: string, targetPath: string) {
+  const companions = await existingCompanions(documentPath);
+  const targets = companionPathsFor(targetPath);
+  const moves = companions
+    .map((companion) => ({ from: companion.path, to: targets ? targets[companion.kind] : null }))
+    .filter((move): move is { from: string; to: string } => move.to !== null && !samePath(move.from, move.to));
+
+  if (companions.length > 0 && !targets) {
+    throw new Error("This document's notes and comments cannot follow that name.");
+  }
+
+  for (const move of moves) {
+    ensureVisibleWorkspacePath(workspaceRoot, move.to);
+    await assertPathAvailable(move.to);
+  }
+
+  await rename(documentPath, targetPath);
+  const done: Array<{ from: string; to: string }> = [];
+
+  try {
+    for (const move of moves) {
+      await moveFileNoClobber(move.from, move.to);
+      done.push(move);
+    }
+  } catch (error) {
+    for (const move of done.reverse()) {
+      await moveFileNoClobber(move.to, move.from).catch(() => undefined);
+    }
+
+    await moveFileNoClobber(targetPath, documentPath).catch(() => undefined);
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`The document's notes or comments could not be moved with it, so nothing was moved. (${reason})`);
+  }
+}
+
+function isDocumentFile(filePath: string, isDirectory: boolean) {
+  return !isDirectory && toKind(filePath, false) === "markdown" && !companionKindOf(filePath);
+}
+
 export async function renamePath(workspaceRoot: string, filePath: string, requestedName: string) {
   ensureVisibleWorkspacePath(workspaceRoot, filePath);
 
@@ -218,13 +392,32 @@ export async function renamePath(workspaceRoot: string, filePath: string, reques
   const newPath = path.join(parentDirectory, fileName);
   ensureVisibleWorkspacePath(workspaceRoot, newPath);
 
-  if (path.resolve(newPath) !== path.resolve(filePath)) {
+  if (!samePath(newPath, filePath)) {
     await assertPathAvailable(newPath);
   }
 
-  await rename(filePath, newPath);
+  if (!fileStats.isDirectory()) {
+    await assertNotAttachedCompanion(filePath);
+  }
+
+  if (isDocumentFile(filePath, fileStats.isDirectory())) {
+    await moveDocumentGroup(workspaceRoot, filePath, newPath);
+  } else {
+    await rename(filePath, newPath);
+  }
 
   return fileTreeNode(workspaceRoot, newPath, fileStats.isDirectory());
+}
+
+/** Best-effort target of a rename, for mutation markers only (never throws). */
+export function plannedRenamePath(filePath: string, requestedName: string) {
+  try {
+    const fileName =
+      toKind(filePath, false) === "markdown" ? validateMarkdownRenameName(requestedName) : validateVisibleFileName(requestedName);
+    return path.join(path.dirname(filePath), fileName);
+  } catch {
+    return null;
+  }
 }
 
 export async function movePath(workspaceRoot: string, sourcePath: string, targetDirectoryPath: string) {
@@ -261,9 +454,33 @@ export async function movePath(workspaceRoot: string, sourcePath: string, target
   }
 
   await assertPathAvailable(targetPath);
-  await rename(sourcePath, targetPath);
+
+  if (!sourceStats.isDirectory()) {
+    await assertNotAttachedCompanion(sourcePath);
+  }
+
+  if (isDocumentFile(sourcePath, sourceStats.isDirectory())) {
+    await moveDocumentGroup(workspaceRoot, sourcePath, targetPath);
+  } else {
+    await rename(sourcePath, targetPath);
+  }
 
   return fileTreeNode(workspaceRoot, targetPath, sourceStats.isDirectory());
+}
+
+/** The first `name copy`, `name copy-2`, … stem free for the document and both companion names. */
+async function uniqueDocumentGroupPath(directoryPath: string, documentName: string) {
+  const extension = path.extname(documentName);
+  const stem = path.basename(documentName, extension);
+
+  for (let index = 1; ; index += 1) {
+    const candidate = path.join(directoryPath, `${stem} copy${index === 1 ? "" : `-${index}`}${extension}`);
+    const taken = await Promise.all(documentGroupPaths(candidate).map(pathExists));
+
+    if (!taken.some(Boolean)) {
+      return candidate;
+    }
+  }
 }
 
 export async function duplicatePath(workspaceRoot: string, filePath: string) {
@@ -275,11 +492,40 @@ export async function duplicatePath(workspaceRoot: string, filePath: string) {
     throw new Error("Folder duplication is not supported yet.");
   }
 
+  await assertNotAttachedCompanion(filePath);
   const parentDirectory = path.dirname(filePath);
-  const preferredName = duplicateName(path.basename(filePath));
-  const duplicatePath = await uniquePath(parentDirectory, preferredName);
+
+  if (!isDocumentFile(filePath, false)) {
+    const preferredName = duplicateName(path.basename(filePath));
+    const duplicatePath = await uniquePath(parentDirectory, preferredName);
+    ensureVisibleWorkspacePath(workspaceRoot, duplicatePath);
+    await cp(filePath, duplicatePath);
+
+    return fileTreeNode(workspaceRoot, duplicatePath, false);
+  }
+
+  const duplicatePath = await uniqueDocumentGroupPath(parentDirectory, path.basename(filePath));
+  const targets = companionPathsFor(duplicatePath);
   ensureVisibleWorkspacePath(workspaceRoot, duplicatePath);
-  await cp(filePath, duplicatePath);
+  await copyFile(filePath, duplicatePath, fsConstants.COPYFILE_EXCL);
+  const created = [duplicatePath];
+
+  try {
+    for (const companion of await existingCompanions(filePath)) {
+      const target = targets?.[companion.kind];
+
+      if (target) {
+        await copyFile(companion.path, target, fsConstants.COPYFILE_EXCL);
+        created.push(target);
+      }
+    }
+  } catch (error) {
+    for (const createdPath of created) {
+      await rm(createdPath, { force: true }).catch(() => undefined);
+    }
+
+    throw error;
+  }
 
   return fileTreeNode(workspaceRoot, duplicatePath, false);
 }

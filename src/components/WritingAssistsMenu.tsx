@@ -1,6 +1,6 @@
-import { PenLine, Moon, RotateCcw } from "lucide-react";
+import { NotebookPen, PenLine, Moon, RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState, type Dispatch, type FormEvent, type RefObject, type SetStateAction } from "react";
-import { autocompleteShortcutActions, autocompleteShortcutChoices, shortcutLabel, type AutocompletePreferences, type WritingGuidance } from "../editor/ideaAutocomplete/options";
+import { autocompleteShortcutActions, autocompleteShortcutChoices, shortcutLabel, type AutocompletePreferences } from "../editor/ideaAutocomplete/options";
 import type { AppStrings } from "../i18n/strings";
 import type { GeminiKeyState } from "../types/iliad";
 
@@ -18,9 +18,11 @@ interface WritingAssistsMenuProps {
   labels: WritingAssistsMenuLabels & AppStrings["writingAssists"];
   preferences: AutocompletePreferences;
   onPreferencesChange: (preferences: AutocompletePreferences) => void;
-  guidance: WritingGuidance;
-  onGuidanceChange: (guidance: WritingGuidance) => void;
-  hasDocument: boolean;
+  /** Opens (creating if needed) the open document's `stem.notes.md`. */
+  onOpenNotes: () => void;
+  /** False when the open file cannot have notes (none open, or it is itself a notes/comments file). */
+  notesAvailable: boolean;
+  hasNotes: boolean;
   snoozed: boolean;
   onToggleSnooze: () => void;
   onResetShortcuts: () => void;
@@ -196,7 +198,7 @@ function SwitchRow({
 }
 
 export function WritingAssistsMenu({
-  preferences, onPreferencesChange, guidance, onGuidanceChange, hasDocument, snoozed, onToggleSnooze, onResetShortcuts,
+  preferences, onPreferencesChange, onOpenNotes, notesAvailable, hasNotes, snoozed, onToggleSnooze, onResetShortcuts,
   labels,
   menuRef,
   open,
@@ -256,15 +258,10 @@ export function WritingAssistsMenu({
               onToggle={() => onPreferencesChange({ ...preferences, manualOnly: !preferences.manualOnly })}
             />
             <button type="button" className="writing-assist-quiet" onClick={onToggleSnooze}><Moon size={14} />{snoozed ? labels.resume : labels.snooze}</button>
-            <details className="writing-assist-details">
-              <summary>{labels.writingNotes}{guidance.enabled && (guidance.voice || guidance.facts) ? <span className="writing-assist-note-dot" /> : null}</summary>
-              <label className="writing-assist-check"><input type="checkbox" checked={guidance.enabled} disabled={!hasDocument}
-                onChange={(event) => onGuidanceChange({ ...guidance, enabled: event.target.checked })} />{labels.useNotes}</label>
-              <input value={guidance.voice} maxLength={400} disabled={!hasDocument} aria-label={labels.voice} placeholder={labels.voice}
-                onChange={(event) => onGuidanceChange({ ...guidance, voice: event.target.value })} />
-              <textarea value={guidance.facts} maxLength={4000} rows={4} disabled={!hasDocument} aria-label={labels.facts} placeholder={labels.facts}
-                onChange={(event) => onGuidanceChange({ ...guidance, facts: event.target.value })} />
-            </details>
+            <button type="button" className="writing-assist-quiet" disabled={!notesAvailable} onClick={onOpenNotes}
+              title={labels.openNotesHint}>
+              <NotebookPen size={14} />{labels.openNotes}{hasNotes ? <span className="writing-assist-note-dot" /> : null}
+            </button>
             <details className="writing-assist-details">
               <summary>{labels.shortcuts}</summary>
               {autocompleteShortcutActions.map((action) => <label className="writing-assist-shortcut-row" key={action}>

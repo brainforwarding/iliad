@@ -56,11 +56,11 @@ describe("reanchorSelectionComments", () => {
     expect(isAnchoredSelectionComment(anchored)).toBe(true);
   });
 
-  it("uses the occurrence ordinal when the quote repeats", () => {
+  it("anchors a repeated quote at the stored occurrence when its prefix still matches", () => {
     const doc = "video intro, then video outro";
     const second = doc.indexOf("video", 1);
     const [anchored] = reanchorSelectionComments(
-      [comment({ quote: "video", occurrence: 2, prefix: "" })],
+      [comment({ quote: "video", occurrence: 2, prefix: "intro, then " })],
       doc,
       "doc.md"
     );
@@ -69,16 +69,23 @@ describe("reanchorSelectionComments", () => {
     expect(anchored.to).toBe(second + 5);
   });
 
-  it("prefers a unique prefix match over the occurrence ordinal", () => {
+  it("detaches a repeated quote whose prefix no longer matches its occurrence (never guesses)", () => {
     const doc = "first video here, second video there";
-    const second = doc.indexOf("video", doc.indexOf("video") + 1);
-    const [anchored] = reanchorSelectionComments(
+    const [detached] = reanchorSelectionComments(
       [comment({ quote: "video", occurrence: 1, prefix: "second " })],
       doc,
       "doc.md"
     );
 
-    expect(anchored.from).toBe(second);
+    expect(isAnchoredSelectionComment(detached)).toBe(false);
+  });
+
+  it("detaches a repeated quote with no stored anchor unless it starts the document", () => {
+    const [detached] = reanchorSelectionComments([comment({ quote: "video", occurrence: 1, prefix: "" })], "a video, a video", "doc.md");
+    const [anchored] = reanchorSelectionComments([comment({ quote: "video", occurrence: 1, prefix: "" })], "video, a video", "doc.md");
+
+    expect(isAnchoredSelectionComment(detached)).toBe(false);
+    expect(anchored.from).toBe(0);
   });
 
   it("flags missing quotes as sin ancla instead of guessing", () => {
