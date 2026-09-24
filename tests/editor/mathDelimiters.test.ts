@@ -4,7 +4,6 @@ import {
   findLatexInlineMath,
   isDisplayLatexCloseLine,
   isDisplayLatexOpenLine,
-  latexMathToDollar,
   matchOneLineDisplayLatex
 } from "../../src/markdown/mathDelimiters";
 
@@ -56,21 +55,5 @@ describe("display \\[ … \\]", () => {
     expect(isDisplayLatexOpenLine("  \\[")).toBe(true);
     expect(isDisplayLatexCloseLine("\\]  ")).toBe(true);
     expect(isDisplayLatexOpenLine("\\[ x")).toBe(false);
-  });
-});
-
-describe("latexMathToDollar (preview rewrite)", () => {
-  it("rewrites inline and one-line display, leaving code untouched", () => {
-    const input = ["See \\( \\theta \\) and:", "\\[ a^2 \\]", "`keep \\( raw \\)`"].join("\n");
-    expect(latexMathToDollar(input)).toBe(["See $\\theta$ and:", "$$a^2$$", "`keep \\( raw \\)`"].join("\n"));
-  });
-
-  it("never rewrites inside fenced code", () => {
-    const input = ["```", "\\( x \\)", "$$y$$", "```", "\\( z \\)"].join("\n");
-    expect(latexMathToDollar(input)).toBe(["```", "\\( x \\)", "$$y$$", "```", "$z$"].join("\n"));
-  });
-
-  it("leaves existing dollar math alone", () => {
-    expect(latexMathToDollar("inline $a$ and $$b$$")).toBe("inline $a$ and $$b$$");
   });
 });

@@ -3,7 +3,7 @@ import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { FileTree, PendingReviewStrip, fileTreeNodeShowsPendingIndicator } from "../../src/components/FileTree";
 import { appStrings } from "../../src/i18n/strings";
-import type { FileTreeDisplayNode, PendingFileTreeChange } from "../../src/assistant/pendingFileTree";
+import type { FileTreeDisplayNode, PendingFileTreeChange } from "../../src/review/pendingFileTree";
 import type { FileTreeNode, WorkspaceInfo } from "../../src/types/iliad";
 
 const workspace: WorkspaceInfo = {

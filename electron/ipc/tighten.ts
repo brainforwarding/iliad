@@ -1,7 +1,7 @@
 import { app, ipcMain } from "electron";
 import type { IpcMainInvokeEvent } from "electron";
-import { AgentService } from "../agent/agentService.js";
-import { normalizeAgentError } from "../agent/errors.js";
+import { normalizeAgentError } from "../writing/errors.js";
+import { WritingAiService } from "../writing/writingAiService.js";
 import {
   TIGHTEN_TIMEOUT_MS,
   cleanTightenOutput,
@@ -20,8 +20,8 @@ import {
   type TightenMode,
   type TightenSelectionRange,
   type TightenResult
-} from "../agent/tighten.js";
-import { isTrustedAgentIpcSender } from "./agent.js";
+} from "../writing/tighten.js";
+import { isTrustedIpcSender } from "./trust.js";
 
 type TightenIpcEvent = Pick<IpcMainInvokeEvent, "sender" | "senderFrame">;
 
@@ -56,7 +56,7 @@ function senderControllerKey(senderId: number, requestId: unknown): string {
 }
 
 export function registerTightenIpc({
-  service = new AgentService(app.getPath("userData"))
+  service = new WritingAiService(app.getPath("userData"))
 }: RegisterTightenIpcOptions = {}) {
   const controllers = new Map<string, AbortController>();
 
@@ -77,7 +77,7 @@ export async function handleTightenIpc(
     controllers: Map<string, AbortController>;
   }
 ): Promise<TightenResult> {
-  if (!isTrustedAgentIpcSender(event)) {
+  if (!isTrustedIpcSender(event)) {
     return { ok: false, reason: "untrusted" };
   }
 

@@ -1,6 +1,6 @@
 // Shared recognition of LaTeX math delimiters (\( … \) inline, \[ … \] display).
-// Pure string utilities with no editor/React dependencies so the CodeMirror
-// decorations and the react-markdown preview agree on what counts as math.
+// Pure string utilities with no editor/React dependencies, used by the
+// CodeMirror visual Markdown decorations.
 //
 // Tradeoff (intentional): a paired, unescaped `\( … \)` is treated as math even
 // though CommonMark would read `\(` as an escaped paren. In practice that pairing
@@ -154,56 +154,4 @@ export function isDisplayLatexCloseLine(text: string) {
 /** A fenced-code delimiter line (``` or ~~~). */
 export function isFenceLine(text: string) {
   return /^\s*(```|~~~)/.test(text);
-}
-
-/**
- * Rewrite LaTeX math delimiters to dollar math for the react-markdown preview,
- * skipping fenced code and inline code. Display `\[ … \]` is block-only.
- */
-export function latexMathToDollar(text: string): string {
-  const lines = text.split("\n");
-  const out: string[] = [];
-  let inFence = false;
-
-  for (const line of lines) {
-    if (isFenceLine(line)) {
-      inFence = !inFence;
-      out.push(line);
-      continue;
-    }
-
-    if (inFence) {
-      out.push(line);
-      continue;
-    }
-
-    const displayTex = matchOneLineDisplayLatex(line);
-    if (displayTex) {
-      out.push(`$$${displayTex}$$`);
-      continue;
-    }
-
-    if (isDisplayLatexOpenLine(line) || isDisplayLatexCloseLine(line)) {
-      out.push("$$");
-      continue;
-    }
-
-    const codeRanges = findInlineCodeRanges(line);
-    const mathRanges = findLatexInlineMath(line, codeRanges);
-
-    if (mathRanges.length === 0) {
-      out.push(line);
-      continue;
-    }
-
-    let rewritten = line;
-    // Rewrite from the end so earlier offsets stay valid.
-    for (let i = mathRanges.length - 1; i >= 0; i -= 1) {
-      const range = mathRanges[i];
-      rewritten = `${rewritten.slice(0, range.from)}$${range.tex}$${rewritten.slice(range.to)}`;
-    }
-    out.push(rewritten);
-  }
-
-  return out.join("\n");
 }

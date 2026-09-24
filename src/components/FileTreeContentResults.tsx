@@ -9,7 +9,7 @@ import {
   type FileTreeContentFolderNode,
   type FileTreeContentMatchTarget,
   type FileTreeContentTreeNode
-} from "../assistant/fileTreeContentSearch";
+} from "../files/fileTreeContentSearch";
 
 interface FileTreeContentResultsLabels {
   contentSearchCount: (matches: number, files: number) => string;

@@ -8,8 +8,6 @@ import {
   Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
   X
 } from "lucide-react";
 import { useDocumentHistory, type DocumentHistoryDirection } from "./app/useDocumentHistory";
@@ -18,10 +16,7 @@ import {
   useDocumentPersistence,
   type SaveStatus
 } from "./app/useDocumentPersistence";
-import {
-  externalReviewTargetForActiveFile,
-  useAgentProposals
-} from "./app/useAgentProposals";
+import { externalReviewTargetForActiveFile, useOutsideReview } from "./app/useOutsideReview";
 import { useSelectionComments } from "./app/useSelectionComments";
 import { useWorkspace } from "./app/useWorkspace";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
@@ -33,26 +28,18 @@ import {
   type EditorWritingAssistsProps
 } from "./components/EditorPane";
 import { ClipMark } from "./components/ClipMark";
-import { AssistantPanel, type AssistantPanelSelectionComments } from "./components/AssistantPanel";
 import { FileTree } from "./components/FileTree";
 import { LanguageMenu } from "./components/LanguageMenu";
 import { TreeContextMenu, type TreeContextMenuState } from "./components/TreeContextMenu";
 import { TypographyMenu } from "./components/TypographyMenu";
-import { WritingAssistsMenu } from "./components/WritingAssistsMenu";
-import { scrollEditorToPosition } from "./editor/selectionComments/scroll";
+import { GEMINI_KEY_URL, WritingAssistsMenu } from "./components/WritingAssistsMenu";
 import {
   markLatestContentSearchRequestId,
   type FileTreeContentSearchProvider
-} from "./assistant/fileTreeContentSearch";
-import { fileHasMutableReview } from "./assistant/assistantUtils";
-import { sameRelativePath } from "./assistant/pendingFileTree";
-import { logReviewNavigation } from "./assistant/reviewDebug";
-import {
-  buildReviewQueueSummary,
-  internalReviewProposals,
-  pendingFileTreeChangesFromQueue
-} from "./assistant/reviewQueue";
-import type { ContextAttachmentMoveHandler } from "./assistant/useAssistantRun";
+} from "./files/fileTreeContentSearch";
+import { fileHasMutableReview } from "./review/reviewFiles";
+import { logReviewNavigation } from "./review/reviewDebug";
+import { buildReviewQueueSummary, pendingFileTreeChangesFromQueue } from "./review/reviewQueue";
 import type { ContentSearchRevealTarget } from "./editor/contentSearchReveal";
 import { useFileActions } from "./files/fileActions";
 import { findNode, findNodeByRelativePath } from "./files/fileTree";
@@ -68,7 +55,6 @@ import { useWritingAssistPreferences } from "./preferences/writingAssistPreferen
 import { useAutocompletePreferences } from "./preferences/autocompletePreferences";
 import type { EditorView } from "@codemirror/view";
 import type {
-  AgentChangeProposal,
   FileTreeNode,
   MarkdownContentSearchResponse,
   UpdateCheckResult,
@@ -98,14 +84,9 @@ function markdownDisplayName(file: FileTreeNode | null, fallbackName: string) {
   return file?.name.replace(/\.(md|markdown|mdown|mkd)$/i, "") ?? fallbackName;
 }
 
-function assistantColumnWidth(viewportWidth: number) {
-  return Math.min(320, Math.max(280, viewportWidth * 0.24));
-}
-
-function effectiveSidebarMaximum(viewportWidth: number, assistantOpen: boolean) {
+function effectiveSidebarMaximum(viewportWidth: number) {
   const editorFloor = 320;
-  const assistantWidth = assistantOpen ? assistantColumnWidth(viewportWidth) : 0;
-  const availableWidth = viewportWidth - assistantWidth - editorFloor;
+  const availableWidth = viewportWidth - editorFloor;
 
   return Math.round(
     Math.max(minimumSidebarWidth, Math.min(maximumPreferredSidebarWidth, viewportWidth * 0.45, availableWidth))
@@ -169,18 +150,10 @@ export default function App() {
     setEditorFontSize
   } = useEditorPreferences();
   const { resetSidebarWidth, setSidebarWidth, sidebarWidth } = useSidebarWidth();
-  const {
-    correctorEnabled,
-    autocompleteEnabled,
-    autocompleteApiFallbackEnabled,
-    setCorrectorEnabled,
-    setAutocompleteEnabled,
-    setAutocompleteApiFallbackEnabled
-  } = useWritingAssistPreferences();
+  const { correctorEnabled, autocompleteEnabled, setCorrectorEnabled, setAutocompleteEnabled } =
+    useWritingAssistPreferences();
   const autocompleteOptions = useAutocompletePreferences(workspace?.path, activeFile?.kind === "markdown" ? activeFile.relativePath : undefined);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [assistantOpen, setAssistantOpen] = useState(false);
-  const [runningAssistantRunId, setRunningAssistantRunId] = useState<string | null>(null);
   const [focusMode, setFocusMode] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window === "undefined" ? 1200 : window.innerWidth
@@ -205,37 +178,10 @@ export default function App() {
   const closeDocumentInFlightRef = useRef(false);
   const latestContentSearchRequestIdRef = useRef(0);
   const contentSearchRevealRequestIdRef = useRef(0);
-  const runningAssistantRunIdRef = useRef<string | null>(null);
-  const contextAttachmentMoveHandlerRef = useRef<ContextAttachmentMoveHandler | null>(null);
-  const editorNavigationDuringRunRef = useRef<{ runId: string | null; changed: boolean }>({
-    runId: null,
-    changed: false
-  });
   const closeTreeContextMenu = useCallback(() => setTreeContextMenu(null), []);
-  const markEditorNavigationDuringRun = useCallback(() => {
-    const runId = runningAssistantRunIdRef.current;
-
-    if (!runId) {
-      logReviewNavigation("navigation_mark_without_running_run");
-      return;
-    }
-
-    logReviewNavigation("navigation_mark_during_run", { runId });
-    editorNavigationDuringRunRef.current = { runId, changed: true };
-  }, []);
   const requestReviewReveal = useCallback((path: string) => {
     logReviewNavigation("file_tree_reveal_requested", { revealPath: path });
     setReviewRevealPath(path);
-  }, []);
-  const handleRunningAssistantRunChange = useCallback((runId: string | null) => {
-    logReviewNavigation("running_run_changed", { runId });
-    runningAssistantRunIdRef.current = runId;
-    setRunningAssistantRunId(runId);
-    editorNavigationDuringRunRef.current = { runId, changed: false };
-  }, []);
-  const editorNavigationChangedDuringRun = useCallback((runId: string) => {
-    const state = editorNavigationDuringRunRef.current;
-    return state.runId === runId && state.changed;
   }, []);
   const {
     backTarget,
@@ -271,14 +217,8 @@ export default function App() {
     flushSave,
     loadDocument,
     onMarkdownNavigation: recordNormalNavigation,
-    onTreeNodeMoved: ({ oldNode, newNode, nextTree, activeFileAfterMove }) => {
+    onTreeNodeMoved: ({ oldNode, newNode }) => {
       relocateHistoryPaths(oldNode.path, newNode.path);
-      contextAttachmentMoveHandlerRef.current?.({
-        oldRelativeRoot: oldNode.relativePath,
-        newRelativeRoot: newNode.relativePath,
-        nextTree,
-        activeRelativePath: activeFileAfterMove?.relativePath ?? null
-      });
     },
     refreshTree,
     renamingPath,
@@ -303,9 +243,6 @@ export default function App() {
     applyExternalReviewUpdate,
     clearReviewForNormalNavigation,
     editorReview,
-    mergeAgentProposals,
-    proposalLoadState,
-    refreshExternalReview,
     reviewActionBusy,
     rejectAgentProposal,
     rejectAgentProposalFile,
@@ -313,10 +250,8 @@ export default function App() {
     setAgentProposals,
     setAgentReviewTarget,
     virtualReviewFile
-  } = useAgentProposals({
+  } = useOutsideReview({
     activeFile,
-    documentText,
-    flushSave,
     loadDocument,
     openNode,
     recordNormalNavigation,
@@ -326,7 +261,6 @@ export default function App() {
     setNotice,
     setSelectedTreePath,
     requestReviewReveal,
-    onReviewNavigation: markEditorNavigationDuringRun,
     activeFileInConflict,
     onActiveFileExternalItemCleared: resumeAfterConflict,
     reloadActiveDocument: () => reloadActiveDocumentRef.current(),
@@ -343,7 +277,7 @@ export default function App() {
   }, [lastWorkspaceChange, strings.workspaceMessages.watcherDegraded, workspace?.path]);
 
   // Outside-change review is owned by main: subscribe to its pushes for the
-  // current workspace and pull once after the proposal list has loaded.
+  // current workspace (the hook pulls the first snapshot itself).
   useEffect(() => {
     if (!workspace?.sessionId) {
       return;
@@ -353,14 +287,6 @@ export default function App() {
       applyExternalReviewUpdate(snapshot);
     });
   }, [applyExternalReviewUpdate, workspace?.sessionId]);
-
-  useEffect(() => {
-    if (proposalLoadState !== "loaded" || !workspace?.sessionId) {
-      return;
-    }
-
-    void refreshExternalReview().catch(() => undefined);
-  }, [proposalLoadState, refreshExternalReview, workspace?.sessionId]);
 
   const conflictReviewTarget = useMemo(() => {
     if (!activeFileInConflict || !workspace || activeFile?.kind !== "markdown") {
@@ -444,12 +370,11 @@ export default function App() {
     () => pendingFileTreeChangesFromQueue(reviewQueue.items),
     [reviewQueue.items]
   );
-  const assistantPanelProposals = useMemo(() => internalReviewProposals(agentProposals), [agentProposals]);
-  const pendingReviewFileCount = reviewQueue.visibleItems.length;
+  const pendingReviewFileCount = reviewQueue.items.length;
   const pendingReviewActive = Boolean(
     activeReview &&
       fileHasMutableReview(activeReview.file) &&
-      reviewQueue.visibleItems.some(
+      reviewQueue.items.some(
         (item) => item.proposalId === activeReview.proposal.id && item.fileId === activeReview.file.id
       )
   );
@@ -465,27 +390,7 @@ export default function App() {
 
     return selectedTreePath;
   }, [activeReview?.file.kind, activeReview?.file.relativePath, selectedTreePath, tree]);
-  const hasPendingExternalFilesystemReview = reviewQueue.externalItems.length > 0;
   const [pendingReviewDiscarding, setPendingReviewDiscarding] = useState(false);
-
-  // One transient signal bridges the panel-closed gap: the first comment saved
-  // while the agent panel is closed pulses the toggle once. No persistent badge.
-  const [assistantTogglePulse, setAssistantTogglePulse] = useState(false);
-  const assistantPulsedWhileClosedRef = useRef(false);
-  const assistantOpenRef = useRef(assistantOpen);
-  const focusModeRef = useRef(focusMode);
-
-  useEffect(() => {
-    assistantOpenRef.current = assistantOpen;
-
-    if (assistantOpen) {
-      assistantPulsedWhileClosedRef.current = false;
-    }
-  }, [assistantOpen]);
-
-  useEffect(() => {
-    focusModeRef.current = focusMode;
-  }, [focusMode]);
 
   useEffect(() => {
     const onResize = () => setViewportWidth(window.innerWidth);
@@ -495,82 +400,61 @@ export default function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const handleSelectionCommentSaved = useCallback(() => {
-    if (assistantOpenRef.current || focusModeRef.current || assistantPulsedWhileClosedRef.current) {
-      return;
-    }
-
-    assistantPulsedWhileClosedRef.current = true;
-    setAssistantTogglePulse(true);
-    window.setTimeout(() => setAssistantTogglePulse(false), 700);
-  }, []);
-
   const {
     comments: pendingSelectionComments,
     createComment: createSelectionComment,
     updateComment: updateSelectionComment,
     deleteComment: deleteSelectionComment,
     applyPositionUpdates: applySelectionCommentPositions,
-    applyFullReplacement: applySelectionCommentFullReplacement,
-    buildSendPayload: buildSelectionCommentsPayload,
-    markSent: markSelectionCommentsSent,
-    revertSent: revertSelectionCommentsSent
+    applyFullReplacement: applySelectionCommentFullReplacement
   } = useSelectionComments({
     activeFile,
     documentText,
-    language,
-    workspace,
-    onCommentSaved: handleSelectionCommentSaved
+    workspace
   });
   const editorViewRef = useRef<EditorView | null>(null);
   const handleEditorViewChange = useCallback((view: EditorView) => {
     editorViewRef.current = view;
   }, []);
-  // Gates the editor's Tighten action; main re-checks identity on each request.
-  const [editorCanTighten, setEditorCanTighten] = useState(false);
-  const [agentHasOpenAiApiKey, setAgentHasOpenAiApiKey] = useState(false);
+  // Gates autocomplete and the ✦ AI menu; main re-checks the key on each request.
   const [writingAssistStatus, setWritingAssistStatus] = useState<WritingAssistStatus | null>(null);
+  const [keyFieldFocusRequest, setKeyFieldFocusRequest] = useState(0);
+  const hasGeminiKey = Boolean(writingAssistStatus?.geminiKey.hasKey);
   const [updateStatus, setUpdateStatus] = useState<UpdateCheckResult | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const updateCheckRequestIdRef = useRef(0);
   const refreshWritingAssistStatus = useCallback(async () => {
     try {
-      const status = await window.iliad.getWritingAssistStatus({ autocompleteApiFallbackEnabled });
-      setWritingAssistStatus(status);
-      setAgentHasOpenAiApiKey(status.autocomplete.apiFallbackAvailable);
+      setWritingAssistStatus(await window.iliad.getWritingAssistStatus());
     } catch {
       setWritingAssistStatus(null);
     }
-  }, [autocompleteApiFallbackEnabled]);
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const refresh = async () => {
-      let hasOpenAiApiKey = false;
-      let hasCodexAccount = false;
+    void refreshWritingAssistStatus();
+  }, [refreshWritingAssistStatus]);
 
-      try {
-        const snapshot = await window.iliad.agent.getSettings();
-        hasOpenAiApiKey = snapshot.hasOpenAiApiKey;
-      } catch {}
+  const saveGeminiKey = useCallback(
+    async (key: string | null) => {
+      await window.iliad.setGeminiApiKey(key);
+      await refreshWritingAssistStatus();
+    },
+    [refreshWritingAssistStatus]
+  );
 
-      try {
-        const codexStatus = await window.iliad.agent.codexStatus();
-        hasCodexAccount = Boolean(codexStatus.available && codexStatus.connected);
-      } catch {}
+  const openGeminiKeyPage = useCallback(() => {
+    void window.iliad.openUrl(GEMINI_KEY_URL);
+  }, []);
 
-      if (!cancelled) {
-        setEditorCanTighten(hasOpenAiApiKey || hasCodexAccount);
-        setAgentHasOpenAiApiKey(hasOpenAiApiKey);
-        void refreshWritingAssistStatus();
-      }
-    };
-
-    void refresh();
-    return () => {
-      cancelled = true;
-    };
-  }, [assistantOpen, refreshWritingAssistStatus]);
+  // ✦ AI without a key: open Writing assists with the key field focused.
+  const requestGeminiKey = useCallback(() => {
+    setTypographyOpen(false);
+    setLanguageOpen(false);
+    setWritingAssistsOpen(true);
+    setKeyFieldFocusRequest((request) => request + 1);
+    void refreshWritingAssistStatus();
+  }, [refreshWritingAssistStatus]);
 
   useEffect(() => {
     if (writingAssistsOpen) {
@@ -653,20 +537,6 @@ export default function App() {
     };
   }, [checkForUpdates]);
 
-  const scrollToSelectionComment = useCallback(
-    (commentId: string) => {
-      const view = editorViewRef.current;
-      const comment = pendingSelectionComments.find((candidate) => candidate.id === commentId);
-
-      if (!view || !comment || comment.to <= comment.from) {
-        return;
-      }
-
-      scrollEditorToPosition(view, comment.from);
-    },
-    [pendingSelectionComments]
-  );
-
   const handleManualReviewTargetChange = useCallback(
     (target: Parameters<typeof selectAgentReviewTarget>[0]) => {
       logReviewNavigation("manual_review_target_change", {
@@ -675,52 +545,12 @@ export default function App() {
         activeRelativePath: activeFile?.relativePath ?? null,
         selectedTreePath
       });
-      markEditorNavigationDuringRun();
       return selectAgentReviewTarget(target);
     },
-    [activeFile?.relativePath, markEditorNavigationDuringRun, selectAgentReviewTarget, selectedTreePath]
-  );
-  const createMarkdownFileWithNavigation = useCallback(() => {
-    markEditorNavigationDuringRun();
-    return createMarkdownFile();
-  }, [createMarkdownFile, markEditorNavigationDuringRun]);
-  const duplicateNodeWithNavigation = useCallback(
-    (node: Parameters<typeof duplicateNode>[0]) => {
-      markEditorNavigationDuringRun();
-      return duplicateNode(node);
-    },
-    [duplicateNode, markEditorNavigationDuringRun]
-  );
-  const moveNodeToTrashWithNavigation = useCallback(
-    (node: Parameters<typeof moveNodeToTrash>[0]) => {
-      markEditorNavigationDuringRun();
-      return moveNodeToTrash(node);
-    },
-    [markEditorNavigationDuringRun, moveNodeToTrash]
-  );
-  const moveNodeWithNavigation = useCallback(
-    (node: Parameters<typeof moveNode>[0], targetDirectoryPath: Parameters<typeof moveNode>[1]) => {
-      markEditorNavigationDuringRun();
-      return moveNode(node, targetDirectoryPath);
-    },
-    [markEditorNavigationDuringRun, moveNode]
-  );
-  const renameNodeWithNavigation = useCallback(
-    (node: Parameters<typeof renameNode>[0], requestedName: Parameters<typeof renameNode>[1]) => {
-      markEditorNavigationDuringRun();
-      return renameNode(node, requestedName);
-    },
-    [markEditorNavigationDuringRun, renameNode]
-  );
-  const openDocumentLinkWithNavigation = useCallback(
-    (href: string) => {
-      markEditorNavigationDuringRun();
-      return openDocumentLink(href);
-    },
-    [markEditorNavigationDuringRun, openDocumentLink]
+    [activeFile?.relativePath, selectAgentReviewTarget, selectedTreePath]
   );
   const acceptPendingTreeChanges = useCallback(async () => {
-    const items = reviewQueue.visibleItems;
+    const items = reviewQueue.items;
 
     if (items.length === 0 || pendingReviewDiscarding) {
       return;
@@ -731,13 +561,11 @@ export default function App() {
       items: items.map((item) => ({
         proposalId: item.proposalId,
         fileId: item.fileId,
-        source: item.source,
         kind: item.kind,
         relativePath: item.relativePath,
         duplicateFileIds: item.duplicateFileIds
       }))
     });
-    markEditorNavigationDuringRun();
     setPendingReviewDiscarding(true);
 
     try {
@@ -747,21 +575,20 @@ export default function App() {
         }
       }
 
-      setNotice(strings.assistant.status.applied);
+      setNotice(strings.review.applied);
     } finally {
       setPendingReviewDiscarding(false);
       logReviewNavigation("bulk_accept_pending_changes_finish", { count: items.length });
     }
   }, [
     applyAgentProposalFile,
-    markEditorNavigationDuringRun,
     pendingReviewDiscarding,
-    reviewQueue.visibleItems,
+    reviewQueue.items,
     setNotice,
-    strings.assistant.status.applied
+    strings.review.applied
   ]);
   const rejectPendingTreeChanges = useCallback(async () => {
-    const items = reviewQueue.visibleItems;
+    const items = reviewQueue.items;
 
     if (items.length === 0 || pendingReviewDiscarding) {
       return;
@@ -772,46 +599,31 @@ export default function App() {
       items: items.map((item) => ({
         proposalId: item.proposalId,
         fileId: item.fileId,
-        source: item.source,
         kind: item.kind,
         relativePath: item.relativePath,
         duplicateFileIds: item.duplicateFileIds
       }))
     });
-    markEditorNavigationDuringRun();
     setPendingReviewDiscarding(true);
 
     const failures: string[] = [];
-    const externalProposalIds = new Set<string>();
+    const proposalIds = new Set<string>();
     let stale = false;
 
     try {
+      // Outside items are restored as one batch in main, which continues past
+      // individual failures and reports them. One failure never stops the rest.
       for (const item of items) {
-        // Outside items are restored as one batch in main, which continues
-        // past individual failures and reports them; internal proposals are
-        // rejected per file. One failure must never stop the rest.
-        if (item.source === "external_filesystem") {
-          if (externalProposalIds.has(item.proposalId)) {
-            continue;
-          }
-
-          externalProposalIds.add(item.proposalId);
-
-          try {
-            stale = (await rejectAgentProposal(item.proposalId)) === "stale" || stale;
-          } catch (rejectError) {
-            failures.push(rejectError instanceof Error ? rejectError.message : String(rejectError));
-          }
-
+        if (proposalIds.has(item.proposalId)) {
           continue;
         }
 
-        for (const fileId of [item.fileId, ...item.duplicateFileIds]) {
-          try {
-            await rejectAgentProposalFile(item.proposalId, fileId);
-          } catch (rejectError) {
-            failures.push(rejectError instanceof Error ? rejectError.message : String(rejectError));
-          }
+        proposalIds.add(item.proposalId);
+
+        try {
+          stale = (await rejectAgentProposal(item.proposalId)) === "stale" || stale;
+        } catch (rejectError) {
+          failures.push(rejectError instanceof Error ? rejectError.message : String(rejectError));
         }
       }
 
@@ -820,20 +632,18 @@ export default function App() {
       } else if (!stale) {
         // On a stale outcome the hook already showed the refreshed-review
         // notice; nothing was discarded.
-        setNotice(strings.assistant.status.discarded);
+        setNotice(strings.review.discarded);
       }
     } finally {
       setPendingReviewDiscarding(false);
       logReviewNavigation("bulk_reject_pending_changes_finish", { count: items.length, failures: failures.length });
     }
   }, [
-    markEditorNavigationDuringRun,
     pendingReviewDiscarding,
     rejectAgentProposal,
-    rejectAgentProposalFile,
-    reviewQueue.visibleItems,
+    reviewQueue.items,
     setNotice,
-    strings.assistant.status.discarded
+    strings.review.discarded
   ]);
 
   const completeDocumentClose = useCallback(() => {
@@ -844,13 +654,12 @@ export default function App() {
     setContentSearchRevealTarget(null);
     setRenamingPath(null);
     closeTreeContextMenu();
-    markEditorNavigationDuringRun();
     setAgentReviewTarget(null);
     clearDocument();
     clearHistory();
     setCloseDialogOpen(false);
     setError(null);
-  }, [clearDocument, clearHistory, closeTreeContextMenu, markEditorNavigationDuringRun, setAgentReviewTarget]);
+  }, [clearDocument, clearHistory, closeTreeContextMenu, setAgentReviewTarget]);
 
   const requestCloseDocument = useCallback(() => {
     if (!activeFile) {
@@ -904,8 +713,7 @@ export default function App() {
         return;
       }
 
-      markEditorNavigationDuringRun();
-      setAgentReviewTarget(null);
+        setAgentReviewTarget(null);
       const result = await openNode(target.node, { recordHistory: false });
 
       if (result.kind === "markdown") {
@@ -916,54 +724,9 @@ export default function App() {
       activeFile?.path,
       completeHistoryNavigation,
       getNavigationTarget,
-      markEditorNavigationDuringRun,
       openNode,
       setAgentReviewTarget
     ]
-  );
-
-  // ADR-0017: live editor selection — ref is always current (read at send);
-  // the debounced state drives only the composer chip display.
-  const liveEditorSelectionRef = useRef<{ from: number; to: number } | null>(null);
-  const [chipEditorSelection, setChipEditorSelection] = useState<{ from: number; to: number } | null>(null);
-  const chipSelectionTimerRef = useRef<number | null>(null);
-  const handleActiveSelectionChange = useCallback((range: { from: number; to: number } | null) => {
-    liveEditorSelectionRef.current = range;
-
-    if (chipSelectionTimerRef.current !== null) {
-      window.clearTimeout(chipSelectionTimerRef.current);
-    }
-
-    chipSelectionTimerRef.current = window.setTimeout(() => {
-      chipSelectionTimerRef.current = null;
-      setChipEditorSelection(range);
-    }, 150);
-  }, []);
-  const getEditorSelection = useCallback(() => liveEditorSelectionRef.current, []);
-
-  const handleAgentOpenDocument = useCallback(
-    (relativePath: string) => {
-      void (async () => {
-        let node = findNodeByRelativePath(tree, relativePath);
-
-        if (!node && workspace) {
-          const refreshed = await refreshTree(workspace.path);
-          node = findNodeByRelativePath(refreshed, relativePath);
-        }
-
-        if (!node || node.kind !== "markdown") {
-          console.warn("agent open_document: node not found in tree", relativePath);
-          return;
-        }
-
-        // Agent-directed navigation: deliberately NOT marked as user
-        // navigation (markEditorNavigationDuringRun), so post-run review
-        // auto-targeting keeps working; history is recorded so the user can
-        // navigate back.
-        await openNode(node);
-      })();
-    },
-    [openNode, refreshTree, tree, workspace]
   );
 
   const searchMarkdownContentForFileTree = useCallback<FileTreeContentSearchProvider["search"]>(
@@ -1021,8 +784,7 @@ export default function App() {
         return;
       }
 
-      markEditorNavigationDuringRun();
-      let node = findNode(tree, match.filePath) ?? findNodeByRelativePath(tree, match.relativePath);
+        let node = findNode(tree, match.filePath) ?? findNodeByRelativePath(tree, match.relativePath);
 
       if (!node) {
         const refreshed = await refreshTree(workspace.path);
@@ -1059,8 +821,7 @@ export default function App() {
     [
       activeFile?.path,
       clearReviewForNormalNavigation,
-      markEditorNavigationDuringRun,
-      openNode,
+        openNode,
       refreshTree,
       tree,
       workspace
@@ -1090,7 +851,6 @@ export default function App() {
     clearHistory();
     setError(null);
     setNotice(null);
-    setAssistantOpen(false);
     setLanguageOpen(false);
     setTypographyOpen(false);
     setWritingAssistsOpen(false);
@@ -1319,8 +1079,8 @@ export default function App() {
   }, [writingAssistsOpen]);
 
   const sidebarMaximumWidth = useMemo(
-    () => effectiveSidebarMaximum(viewportWidth, assistantOpen && !focusMode && viewportWidth > 760),
-    [assistantOpen, focusMode, viewportWidth]
+    () => effectiveSidebarMaximum(viewportWidth),
+    [viewportWidth]
   );
   const renderedSidebarWidth = clampSidebarWidth(sidebarWidth, sidebarMaximumWidth);
   const shellStyle = useMemo(
@@ -1417,16 +1177,12 @@ export default function App() {
       classes.push("is-focus-mode");
     }
 
-    if (assistantOpen && !focusMode) {
-      classes.push("assistant-is-open");
-    }
-
     if (sidebarResizing) {
       classes.push("is-sidebar-resizing");
     }
 
     return classes.join(" ");
-  }, [assistantOpen, focusMode, sidebarOpen, sidebarResizing]);
+  }, [focusMode, sidebarOpen, sidebarResizing]);
   const visibleStatus = statusText(saveStatus, lastSavedAt, strings.topbar.saveStatus);
   const shouldShowStatus = saveStatus !== "saved";
   const editorFile = virtualReviewFile ?? activeFile;
@@ -1459,7 +1215,8 @@ export default function App() {
     }
 
     return {
-      enabled: editorCanTighten,
+      enabled: hasGeminiKey,
+      onRequestKey: requestGeminiKey,
       minChars: 12,
       maxChars: 4000,
       labels: strings.editor.tighten,
@@ -1474,7 +1231,7 @@ export default function App() {
         }),
       cancel: (requestId) => window.iliad.cancelTighten(requestId)
     };
-  }, [activeFile, editorCanTighten, editorFile, language, strings.editor.tighten]);
+  }, [activeFile, editorFile, hasGeminiKey, language, requestGeminiKey, strings.editor.tighten]);
   const editorWritingAssists = useMemo<EditorWritingAssistsProps | undefined>(() => {
     if (!activeFile || activeFile.kind !== "markdown" || editorFile !== activeFile) {
       return undefined;
@@ -1487,7 +1244,7 @@ export default function App() {
     return {
       correctorEnabled,
       autocompleteEnabled,
-      autocompleteApiFallbackEnabled,
+      hasAiKey: hasGeminiKey,
       preferences: autocompleteOptions.preferences,
       guidance: autocompleteOptions.guidance,
       snoozedUntil: autocompleteOptions.snoozedUntil,
@@ -1523,9 +1280,9 @@ export default function App() {
     };
   }, [
     activeFile,
-    autocompleteApiFallbackEnabled,
     autocompleteEnabled,
     correctorEnabled,
+    hasGeminiKey,
     autocompleteOptions.preferences,
     autocompleteOptions.guidance,
     autocompleteOptions.snoozedUntil,
@@ -1534,31 +1291,6 @@ export default function App() {
     strings.editor.ideaAutocomplete,
     strings.editor.writingCorrector,
     workspace?.sessionId
-  ]);
-  // The chip always reflects the open document; no chip for non-open documents.
-  const assistantSelectionComments = useMemo<AssistantPanelSelectionComments | undefined>(() => {
-    if (!activeFile || activeFile.kind !== "markdown") {
-      return undefined;
-    }
-
-    return {
-      comments: pendingSelectionComments,
-      documentName: activeFile.name,
-      documentPath: activeFile.path,
-      buildPayload: buildSelectionCommentsPayload,
-      onMarkSent: markSelectionCommentsSent,
-      onRevert: revertSelectionCommentsSent,
-      onDiscard: deleteSelectionComment,
-      onSelect: scrollToSelectionComment
-    };
-  }, [
-    activeFile,
-    buildSelectionCommentsPayload,
-    deleteSelectionComment,
-    markSelectionCommentsSent,
-    pendingSelectionComments,
-    revertSelectionCommentsSent,
-    scrollToSelectionComment
   ]);
   const editorValue =
     activeReview?.proposal.metadata?.kind === "external_filesystem" && activeReview.file.kind === "edit_file"
@@ -1577,39 +1309,10 @@ export default function App() {
     ? strings.topbar.forwardTo(markdownDisplayName(forwardTarget.node, strings.appName))
     : strings.topbar.noNextDocument;
   const focusModeLabel = focusMode ? strings.topbar.exitFocusMode : strings.topbar.focusMode;
-  const autocompleteStatusNote = useMemo(() => {
-    if (!autocompleteEnabled) {
-      return undefined;
-    }
-
-    const status = writingAssistStatus?.autocomplete;
-
-    if (!status) {
-      return undefined;
-    }
-
-    if (status.provider === "gemini-api") {
-      return strings.writingAssists.autocompleteGemini;
-    }
-
-    if (status.provider === "codex-app-server") {
-      return status.model
-        ? `${strings.writingAssists.autocompleteCodex} · ${status.model}`
-        : strings.writingAssists.autocompleteCodex;
-    }
-
-    if (status.provider === "openai-api") {
-      return status.model
-        ? `${strings.writingAssists.autocompleteApi} · ${status.model}`
-        : strings.writingAssists.autocompleteApi;
-    }
-
-    if (status.apiFallbackAvailable && !status.apiFallbackEnabled) {
-      return strings.writingAssists.autocompleteEnableApiFallback;
-    }
-
-    return strings.writingAssists.autocompleteUnavailable;
-  }, [autocompleteEnabled, strings.writingAssists, writingAssistStatus?.autocomplete]);
+  const autocompleteStatusNote =
+    autocompleteEnabled && writingAssistStatus && !writingAssistStatus.geminiKey.hasKey
+      ? strings.writingAssists.autocompleteNeedsKey
+      : undefined;
 
   if (!workspace) {
     return (
@@ -1739,10 +1442,12 @@ export default function App() {
               open={writingAssistsOpen}
               correctorEnabled={correctorEnabled}
               autocompleteEnabled={autocompleteEnabled}
-              autocompleteApiFallbackEnabled={autocompleteApiFallbackEnabled}
               correctorAvailable={language === "en"}
               autocompleteNote={autocompleteStatusNote}
-              showApiFallback={writingAssistStatus?.autocomplete.apiFallbackAvailable ?? agentHasOpenAiApiKey}
+              geminiKey={writingAssistStatus?.geminiKey ?? null}
+              onSaveGeminiKey={saveGeminiKey}
+              onGetGeminiKey={openGeminiKeyPage}
+              keyFieldFocusRequest={keyFieldFocusRequest}
               onToggleOpen={() => {
                 setWritingAssistsOpen((open) => {
                   const nextOpen = !open;
@@ -1756,7 +1461,6 @@ export default function App() {
               }}
               onSetCorrectorEnabled={setCorrectorEnabled}
               onSetAutocompleteEnabled={setAutocompleteEnabled}
-              onSetAutocompleteApiFallbackEnabled={setAutocompleteApiFallbackEnabled}
             />
             <LanguageMenu
               language={language}
@@ -1769,17 +1473,6 @@ export default function App() {
               onToggleOpen={() => setLanguageOpen((open) => !open)}
               open={languageOpen}
             />
-            {!focusMode ? (
-              <button
-                type="button"
-                className={`icon-button${assistantTogglePulse ? " is-comment-pulse" : ""}`}
-                data-tooltip={assistantOpen ? strings.assistant.close : strings.assistant.open}
-                aria-label={assistantOpen ? strings.assistant.close : strings.assistant.open}
-                onClick={() => setAssistantOpen((open) => !open)}
-              >
-                {assistantOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
-              </button>
-            ) : null}
             <button
               type="button"
               className="icon-button"
@@ -1822,8 +1515,7 @@ export default function App() {
                   path: node.path,
                   kind: node.kind
                 });
-                markEditorNavigationDuringRun();
-                clearReviewForNormalNavigation(node);
+                            clearReviewForNormalNavigation(node);
                 return openNode(node);
               }}
               onOpenPendingChange={(target) => {
@@ -1854,7 +1546,7 @@ export default function App() {
                   clearReason: reason
                 });
               }}
-              onCreateFile={createMarkdownFileWithNavigation}
+              onCreateFile={createMarkdownFile}
               onCreateFolder={createFolder}
               onOpenFolder={openWorkspace}
               onOpenRecent={openRecentWorkspace}
@@ -1868,12 +1560,12 @@ export default function App() {
               }}
               onAcceptPendingChanges={acceptPendingTreeChanges}
               onRejectPendingChanges={rejectPendingTreeChanges}
-              onMoveNode={moveNodeWithNavigation}
+              onMoveNode={moveNode}
               onShowContextMenu={(node, position) => setTreeContextMenu({ node, ...position })}
               contextMenuOpen={Boolean(treeContextMenu)}
               onCloseContextMenu={closeTreeContextMenu}
               onCancelRename={() => setRenamingPath(null)}
-              onCommitRename={renameNodeWithNavigation}
+              onCommitRename={renameNode}
               contentSearchProvider={fileTreeContentSearchProvider}
             />
             <div
@@ -1911,12 +1603,11 @@ export default function App() {
             selectionComments={editorSelectionComments}
             tighten={editorTighten}
             writingAssists={editorWritingAssists}
-            onActiveSelectionChange={handleActiveSelectionChange}
             onChange={handleEditorChange}
             onInsertImage={insertImage}
             onInsertImageReference={insertImageReference}
-            onOpenLink={openDocumentLinkWithNavigation}
-            onCreateDocument={createMarkdownFileWithNavigation}
+            onOpenLink={openDocumentLink}
+            onCreateDocument={createMarkdownFile}
             onEditorViewChange={handleEditorViewChange}
             contentSearchRevealTarget={contentSearchRevealTarget}
             onContentSearchRevealHandled={(requestId) => {
@@ -1925,31 +1616,6 @@ export default function App() {
           />
         </EditorErrorBoundary>
 
-        {assistantOpen && !focusMode ? (
-          <AssistantPanel
-            activeFile={activeFile}
-            documentText={documentText}
-            fileTree={tree}
-            labels={strings.assistant}
-            language={language}
-            proposals={assistantPanelProposals}
-            selectionComments={assistantSelectionComments}
-            workspace={workspace}
-            onProposalsChanged={mergeAgentProposals}
-            onAcceptProposalFile={applyAgentProposalFile}
-            onRejectProposalFile={rejectAgentProposalFile}
-            onReviewTargetChange={handleManualReviewTargetChange}
-            onAutoReviewTargetChange={selectAgentReviewTarget}
-            editorNavigationChangedDuringRun={editorNavigationChangedDuringRun}
-            onRunningRunChange={handleRunningAssistantRunChange}
-            onOpenDocumentRequest={handleAgentOpenDocument}
-            onContextAttachmentMoveHandlerChange={(handler) => {
-              contextAttachmentMoveHandlerRef.current = handler;
-            }}
-            editorSelection={chipEditorSelection}
-            getEditorSelection={getEditorSelection}
-          />
-        ) : null}
       </div>
 
       <TreeContextMenu
@@ -1957,9 +1623,9 @@ export default function App() {
         menuRef={treeContextMenuRef}
         labels={strings.treeContextMenu}
         onCopyPath={copyNodePath}
-        onDuplicate={duplicateNodeWithNavigation}
-        onMoveToTrash={moveNodeToTrashWithNavigation}
-        onMoveToRoot={(node) => moveNodeWithNavigation(node, workspace.path)}
+        onDuplicate={duplicateNode}
+        onMoveToTrash={moveNodeToTrash}
+        onMoveToRoot={(node) => moveNode(node, workspace.path)}
         canMoveToRoot={(node) => {
           if (!node.relativePath.includes("/")) {
             return false;

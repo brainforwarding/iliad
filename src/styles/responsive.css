@@ -21,18 +21,4 @@
   .editor-surface .cm-content {
     padding: 0 28px;
   }
-
-  .assistant-is-open .app-content,
-  .assistant-is-open.sidebar-is-collapsed .app-content {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .assistant-is-open .sidebar,
-  .assistant-is-open .editor-shell {
-    display: none;
-  }
-
-  .assistant-panel {
-    border-left: 0;
-  }
 }

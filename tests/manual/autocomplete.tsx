@@ -50,14 +50,13 @@ function Preview() {
   const [open, setOpen] = useState(true);
   const [enabled, setEnabled] = useState(true);
   const [corrector, setCorrector] = useState(false);
-  const [fallback, setFallback] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const [language, setLanguage] = useState<"en" | "es">("en");
   const strings = appStrings[language];
   const options = useAutocompletePreferences("/preview", files[chapter].relativePath);
   const writingAssists = useMemo(() => ({
-    correctorEnabled: false, autocompleteEnabled: enabled, autocompleteApiFallbackEnabled: false,
+    correctorEnabled: false, autocompleteEnabled: enabled,
     workspaceSessionId: "preview", documentRelativePath: files[chapter].relativePath, language,
     preferences: options.preferences, guidance: options.guidance, snoozedUntil: options.snoozedUntil,
     labels: { corrector: strings.editor.writingCorrector, autocomplete: strings.editor.ideaAutocomplete },
@@ -68,8 +67,8 @@ function Preview() {
       <div><button onClick={() => setChapter((n) => 1 - n)}>{files[chapter].name}</button> <button onClick={() => setLanguage(language === "en" ? "es" : "en")}>{language.toUpperCase()}</button></div>
       <WritingAssistsMenu labels={strings.writingAssists} menuRef={menuRef} open={open} onToggleOpen={() => setOpen(!open)}
         correctorEnabled={corrector} onSetCorrectorEnabled={setCorrector} correctorAvailable={true}
-        autocompleteEnabled={enabled} onSetAutocompleteEnabled={setEnabled} autocompleteApiFallbackEnabled={fallback} onSetAutocompleteApiFallbackEnabled={setFallback}
-        autocompleteNote="Gemini 3.8 Flash" showApiFallback={false} hasDocument={true}
+        autocompleteEnabled={enabled} onSetAutocompleteEnabled={setEnabled}
+        geminiKey={{ hasKey: true, last4: "demo" }} onSaveGeminiKey={async () => undefined} onGetGeminiKey={() => undefined} hasDocument={true}
         preferences={options.preferences} onPreferencesChange={options.setPreferences} guidance={options.guidance} onGuidanceChange={options.setGuidance}
         snoozed={options.snoozedUntil > Date.now()} onToggleSnooze={options.toggleSnooze} onResetShortcuts={options.resetShortcuts} />
     </header>

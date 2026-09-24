@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { unifiedDiff } from "../agent/diff.js";
-import { hashMarkdown } from "../agent/hash.js";
-import { buildMarkdownChangeProposal } from "../agent/markdownChangeContract.js";
-import { buildLineReviewHunks } from "../agent/reviewDiff.js";
-import type { AgentChangeProposal, AgentDraftFileChange, AgentRunRequest } from "../agent/types.js";
+import { unifiedDiff } from "./diff.js";
+import { hashMarkdown } from "./hash.js";
+import { buildMarkdownChangeProposal } from "./markdownChangeContract.js";
+import { buildLineReviewHunks } from "./reviewDiff.js";
+import type { AgentChangeProposal, AgentDraftFileChange } from "./types.js";
 
 export interface ExternalReviewItem {
   relativePath: string;
@@ -37,15 +37,10 @@ export function externalReviewRunId(workspaceRoot: string) {
   return `external-filesystem-${workspaceFingerprint(workspaceRoot)}`;
 }
 
-function projectionRunRequest(workspaceRoot: string): AgentRunRequest {
+function projectionRunRequest(workspaceRoot: string) {
   return {
     runId: externalReviewRunId(workspaceRoot),
-    workspaceRoot,
-    activeFile: null,
-    messages: [],
-    prompt: "Outside changes",
-    mode: "balanced",
-    language: "en"
+    workspaceRoot
   };
 }
 

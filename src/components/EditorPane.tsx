@@ -57,6 +57,8 @@ export interface EditorSelectionCommentsProps {
 
 export interface EditorTightenProps {
   enabled: boolean;
+  /** Opens Writing assists at the Gemini key field when `enabled` is false. */
+  onRequestKey?: () => void;
   minChars: number;
   maxChars: number;
   labels: TightenOverlayLabels;
@@ -76,7 +78,8 @@ export interface EditorWritingAssistsProps {
   onPartial?: (listener: (event: { requestId: string; insert: string }) => void) => () => void;
   correctorEnabled: boolean;
   autocompleteEnabled: boolean;
-  autocompleteApiFallbackEnabled: boolean;
+  /** A Gemini key is set; without one only explicit requests run (and show the add-key hint). */
+  hasAiKey?: boolean;
   language: "en" | "es";
   workspaceSessionId?: string;
   documentRelativePath?: string;
@@ -826,10 +829,9 @@ export function EditorPane({
     return ideaAutocompleteExtension({
       preferences: writingAssists.preferences, guidance: writingAssists.guidance,
       snoozedUntil: writingAssists.snoozedUntil, onPartial: writingAssists.onPartial,
-      enabled: true, language: writingAssists.language,
+      enabled: true, automaticEnabled: writingAssists.hasAiKey !== false, language: writingAssists.language,
       workspaceSessionId: writingAssists.workspaceSessionId, documentRelativePath: writingAssists.documentRelativePath,
       documentTitle: file.name.replace(/\.(md|markdown|mdown|mkd)$/i, ""),
-      autocompleteApiFallbackEnabled: writingAssists.autocompleteApiFallbackEnabled,
       blockedLineRanges, requestAutocomplete: writingAssists.autocompleteIdea,
       cancelAutocomplete: writingAssists.cancelAutocompleteIdea, onStatusChange: handleAutocompleteStatusChange
     });
@@ -1129,6 +1131,7 @@ export function EditorPane({
               tighten && file
                 ? {
                     enabled: tighten.enabled,
+                    onRequestKey: tighten.onRequestKey,
                     minChars: tighten.minChars,
                     maxChars: tighten.maxChars,
                     labels: tighten.labels,

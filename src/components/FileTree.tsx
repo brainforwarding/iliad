@@ -17,11 +17,6 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { WorkspaceMenu } from "./WorkspaceMenu";
 import { FileTreeContentResults } from "./FileTreeContentResults";
 import {
-  contextFileDragMimeType,
-  createContextFileDragPayload,
-  workspaceContextDragSessionId
-} from "../assistant/contextAttachments";
-import {
   buildFileTreeDisplayNodes,
   displayNodeChildren,
   displayNodeId,
@@ -34,7 +29,7 @@ import {
   markdownStem,
   type FileTreeDisplayNode,
   type PendingFileTreeChange
-} from "../assistant/pendingFileTree";
+} from "../review/pendingFileTree";
 import {
   clampFileTreeSearchActiveIndex,
   filterFileTreeDisplayNodesForSearch,
@@ -43,7 +38,7 @@ import {
   type FileTreeSearchMode,
   type FileTreeSearchNodeMeta,
   type FileTreeSearchRange
-} from "../assistant/fileTreeSearch";
+} from "../files/fileTreeSearch";
 import {
   buildFileTreeContentResultTree,
   clampContentSearchActiveIndex,
@@ -58,7 +53,7 @@ import {
   type FileTreeContentMatchTarget,
   type FileTreeContentSearchProvider,
   type FileTreeSearchScope
-} from "../assistant/fileTreeContentSearch";
+} from "../files/fileTreeContentSearch";
 import { findNode } from "../files/fileTree";
 import {
   createFileTreeMoveDragPayload,
@@ -789,7 +784,6 @@ function TreeRow({
           (node.source === "real" && node.pendingTarget?.kind === "create_file")
         ? "is-create"
         : "is-edit";
-  const canDragContextFile = node.source === "real" && nodeKind === "markdown";
   const canDragImageReference = node.source === "real" && nodeKind === "external" && isImageNode(node.node);
   const canDragMove = node.source === "real" && !node.pendingTarget && !node.hasPendingDescendant;
   const isDragging = node.source === "real" && draggingRelativePath === normalizeDisplayRelativePath(node.node.relativePath);
@@ -830,23 +824,16 @@ function TreeRow({
       <div
         ref={(element) => registerRow(nodePath, element)}
         className={rowClassName}
-        draggable={canDragContextFile || canDragImageReference || canDragMove}
+        draggable={canDragImageReference || canDragMove}
         style={{ "--tree-depth": depth } as CSSProperties}
         onDragStart={(event) => {
-          if (node.source !== "real" || (!canDragContextFile && !canDragImageReference && !canDragMove)) {
+          if (node.source !== "real" || (!canDragImageReference && !canDragMove)) {
             event.preventDefault();
             return;
           }
 
           event.dataTransfer.effectAllowed =
-            (canDragContextFile || canDragImageReference) && canDragMove ? "copyMove" : canDragMove ? "move" : "copy";
-
-          if (canDragContextFile) {
-            event.dataTransfer.setData(
-              contextFileDragMimeType,
-              JSON.stringify(createContextFileDragPayload(workspaceSessionId, node.node.relativePath))
-            );
-          }
+            canDragImageReference && canDragMove ? "copyMove" : canDragMove ? "move" : "copy";
 
           if (canDragImageReference) {
             const payload = createImageReferenceDragPayload(workspaceSessionId, node.node.relativePath);
@@ -1340,10 +1327,7 @@ export function FileTree({
 
     return expanded;
   }, [durableExpanded, searchForcedExpanded]);
-  const workspaceSessionId = useMemo(
-    () => workspaceContextDragSessionId(workspace),
-    [workspace.path, workspace.sessionId]
-  );
+  const workspaceSessionId = workspace.sessionId ?? workspace.path;
   const pendingChangesKey = useMemo(
     () =>
       pendingChanges

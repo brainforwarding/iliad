@@ -1,14 +1,16 @@
 import { PenLine, Moon, RotateCcw } from "lucide-react";
-import type { Dispatch, RefObject, SetStateAction } from "react";
+import { useEffect, useRef, useState, type Dispatch, type FormEvent, type RefObject, type SetStateAction } from "react";
 import { autocompleteShortcutActions, autocompleteShortcutChoices, shortcutLabel, type AutocompletePreferences, type WritingGuidance } from "../editor/ideaAutocomplete/options";
 import type { AppStrings } from "../i18n/strings";
+import type { GeminiKeyState } from "../types/iliad";
+
+export const GEMINI_KEY_URL = "https://aistudio.google.com/apikey";
 
 interface WritingAssistsMenuLabels {
   title: string;
   dialogLabel: string;
   corrector: string;
   autocomplete: string;
-  apiFallback: string;
   correctorUnavailable: string;
 }
 
@@ -26,14 +28,138 @@ interface WritingAssistsMenuProps {
   open: boolean;
   correctorEnabled: boolean;
   autocompleteEnabled: boolean;
-  autocompleteApiFallbackEnabled: boolean;
   correctorAvailable: boolean;
   autocompleteNote?: string;
-  showApiFallback: boolean;
+  /** Null while the key state is unknown (nothing about the key is shown). */
+  geminiKey: GeminiKeyState | null;
+  /** Saves (string) or removes (null) the Gemini key; rejects on failure. */
+  onSaveGeminiKey: (key: string | null) => Promise<void>;
+  onGetGeminiKey: () => void;
+  /** Bumped to move focus to the key field (✦ AI clicked without a key). */
+  keyFieldFocusRequest?: number;
   onToggleOpen: () => void;
   onSetCorrectorEnabled: Dispatch<SetStateAction<boolean>>;
   onSetAutocompleteEnabled: Dispatch<SetStateAction<boolean>>;
-  onSetAutocompleteApiFallbackEnabled: Dispatch<SetStateAction<boolean>>;
+}
+
+type GeminiKeyLabels = Pick<
+  AppStrings["writingAssists"],
+  | "geminiKey"
+  | "geminiKeyHint"
+  | "geminiKeyPlaceholder"
+  | "geminiKeySave"
+  | "geminiKeyCancel"
+  | "geminiKeyRemove"
+  | "geminiKeyGet"
+  | "geminiKeySaved"
+  | "geminiKeyChange"
+  | "geminiKeySaveFailed"
+>;
+
+/**
+ * The one AI setting. Without a key it is a small form (first row of the
+ * menu); with a key it is a quiet line ("Gemini key ••••1234 · Change").
+ */
+function GeminiKeyRow({
+  keyState,
+  labels,
+  onSave,
+  onGetKey,
+  focusRequest
+}: {
+  keyState: GeminiKeyState;
+  labels: GeminiKeyLabels;
+  onSave: (key: string | null) => Promise<void>;
+  onGetKey: () => void;
+  focusRequest?: number;
+}) {
+  const [changing, setChanging] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const editing = !keyState.hasKey || changing;
+
+  useEffect(() => {
+    if (focusRequest && editing) {
+      inputRef.current?.focus();
+    }
+  }, [editing, focusRequest]);
+
+  const save = async (key: string | null) => {
+    setSaving(true);
+    setFailed(false);
+
+    try {
+      await onSave(key);
+      setDraft("");
+      setChanging(false);
+    } catch {
+      setFailed(true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div className="writing-assist-key-summary">
+        <span>{labels.geminiKeySaved(keyState.last4 ?? "")}</span>
+        <span aria-hidden="true">·</span>
+        <button type="button" className="writing-assist-link" onClick={() => setChanging(true)}>
+          {labels.geminiKeyChange}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      className="writing-assist-key"
+      onSubmit={(event: FormEvent) => {
+        event.preventDefault();
+
+        if (draft.trim() && !saving) {
+          void save(draft.trim());
+        }
+      }}
+    >
+      <label className="writing-assist-key-label" htmlFor="writing-assist-gemini-key">
+        {labels.geminiKey}
+      </label>
+      {!keyState.hasKey ? <span className="writing-assist-switch-note">{labels.geminiKeyHint}</span> : null}
+      <input
+        ref={inputRef}
+        id="writing-assist-gemini-key"
+        type="password"
+        autoComplete="off"
+        spellCheck={false}
+        value={draft}
+        placeholder={labels.geminiKeyPlaceholder}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      {failed ? <span className="writing-assist-key-error" role="alert">{labels.geminiKeySaveFailed}</span> : null}
+      <div className="writing-assist-key-actions">
+        <button type="submit" className="writing-assist-key-save" disabled={!draft.trim() || saving}>
+          {labels.geminiKeySave}
+        </button>
+        {changing ? (
+          <>
+            <button type="button" className="writing-assist-link" onClick={() => { setChanging(false); setDraft(""); setFailed(false); }}>
+              {labels.geminiKeyCancel}
+            </button>
+            <button type="button" className="writing-assist-link" disabled={saving} onClick={() => void save(null)}>
+              {labels.geminiKeyRemove}
+            </button>
+          </>
+        ) : (
+          <button type="button" className="writing-assist-link" onClick={onGetKey}>
+            {labels.geminiKeyGet}
+          </button>
+        )}
+      </div>
+    </form>
+  );
 }
 
 function SwitchRow({
@@ -76,14 +202,15 @@ export function WritingAssistsMenu({
   open,
   correctorEnabled,
   autocompleteEnabled,
-  autocompleteApiFallbackEnabled,
   correctorAvailable,
   autocompleteNote,
-  showApiFallback,
+  geminiKey,
+  onSaveGeminiKey,
+  onGetGeminiKey,
+  keyFieldFocusRequest,
   onToggleOpen,
   onSetCorrectorEnabled,
-  onSetAutocompleteEnabled,
-  onSetAutocompleteApiFallbackEnabled
+  onSetAutocompleteEnabled
 }: WritingAssistsMenuProps) {
   const continueKey = shortcutLabel(preferences.shortcuts.continue);
   const shortcutActionLabels = { continue: labels.continueKey, sentence: labels.sentenceKey, paragraph: labels.paragraphKey, idea: labels.ideaKey };
@@ -103,6 +230,10 @@ export function WritingAssistsMenu({
 
       {open ? (
         <div className="writing-assists-popover" role="dialog" aria-label={labels.dialogLabel}>
+          {geminiKey && !geminiKey.hasKey ? (
+            <GeminiKeyRow keyState={geminiKey} labels={labels} onSave={onSaveGeminiKey} onGetKey={onGetGeminiKey}
+              focusRequest={keyFieldFocusRequest} />
+          ) : null}
           <SwitchRow
             label={labels.corrector}
             checked={correctorAvailable && correctorEnabled}
@@ -152,12 +283,9 @@ export function WritingAssistsMenu({
                 onChange={(event) => onPreferencesChange({ ...preferences, announce: event.target.checked })} />{labels.announce}</label>
             </details>
           </> : null}
-          {showApiFallback ? (
-            <SwitchRow
-              label={labels.apiFallback}
-              checked={autocompleteApiFallbackEnabled}
-              onToggle={() => onSetAutocompleteApiFallbackEnabled((enabled) => !enabled)}
-            />
+          {geminiKey?.hasKey ? (
+            <GeminiKeyRow keyState={geminiKey} labels={labels} onSave={onSaveGeminiKey} onGetKey={onGetGeminiKey}
+              focusRequest={keyFieldFocusRequest} />
           ) : null}
         </div>
       ) : null}

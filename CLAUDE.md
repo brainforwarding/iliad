@@ -18,14 +18,12 @@ npm run preview     # vite preview on 127.0.0.1 (renderer only, no Electron)
 Run a single test file or pattern with vitest directly:
 
 ```bash
-npx vitest run tests/agent/tighten.test.ts   # one file
+npx vitest run tests/writing/tighten.test.ts # one file
 npx vitest run -t "applies anchored edit"     # tests matching a name
 npx vitest                                     # watch mode
 ```
 
 Local CLI workspace launches are exercised with `npm run build`, `npm link`, then `iliad .` from a target folder.
-
-The Telegram relay is a separate Cloudflare Worker package under `relay/telegram/`; check it with `npm run relay:typecheck` and `npm run relay:test`. `npm run smoke:review` exercises the agent review-diff path headlessly.
 
 After meaningful changes, run `npm run typecheck`, `npm test`, and `npm run build`, then verify in the Electron app (see "Manual checks" in `docs/architecture.md`).
 

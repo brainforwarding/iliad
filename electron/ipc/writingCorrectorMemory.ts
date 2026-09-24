@@ -8,7 +8,7 @@ import {
 import { ensureMarkdownFile } from "../fs/pathSafety.js";
 import { isInsideAllowedWorkspace } from "../fs/workspaceRegistry.js";
 import { canonicalizeWorkspaceDirectory } from "../launch/workspace.js";
-import { isTrustedAgentIpcSender } from "./agent.js";
+import { isTrustedIpcSender } from "./trust.js";
 
 type WritingCorrectorMemoryIpcEvent = Pick<IpcMainInvokeEvent, "sender" | "senderFrame">;
 type WorkspaceSessionResolver = (
@@ -66,7 +66,7 @@ export async function handleGetWritingCorrectorMemoryIpc(
   store: Pick<WritingCorrectorMemoryStore, "getForDocument">,
   resolveWorkspaceRootForSession: WorkspaceSessionResolver = defaultWorkspaceSessionResolver
 ): Promise<WritingCorrectorMemorySnapshot> {
-  if (!isTrustedAgentIpcSender(event)) {
+  if (!isTrustedIpcSender(event)) {
     return emptyMemory;
   }
 
@@ -85,7 +85,7 @@ export async function handleIgnoreWritingCorrectorIssueIpc(
   store: Pick<WritingCorrectorMemoryStore, "ignoreIssue">,
   resolveWorkspaceRootForSession: WorkspaceSessionResolver = defaultWorkspaceSessionResolver
 ): Promise<WritingCorrectorMemorySnapshot> {
-  if (!isTrustedAgentIpcSender(event)) {
+  if (!isTrustedIpcSender(event)) {
     return emptyMemory;
   }
 
@@ -108,7 +108,7 @@ export async function handleAddWritingCorrectorDictionaryWordIpc(
   request: WritingCorrectorDictionaryRequest,
   store: Pick<WritingCorrectorMemoryStore, "addDictionaryWord">
 ): Promise<{ customWords: string[] }> {
-  if (!isTrustedAgentIpcSender(event)) {
+  if (!isTrustedIpcSender(event)) {
     return emptyDictionary;
   }
 

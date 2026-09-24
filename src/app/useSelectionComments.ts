@@ -1,26 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { normalizeRelativePath, workspaceContextApiSessionId } from "../assistant/contextAttachments";
-import {
-  clearSentSelectionComments,
-  markSelectionCommentsSent,
-  pendingSelectionComments,
-  removeSelectionComment,
-  revertSelectionCommentsToPending
-} from "../assistant/selectionComments";
 import { captureSelectionAnchor, reanchorSelectionComments } from "./selectionCommentsAnchor";
-import { serializeSelectionComments } from "./selectionCommentsSerialize";
 import type { FileTreeNode, SelectionComment, WorkspaceInfo } from "../types/iliad";
 
 const PERSIST_DEBOUNCE_MS = 280;
-const SENT_FADE_MS = 220;
+
+function normalizeRelativePath(relativePath: string) {
+  return relativePath.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.?\//, "").trim();
+}
+
+function pendingSelectionComments(comments: SelectionComment[]) {
+  return comments.filter((comment) => comment.status === "pending");
+}
 
 interface UseSelectionCommentsOptions {
   activeFile: FileTreeNode | null;
   documentText: string;
-  language: "en" | "es";
   workspace: WorkspaceInfo | null;
-  /** Fired when a comment is created (used for the one transient toggle pulse). */
-  onCommentSaved?: () => void;
 }
 
 export interface SelectionCommentDraft {
@@ -35,12 +30,6 @@ export interface SelectionCommentPositionUpdate {
   to: number;
 }
 
-export interface SelectionCommentsSendPayload {
-  block: string;
-  ids: string[];
-  count: number;
-}
-
 function commentId() {
   return `comment-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -48,16 +37,12 @@ function commentId() {
 /**
  * State owner for selection comments on the open document: CRUD, position
  * intake from the editor extension, re-anchoring on document open / full
- * replacement, serialization, and sent/revert transitions. Lives in App.tsx
- * composition — no selection-comment state may live in useAssistantRun or
- * AssistantPanel (the panel unmounts when closed and in focus mode).
+ * replacement, and persistence. Lives in App.tsx composition.
  */
 export function useSelectionComments({
   activeFile,
   documentText,
-  language,
-  workspace,
-  onCommentSaved
+  workspace
 }: UseSelectionCommentsOptions) {
   const [comments, setComments] = useState<SelectionComment[]>([]);
   const stateRef = useRef<{ relativePath: string | null; comments: SelectionComment[]; dirty: boolean }>({
@@ -72,11 +57,8 @@ export function useSelectionComments({
   activeFilePathRef.current = activeFile?.path ?? null;
   documentTextRef.current = documentText;
   const persistTimer = useRef<number | null>(null);
-  const fadeTimers = useRef<Set<number>>(new Set());
-  const onCommentSavedRef = useRef(onCommentSaved);
-  onCommentSavedRef.current = onCommentSaved;
   const workspaceSessionId = useMemo(
-    () => (workspace ? workspaceContextApiSessionId(workspace) : null),
+    () => (workspace ? workspace.sessionId ?? workspace.path : null),
     [workspace?.path, workspace?.sessionId]
   );
   const workspaceSessionIdRef = useRef(workspaceSessionId);
@@ -190,19 +172,12 @@ export function useSelectionComments({
   }, [activeFile?.path, flushPersist, workspacePath]);
 
   useEffect(() => {
-    const timers = fadeTimers.current;
     const onBeforeUnload = () => flushPersist();
     window.addEventListener("beforeunload", onBeforeUnload);
 
     return () => {
       window.removeEventListener("beforeunload", onBeforeUnload);
       flushPersist();
-
-      for (const timer of timers) {
-        window.clearTimeout(timer);
-      }
-
-      timers.clear();
     };
   }, [flushPersist]);
 
@@ -231,7 +206,6 @@ export function useSelectionComments({
       };
 
       applyComments((current) => [...current, comment]);
-      onCommentSavedRef.current?.();
     },
     [applyComments]
   );
@@ -251,7 +225,7 @@ export function useSelectionComments({
 
   const deleteComment = useCallback(
     (id: string) => {
-      applyComments((current) => removeSelectionComment(current, id));
+      applyComments((current) => current.filter((comment) => comment.id !== id));
     },
     [applyComments]
   );
@@ -308,62 +282,12 @@ export function useSelectionComments({
     [applyComments]
   );
 
-  const buildSendPayload = useCallback(
-    (hasTypedText: boolean): SelectionCommentsSendPayload | null => {
-      const pending = pendingSelectionComments(stateRef.current.comments);
-      const relativePath = stateRef.current.relativePath;
-
-      if (pending.length === 0 || !relativePath) {
-        return null;
-      }
-
-      const documentName = relativePath.split("/").filter(Boolean).pop() ?? relativePath;
-
-      return {
-        block: serializeSelectionComments({
-          comments: pending,
-          documentText: documentTextRef.current,
-          documentName,
-          language,
-          userTypedText: hasTypedText
-        }),
-        ids: pending.map((comment) => comment.id),
-        count: pending.length
-      };
-    },
-    [language]
-  );
-
-  const markSent = useCallback(
-    (ids: string[]) => {
-      applyComments((current) => markSelectionCommentsSent(current, ids));
-      const timer = window.setTimeout(() => {
-        fadeTimers.current.delete(timer);
-        // Sent trace is none: after the wash fade, sent comments are cleared
-        // entirely (the transcript is the record). Reverted ones are skipped.
-        applyComments((current) => clearSentSelectionComments(current, ids), { persist: false });
-      }, SENT_FADE_MS);
-      fadeTimers.current.add(timer);
-    },
-    [applyComments]
-  );
-
-  const revertSent = useCallback(
-    (ids: string[]) => {
-      applyComments((current) => revertSelectionCommentsToPending(current, ids));
-    },
-    [applyComments]
-  );
-
   return {
     comments,
     createComment,
     updateComment,
     deleteComment,
     applyPositionUpdates,
-    applyFullReplacement,
-    buildSendPayload,
-    markSent,
-    revertSent
+    applyFullReplacement
   };
 }

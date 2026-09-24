@@ -129,10 +129,6 @@ const api = {
     imageRelativePath: string;
   }) => invoke("asset:reference-image-relative", request),
   pathForFile: (file: File) => webUtils.getPathForFile(file),
-  listMarkdownContextDocuments: (workspaceSessionId: string) =>
-    invoke("agent:list-markdown-context-documents", workspaceSessionId),
-  normalizeContextDrop: (workspaceSessionId: string, absolutePath: string) =>
-    invoke("agent:normalize-context-drop", workspaceSessionId, absolutePath),
   assetUrl: (absolutePath: string) => `iliad-file://local/${encodeURIComponent(absolutePath)}`,
   tightenSelection: (request: {
     requestId: string;
@@ -161,7 +157,6 @@ const api = {
     direction?: string;
     guidance?: string;
     avoid?: string[];
-    autocompleteApiFallbackEnabled: boolean;
   }) => invoke("autocomplete:run", request),
   onAutocompletePartial: (listener: (event: { requestId: string; insert: string }) => void) => {
     const handler = (_event: IpcRendererEvent, event: { requestId: string; insert: string }) => listener(event);
@@ -171,8 +166,9 @@ const api = {
   cancelAutocompleteIdea: (requestId: string) => {
     void invoke("autocomplete:cancel", requestId);
   },
-  getWritingAssistStatus: (request: { autocompleteApiFallbackEnabled: boolean }) =>
-    invoke("writing-assist:status", request),
+  getWritingAssistStatus: () => invoke("writing-assist:status"),
+  getGeminiKeyState: () => invoke("writing:get-gemini-key-state"),
+  setGeminiApiKey: (key: string | null) => invoke("writing:set-gemini-key", key),
   selectionComments: {
     list: (workspaceSessionId: string) => invoke("selection-comments:list", workspaceSessionId),
     save: (workspaceSessionId: string, documentRelativePath: string, comments: unknown) =>
@@ -193,30 +189,8 @@ const api = {
     addDictionaryWord: (request: { language: "en" | "es"; word: string }) =>
       invoke("writing-corrector-memory:add-dictionary-word", request)
   },
+  // Outside-change review. Channel names keep their historical `agent:` prefix.
   agent: {
-    getSettings: () => invoke("agent:get-settings"),
-    updateSettings: (update: unknown) => invoke("agent:update-settings", update),
-    probeCodexCli: (request?: unknown) => invoke("agent:probe-codex-cli", request),
-    codexStatus: () => invoke("agent:codex-status"),
-    startCodexDeviceLogin: () => invoke("agent:codex-start-device-login"),
-    cancelCodexLogin: () => invoke("agent:codex-cancel-login"),
-    logoutCodex: () => invoke("agent:codex-logout"),
-    openCodexDeviceLogin: () => invoke("agent:codex-open-device-login"),
-    startRun: (request: unknown) => invoke("agent:start-run", request),
-    transcribeAudio: (request: unknown) => invoke("agent:transcribe-audio", request),
-    onRunEvent: (listener: (event: unknown) => void) => {
-      const handler = (_event: IpcRendererEvent, runEvent: unknown) => {
-        listener(runEvent);
-      };
-
-      ipcRenderer.on("agent:run-event", handler);
-
-      return () => {
-        ipcRenderer.removeListener("agent:run-event", handler);
-      };
-    },
-    cancelRun: (runId: string) => invoke("agent:cancel-run", runId),
-    listProposals: (workspaceRoot: string) => invoke("agent:list-proposals", workspaceRoot),
     getExternalReview: (request: unknown) => invoke("agent:get-external-review", request),
     onExternalReviewChanged: (listener: (snapshot: unknown) => void) => {
       const handler = (_event: IpcRendererEvent, snapshot: unknown) => {
@@ -231,19 +205,7 @@ const api = {
     },
     applyProposalFile: (request: unknown) => invoke("agent:apply-proposal-file", request),
     rejectProposalFile: (request: unknown) => invoke("agent:reject-proposal-file", request),
-    rejectProposal: (request: unknown) => invoke("agent:reject-proposal", request),
-    resolveProposalHunk: (request: unknown) => invoke("agent:resolve-proposal-hunk", request),
-    listChatThreads: (workspaceRoot: string) => invoke("agent:list-chat-threads", workspaceRoot),
-    getChatThread: (request: unknown) => invoke("agent:get-chat-thread", request),
-    saveChatThread: (request: unknown) => invoke("agent:save-chat-thread", request),
-    clearChatHistory: (workspaceRoot: string) => invoke("agent:clear-chat-history", workspaceRoot),
-    generateChatThreadTitle: (request: unknown) => invoke("agent:generate-chat-thread-title", request)
-  },
-  remote: {
-    getSettings: () => invoke("remote:get-settings"),
-    startPairing: () => invoke("remote:start-pairing"),
-    updateSettings: (update: unknown) => invoke("remote:update-settings", update),
-    revokeSettings: () => invoke("remote:revoke-settings")
+    rejectProposal: (request: unknown) => invoke("agent:reject-proposal", request)
   }
 };
 

@@ -17,11 +17,11 @@ import {
   type IdeaAutocompleteResult,
   type IdeaAutocompleteSuggestionKind,
   type IdeaAutocompleteTrigger
-} from "../agent/autocomplete.js";
-import { AgentService } from "../agent/agentService.js";
-import { normalizeAgentError } from "../agent/errors.js";
+} from "../writing/autocomplete.js";
+import { normalizeAgentError } from "../writing/errors.js";
+import { WritingAiService } from "../writing/writingAiService.js";
 import { ensureMarkdownFile } from "../fs/pathSafety.js";
-import { isTrustedAgentIpcSender } from "./agent.js";
+import { isTrustedIpcSender } from "./trust.js";
 
 type AutocompleteIpcEvent = Pick<IpcMainInvokeEvent, "sender" | "senderFrame">;
 type WorkspaceSessionResolver = (
@@ -43,14 +43,9 @@ interface AutocompleteIdeaRequest {
   trigger?: unknown;
   suggestionKind?: unknown;
   extend?: unknown;
-  autocompleteApiFallbackEnabled?: unknown;
   direction?: unknown;
   guidance?: unknown;
   avoid?: unknown;
-}
-
-interface WritingAssistStatusRequest {
-  autocompleteApiFallbackEnabled?: unknown;
 }
 
 interface AutocompleteRuntimeService {
@@ -65,14 +60,12 @@ interface AutocompleteRuntimeService {
     trigger: IdeaAutocompleteTrigger;
     suggestionKind: IdeaAutocompleteSuggestionKind;
     extend?: boolean;
-    allowApiFallback: boolean;
     direction?: string;
     guidance?: string;
     avoid?: string[];
     onPartial?: (raw: string) => void;
     signal: AbortSignal;
   }): Promise<string>;
-  writingAssistStatus(request: { autocompleteApiFallbackEnabled: boolean }): Promise<unknown>;
 }
 
 interface RegisterAutocompleteIpcOptions {
@@ -85,7 +78,7 @@ function senderControllerKey(senderId: number, requestId: string): string {
 }
 
 export function registerAutocompleteIpc({
-  service = new AgentService(app.getPath("userData")),
+  service = new WritingAiService(app.getPath("userData")),
   resolveWorkspaceRootForSession = defaultWorkspaceSessionResolver
 }: RegisterAutocompleteIpcOptions = {}) {
   const controllers = new Map<string, AbortController>();
@@ -95,30 +88,11 @@ export function registerAutocompleteIpc({
   );
 
   ipcMain.handle("autocomplete:cancel", (event, requestId: unknown) => {
-    if (!isTrustedAgentIpcSender(event) || typeof requestId !== "string" || !requestId.trim()) {
+    if (!isTrustedIpcSender(event) || typeof requestId !== "string" || !requestId.trim()) {
       return;
     }
 
     controllers.get(senderControllerKey(event.sender.id, requestId.trim()))?.abort();
-  });
-
-  ipcMain.handle("writing-assist:status", (event, request: WritingAssistStatusRequest) => {
-    if (!isTrustedAgentIpcSender(event)) {
-      return {
-        corrector: { available: false, provider: null },
-        autocomplete: {
-          available: false,
-          provider: null,
-          apiFallbackAvailable: false,
-          apiFallbackEnabled: false,
-          model: null
-        }
-      };
-    }
-
-    return service.writingAssistStatus({
-      autocompleteApiFallbackEnabled: request?.autocompleteApiFallbackEnabled === true
-    });
   });
 }
 
@@ -131,7 +105,7 @@ export async function handleAutocompleteIpc(
     resolveWorkspaceRootForSession: WorkspaceSessionResolver;
   }
 ): Promise<IdeaAutocompleteResult> {
-  if (!isTrustedAgentIpcSender(event)) {
+  if (!isTrustedIpcSender(event)) {
     return { ok: false, reason: "untrusted" };
   }
 
@@ -206,8 +180,7 @@ async function normalizeAutocompleteRequest(
         trigger: IdeaAutocompleteTrigger;
         suggestionKind: IdeaAutocompleteSuggestionKind;
         extend: boolean;
-        allowApiFallback: boolean;
-        direction?: string;
+            direction?: string;
         guidance?: string;
         avoid?: string[];
       };
@@ -264,7 +237,6 @@ async function normalizeAutocompleteRequest(
       trigger,
       suggestionKind,
       extend: trigger === "manual" && request.extend === true,
-      allowApiFallback: request.autocompleteApiFallbackEnabled === true,
       direction: sanitizeString(request.direction, 240),
       guidance: sanitizeString(request.guidance, 1800),
       avoid: Array.isArray(request.avoid) ? request.avoid.filter((text): text is string => typeof text === "string").slice(-3).map((text) => text.slice(0, AUTOCOMPLETE_MAX_IDEA_OUTPUT_CHARS)) : []

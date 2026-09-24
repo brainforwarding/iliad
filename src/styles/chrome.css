@@ -148,30 +148,6 @@
   box-shadow: var(--focus-ring);
 }
 
-/* One transient signal when a selection comment is saved with the agent panel
-   closed: the toggle pulses once (≤700ms). No persistent badge anywhere. */
-.icon-button.is-comment-pulse {
-  animation: assistant-toggle-comment-pulse 640ms ease;
-}
-
-@keyframes assistant-toggle-comment-pulse {
-  0%,
-  100% {
-    box-shadow: none;
-  }
-  45% {
-    border-color: var(--focus-ring-border);
-    box-shadow: var(--focus-ring);
-    color: var(--accent-deep);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .icon-button.is-comment-pulse {
-    animation: none;
-  }
-}
-
 .icon-button:disabled {
   border-color: transparent;
   background: transparent;
@@ -283,16 +259,14 @@
 }
 
 .topbar-actions .icon-button[data-tooltip]::after,
-.sidebar-actions .icon-button[data-tooltip]::after,
-.assistant-header-actions .icon-button[data-tooltip]::after {
+.sidebar-actions .icon-button[data-tooltip]::after {
   right: 0;
   left: auto;
   transform: translateY(-2px);
 }
 
 .topbar-actions .icon-button[data-tooltip]:hover::after,
-.sidebar-actions .icon-button[data-tooltip]:hover::after,
-.assistant-header-actions .icon-button[data-tooltip]:hover::after {
+.sidebar-actions .icon-button[data-tooltip]:hover::after {
   transform: translateY(0);
 }
 
@@ -306,14 +280,6 @@
 
 .sidebar-is-collapsed .app-content {
   grid-template-columns: minmax(0, 1fr);
-}
-
-.assistant-is-open .app-content {
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) clamp(280px, 24vw, 320px);
-}
-
-.assistant-is-open.sidebar-is-collapsed .app-content {
-  grid-template-columns: minmax(0, 1fr) clamp(280px, 24vw, 320px);
 }
 
 .sidebar-frame {
@@ -375,7 +341,7 @@
     grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   }
 
-  .app-shell:not(.assistant-is-open):not(.sidebar-is-collapsed):not(.is-focus-mode) .app-content {
+  .app-shell:not(.sidebar-is-collapsed):not(.is-focus-mode) .app-content {
     grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   }
 }

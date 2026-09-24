@@ -2,9 +2,8 @@ import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { link, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir, unlink } from "node:fs/promises";
 import path from "node:path";
-import { captureGitAdvisorySnapshot, checkGitAdvisorySnapshot, type GitAdvisorySnapshot } from "../agent/gitAdvisory.js";
-import { hashMarkdown } from "../agent/hash.js";
-import { workspaceMutationLeaseOwner } from "../agent/workspaceMutationLease.js";
+import { captureGitAdvisorySnapshot, checkGitAdvisorySnapshot, type GitAdvisorySnapshot } from "./gitAdvisory.js";
+import { hashMarkdown } from "./hash.js";
 import { ensureInsideWorkspace, isIgnoredWorkspaceName, markdownExtensions } from "../fs/pathSafety.js";
 import { markWorkspaceMutation } from "../fs/workspaceMutationMarkers.js";
 import {
@@ -15,7 +14,7 @@ import {
   type ExternalReviewItem,
   type ExternalReviewSnapshot
 } from "./externalReviewProjection.js";
-import type { AgentChangeProposal } from "../agent/types.js";
+import type { AgentChangeProposal } from "./types.js";
 
 export type { ExternalReviewItem, ExternalReviewSnapshot } from "./externalReviewProjection.js";
 
@@ -38,27 +37,6 @@ export type MarkdownWriteConflictReason = "pending_review" | "disk_changed" | "u
 export type MarkdownWriteResult =
   | { status: "written"; savedAt: string }
   | { status: "conflict"; reason: MarkdownWriteConflictReason };
-
-export interface GuardedMarkdownWriter {
-  write(request: {
-    workspaceRoot: string;
-    relativePath: string;
-    content: string;
-    expected: MarkdownWriteExpectation;
-  }): Promise<MarkdownWriteResult>;
-  remove(request: {
-    workspaceRoot: string;
-    relativePath: string;
-    expected: { kind: "hash"; hash: string } | { kind: "any" };
-  }): Promise<MarkdownWriteResult>;
-  /**
-   * Whether a write to this path would be refused with `pending_review`
-   * right now. Callers that compare disk against their own expectation ask
-   * this first, so an outside item pending review is reported as such rather
-   * than as generic drift.
-   */
-  hasPendingReview?(workspaceRoot: string, relativePath: string): boolean;
-}
 
 export interface DiskChangeHint {
   relativePath: string | null;
@@ -147,7 +125,6 @@ function conflictMessage(reason: MarkdownWriteConflictReason) {
  */
 export class WorkspaceBaselineService {
   private readonly states = new Map<string, WorkspaceBaselineState>();
-  private readonly beforeBaselineHooks: Array<(workspaceRoot: string) => Promise<void>> = [];
   private readonly settleMs: number;
   private readonly deferMs: number;
   private readonly confirmMs: number;
@@ -163,11 +140,6 @@ export class WorkspaceBaselineService {
     this.releaseGraceMs = options.releaseGraceMs ?? 5000;
     this.trashItem = options.trashItem ?? null;
     this.onLog = options.onLog;
-  }
-
-  /** Runs before the first baseline of a workspace is taken (Codex journal recovery). */
-  onBeforeBaseline(hook: (workspaceRoot: string) => Promise<void>) {
-    this.beforeBaselineHooks.push(hook);
   }
 
   async attach(workspaceRoot: string, subscriber: BaselineSubscriber): Promise<ExternalReviewSnapshot> {
@@ -307,15 +279,6 @@ export class WorkspaceBaselineService {
     }
   }
 
-  /** Requests a full reconcile after the caller's own disk work settles (Codex restore). */
-  requestFullRefresh(workspaceRoot: string) {
-    const state = this.states.get(path.resolve(workspaceRoot));
-
-    if (state) {
-      this.scheduleRefresh(state, null, 0);
-    }
-  }
-
   async runIliadMutation<T>(
     workspaceRoot: string,
     options: {
@@ -378,14 +341,6 @@ export class WorkspaceBaselineService {
 
       this.scheduleRefresh(state, directoryMove || touched.size === 0 ? null : [...touched], this.settleMs);
     }
-  }
-
-  markdownWriter(): GuardedMarkdownWriter {
-    return {
-      write: (request) => this.writeMarkdownIfUnchanged(request.workspaceRoot, request),
-      remove: (request) => this.removeMarkdownIfUnchanged(request.workspaceRoot, request),
-      hasPendingReview: (workspaceRoot, relativePath) => this.hasPendingReview(workspaceRoot, relativePath)
-    };
   }
 
   hasPendingReview(workspaceRoot: string, relativePath: string): boolean {
@@ -677,14 +632,6 @@ export class WorkspaceBaselineService {
   // internals
 
   private async initializeState(state: WorkspaceBaselineState) {
-    for (const hook of this.beforeBaselineHooks) {
-      try {
-        await hook(state.workspaceRoot);
-      } catch (error) {
-        this.log("baseline.before_hook_failed", { message: errorMessage(error) });
-      }
-    }
-
     const disk = await scanMarkdownWorkspace(state.workspaceRoot);
 
     for (const [relativePath, content] of disk) {
@@ -748,7 +695,7 @@ export class WorkspaceBaselineService {
     state.timer = setTimeout(() => {
       state.timer = null;
 
-      if (workspaceMutationLeaseOwner(state.workspaceRoot) || state.mutationsInFlight > 0) {
+      if (state.mutationsInFlight > 0) {
         state.timer = setTimeout(() => {
           state.timer = null;
           this.scheduleRefresh(state, state.pendingPaths ? [...state.pendingPaths] : null, 0);

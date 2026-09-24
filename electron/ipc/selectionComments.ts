@@ -5,7 +5,7 @@ import { SelectionCommentsStore, type SelectionComment } from "../agent/selectio
 import { ensureMarkdownFile } from "../fs/pathSafety.js";
 import { isInsideAllowedWorkspace } from "../fs/workspaceRegistry.js";
 import { canonicalizeWorkspaceDirectory } from "../launch/workspace.js";
-import { isTrustedAgentIpcSender } from "./agent.js";
+import { isTrustedIpcSender } from "./trust.js";
 
 type SelectionCommentsIpcEvent = Pick<IpcMainInvokeEvent, "sender" | "senderFrame">;
 type WorkspaceSessionResolver = (
@@ -45,7 +45,7 @@ export async function handleListSelectionCommentsIpc(
   store: Pick<SelectionCommentsStore, "listForWorkspace">,
   resolveWorkspaceRootForSession: WorkspaceSessionResolver = defaultWorkspaceSessionResolver
 ): Promise<SelectionComment[]> {
-  if (!isTrustedAgentIpcSender(event)) {
+  if (!isTrustedIpcSender(event)) {
     return [];
   }
 
@@ -66,7 +66,7 @@ export async function handleSaveSelectionCommentsIpc(
   store: Pick<SelectionCommentsStore, "replaceForDocument">,
   resolveWorkspaceRootForSession: WorkspaceSessionResolver = defaultWorkspaceSessionResolver
 ): Promise<SelectionComment[]> {
-  if (!isTrustedAgentIpcSender(event)) {
+  if (!isTrustedIpcSender(event)) {
     return [];
   }
 

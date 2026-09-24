@@ -6,7 +6,6 @@ import { readDirectory, type FileTreeNode } from "../fs/fileOps.js";
 import { isIgnoredWorkspaceName, markdownExtensions } from "../fs/pathSafety.js";
 import { workspaceMutationMarkerMatches } from "../fs/workspaceMutationMarkers.js";
 import { rememberWorkspace } from "../fs/workspaceRegistry.js";
-import { workspaceMutationLeaseOwner } from "../agent/workspaceMutationLease.js";
 import { canonicalizeWorkspaceDirectory, type WorkspaceInfo } from "../launch/workspace.js";
 import type { WorkspaceBaselineService } from "../review/workspaceBaseline.js";
 
@@ -218,7 +217,7 @@ function createWorkspaceWatcher(
 
     if (
       (treeChanged || markdownChanged) &&
-      (workspaceMutationLeaseOwner(workspace.path) || workspaceMutationMarkerMatches(workspace.path, relativePath))
+      workspaceMutationMarkerMatches(workspace.path, relativePath)
     ) {
       return;
     }

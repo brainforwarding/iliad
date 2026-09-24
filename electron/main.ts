@@ -1,11 +1,10 @@
 import { app, BrowserWindow, Menu, protocol, session, shell, type MenuItemConstructorOptions } from "electron";
 import path from "node:path";
-import { registerAgentIpc } from "./ipc/agent.js";
 import { registerAutocompleteIpc } from "./ipc/autocomplete.js";
 import { registerAssetIpc, registerAssetProtocol } from "./ipc/assets.js";
 import { registerDiagnosticsIpc } from "./ipc/diagnostics.js";
 import { registerFileIpc } from "./ipc/files.js";
-import { registerRemoteIpc } from "./ipc/remote.js";
+import { registerReviewIpc } from "./ipc/review.js";
 import { registerSearchIpc } from "./ipc/search.js";
 import { registerSelectionCommentsIpc } from "./ipc/selectionComments.js";
 import { registerShellIpc } from "./ipc/shell.js";
@@ -13,15 +12,13 @@ import { registerTightenIpc } from "./ipc/tighten.js";
 import { registerUpdatesIpc, updateCheckRequestedChannel } from "./ipc/updates.js";
 import { registerWorkspaceIpc } from "./ipc/workspace.js";
 import { registerWritingCorrectorMemoryIpc } from "./ipc/writingCorrectorMemory.js";
+import { registerWritingSettingsIpc } from "./ipc/writingSettings.js";
 import { parseLaunchWorkspacePath } from "./launch/argv.js";
 import { canonicalizeWorkspaceDirectory, type WorkspaceInfo } from "./launch/workspace.js";
-import { AgentService } from "./agent/agentService.js";
-import { AgentChatHistoryStore } from "./agent/chatHistoryStore.js";
 import { createDiagnosticsLogger } from "./diagnostics/logger.js";
 import { WorkspaceBaselineService } from "./review/workspaceBaseline.js";
-import { RemoteRelayClient } from "./remote/remoteRelayClient.js";
-import { TelegramRemoteService } from "./remote/telegramRemoteService.js";
 import { UpdateService } from "./updates/updateService.js";
+import { WritingAiService } from "./writing/writingAiService.js";
 import { installYouTubeEmbedHeaders } from "./window/youtubeEmbedHeaders.js";
 import { IliadWindowManager } from "./window/windowManager.js";
 
@@ -223,8 +220,17 @@ app.whenReady().then(async () => {
   const diagnosticsLogger = createDiagnosticsLogger(userDataPath);
   const baselineService = new WorkspaceBaselineService({
     trashItem: (absolutePath) => shell.trashItem(absolutePath),
-    onLog: (event, details) => diagnosticsLogger.info({ area: "agent", event, details })
+    onLog: (event, details) => diagnosticsLogger.info({ area: "review", event, details })
   });
+  const resolveWorkspaceRootForSession = (event: { sender: { id: number } }, workspaceSessionId: string) => {
+    const workspace = windowManager.getWindowWorkspace(event.sender.id);
+
+    if (!workspace || workspace.sessionId !== workspaceSessionId) {
+      return null;
+    }
+
+    return workspace.path;
+  };
   registerWorkspaceIpc({
     getLaunchWorkspace: (webContentsId) => windowManager.getLaunchWorkspace(webContentsId),
     getWindowWorkspace: (webContentsId) => windowManager.getWindowWorkspace(webContentsId),
@@ -239,90 +245,16 @@ app.whenReady().then(async () => {
   registerShellIpc();
   registerAssetIpc({
     getWindowWorkspace: (webContentsId) => windowManager.getWindowWorkspace(webContentsId),
-    resolveWorkspaceRootForSession: (event, workspaceSessionId) => {
-      const workspace = windowManager.getWindowWorkspace(event.sender.id);
-
-      if (!workspace || workspace.sessionId !== workspaceSessionId) {
-        return null;
-      }
-
-      return workspace.path;
-    }
+    resolveWorkspaceRootForSession
   });
   registerDiagnosticsIpc({ logger: diagnosticsLogger });
-  const chatHistoryStore = new AgentChatHistoryStore(userDataPath);
-  const agentService = new AgentService(userDataPath, { chatHistoryStore, baselineService });
-  const remoteService = new TelegramRemoteService({
-    userDataPath,
-    agentService,
-    chatHistoryStore,
-    getCurrentWorkspace: () => {
-      const workspace = windowManager.getMostRecentWorkspace();
-      return workspace ? { root: workspace.path, label: workspace.name } : null;
-    }
-  });
-  const remoteRelayClient = new RemoteRelayClient({ remoteService });
-  remoteRelayClient.start();
-  registerRemoteIpc({
-    remoteService,
-    remoteRelayClient,
-    resolveWorkspaceRootForSession: (event, workspaceSessionId) => {
-      const workspace = windowManager.getWindowWorkspace(event.sender.id);
-
-      if (!workspace || workspace.sessionId !== workspaceSessionId) {
-        return null;
-      }
-
-      return workspace.path;
-    }
-  });
-  registerAgentIpc({
-    service: agentService,
-    resolveWorkspaceRootForSession: (event, workspaceSessionId) => {
-      const workspace = windowManager.getWindowWorkspace(event.sender.id);
-
-      if (!workspace || workspace.sessionId !== workspaceSessionId) {
-        return null;
-      }
-
-      return workspace.path;
-    }
-  });
-  registerSelectionCommentsIpc({
-    resolveWorkspaceRootForSession: (event, workspaceSessionId) => {
-      const workspace = windowManager.getWindowWorkspace(event.sender.id);
-
-      if (!workspace || workspace.sessionId !== workspaceSessionId) {
-        return null;
-      }
-
-      return workspace.path;
-    }
-  });
-  registerWritingCorrectorMemoryIpc({
-    resolveWorkspaceRootForSession: (event, workspaceSessionId) => {
-      const workspace = windowManager.getWindowWorkspace(event.sender.id);
-
-      if (!workspace || workspace.sessionId !== workspaceSessionId) {
-        return null;
-      }
-
-      return workspace.path;
-    }
-  });
-  registerAutocompleteIpc({
-    service: agentService,
-    resolveWorkspaceRootForSession: (event, workspaceSessionId) => {
-      const workspace = windowManager.getWindowWorkspace(event.sender.id);
-
-      if (!workspace || workspace.sessionId !== workspaceSessionId) {
-        return null;
-      }
-
-      return workspace.path;
-    }
-  });
-  registerTightenIpc({ service: agentService });
+  registerReviewIpc({ baselineService, resolveWorkspaceRootForSession, diagnostics: diagnosticsLogger });
+  const writingAiService = new WritingAiService(userDataPath, { diagnostics: diagnosticsLogger });
+  registerWritingSettingsIpc({ service: writingAiService });
+  registerSelectionCommentsIpc({ resolveWorkspaceRootForSession });
+  registerWritingCorrectorMemoryIpc({ resolveWorkspaceRootForSession });
+  registerAutocompleteIpc({ service: writingAiService, resolveWorkspaceRootForSession });
+  registerTightenIpc({ service: writingAiService });
   registerUpdatesIpc({
     service: new UpdateService({ currentVersion: app.getVersion() }),
     consumePendingCheckRequest: () => {
@@ -349,7 +281,7 @@ app.whenReady().then(async () => {
   });
 
   app.on("before-quit", () => {
-    remoteRelayClient.dispose();
+    writingAiService.dispose();
     baselineService.dispose();
   });
 });

@@ -4,14 +4,16 @@ import { describe, expect, it } from "vitest";
 import { WritingAssistsMenu } from "../../src/components/WritingAssistsMenu";
 import { defaultAutocompletePreferences, emptyWritingGuidance } from "../../src/editor/ideaAutocomplete/options";
 import { appStrings } from "../../src/i18n/strings";
+import type { GeminiKeyState } from "../../src/types/iliad";
 
-function render(manualOnly = false) {
+function render({ manualOnly = false, geminiKey = { hasKey: true, last4: "1234" } as GeminiKeyState | null } = {}) {
   const noop = () => undefined;
   return renderToStaticMarkup(
     <WritingAssistsMenu labels={appStrings.en.writingAssists} menuRef={createRef()} open onToggleOpen={noop}
       correctorEnabled={false} onSetCorrectorEnabled={noop} correctorAvailable
-      autocompleteEnabled onSetAutocompleteEnabled={noop} autocompleteApiFallbackEnabled={false} onSetAutocompleteApiFallbackEnabled={noop}
-      showApiFallback={false} hasDocument preferences={{ ...defaultAutocompletePreferences, manualOnly }} onPreferencesChange={noop}
+      autocompleteEnabled onSetAutocompleteEnabled={noop}
+      geminiKey={geminiKey} onSaveGeminiKey={async () => undefined} onGetGeminiKey={noop}
+      hasDocument preferences={{ ...defaultAutocompletePreferences, manualOnly }} onPreferencesChange={noop}
       guidance={emptyWritingGuidance} onGuidanceChange={noop} snoozed={false} onToggleSnooze={noop} onResetShortcuts={noop} />
   );
 }
@@ -30,6 +32,27 @@ describe("Writing assists menu", () => {
   });
 
   it("explains the manual-only state with the configured key", () => {
-    expect(render(true)).toContain("Off: only when you press");
+    expect(render({ manualOnly: true })).toContain("Off: only when you press");
+  });
+
+  it("puts the Gemini key field first when no key is set", () => {
+    const html = render({ geminiKey: { hasKey: false, last4: null } });
+    expect(html.indexOf("Gemini API key")).toBeGreaterThan(-1);
+    expect(html.indexOf("Gemini API key")).toBeLessThan(html.indexOf("Corrector"));
+    expect(html).toContain('type="password"');
+    expect(html).toContain("Get a key");
+  });
+
+  it("shows a quiet last row with the masked key when one is set", () => {
+    const html = render();
+    expect(html).toContain("Gemini key ••••1234");
+    expect(html).toContain("Change");
+    expect(html).not.toContain('type="password"');
+    expect(html.indexOf("Gemini key ••••1234")).toBeGreaterThan(html.indexOf("Corrector"));
+  });
+
+  it("carries no Codex, OpenAI, or API-fallback copy", () => {
+    const html = render() + render({ geminiKey: { hasKey: false, last4: null } });
+    expect(html).not.toMatch(/codex|openai|fallback|Using Gemini/i);
   });
 });

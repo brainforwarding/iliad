@@ -35,7 +35,6 @@ export interface IdeaAutocompleteRequestPayload {
   suggestionKind: IdeaAutocompleteSuggestionKind;
   /** The prefix ends with the visible, unaccepted suggestion, which the model continues. */
   extend?: boolean;
-  autocompleteApiFallbackEnabled: boolean;
 }
 
 export interface IdeaAutocompleteExtensionOptions {
@@ -44,11 +43,12 @@ export interface IdeaAutocompleteExtensionOptions {
   snoozedUntil?: number;
   onPartial?: (listener: (event: { requestId: string; insert: string }) => void) => () => void;
   enabled: boolean;
+  /** False when no AI key is set: only explicit (manual) requests run, and they report the missing key. */
+  automaticEnabled?: boolean;
   language: "en" | "es";
   workspaceSessionId?: string;
   documentRelativePath?: string;
   documentTitle: string;
-  autocompleteApiFallbackEnabled: boolean;
   blockedLineRanges?: readonly BlockedLineRange[];
   requestAutocomplete: (request: IdeaAutocompleteRequestPayload) => Promise<IdeaAutocompleteResult>;
   cancelAutocomplete: (requestId: string) => void;
@@ -533,7 +533,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           return false;
         }
 
-        if (trigger === "automatic" && (options.preferences?.manualOnly || Date.now() < (options.snoozedUntil ?? 0) || !this.pendingAutomaticTrigger || this.dismissedUntilEdit || Date.now() < this.automaticPausedUntil)) {
+        if (trigger === "automatic" && (options.automaticEnabled === false || options.preferences?.manualOnly || Date.now() < (options.snoozedUntil ?? 0) || !this.pendingAutomaticTrigger || this.dismissedUntilEdit || Date.now() < this.automaticPausedUntil)) {
           return false;
         }
 
@@ -611,8 +611,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
             extend: Boolean(base),
             direction,
             guidance,
-            avoid: trigger === "manual" && !base ? previousVariants : [],
-            autocompleteApiFallbackEnabled: options.autocompleteApiFallbackEnabled
+            avoid: trigger === "manual" && !base ? previousVariants : []
           });
 
           if (this.inFlightRequestId !== requestId) {

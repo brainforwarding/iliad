@@ -12,7 +12,7 @@ function harness(request = vi.fn<() => Promise<IdeaAutocompleteResult>>().mockRe
   const status = vi.fn();
   const extensions = ideaAutocompleteExtension({
     enabled: true, language: "en", workspaceSessionId: "session", documentRelativePath: "draft.md",
-    documentTitle: "Draft", autocompleteApiFallbackEnabled: false,
+    documentTitle: "Draft",
     requestAutocomplete: request, cancelAutocomplete: cancel, onStatusChange: status, ...options
   });
   const view = {

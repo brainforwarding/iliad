@@ -45,6 +45,11 @@ export interface TightenOverlayLabels {
   alreadyTight: string;
   failed: string;
   noKey: string;
+  invalidKey: string;
+  incomplete: string;
+  blocked: string;
+  /** Title of the disabled ✦ AI action when no Gemini key is set. */
+  addKey: string;
   tooLong: string;
   editAction: string;
   editComposerLabel: string;
@@ -63,8 +68,10 @@ export interface TightenOverlayLabels {
 }
 
 export interface TightenOverlayApi {
-  /** Has a runnable agent identity + a Markdown file is active. Action collapses out when false. */
+  /** A Gemini key is set and a Markdown file is active. When false the ✦ AI action shows disabled. */
   enabled: boolean;
+  /** Opens Writing assists at the Gemini key field (used while `enabled` is false). */
+  onRequestKey?: () => void;
   minChars: number;
   maxChars: number;
   /** Current active-file path — compared at accept time to discard a file-switch race. */
@@ -713,8 +720,17 @@ export function SelectionCommentsOverlay({
   const handleTightenShortcut = (shortcutView: EditorView) => {
     const activeTighten = tightenRef.current;
 
-    if (!activeTighten?.enabled || composerRef.current || editComposerRef.current) {
+    if (!activeTighten || composerRef.current || editComposerRef.current) {
       return false;
+    }
+
+    if (!activeTighten.enabled) {
+      if (shortcutView.state.selection.main.empty || !activeTighten.onRequestKey) {
+        return false;
+      }
+
+      activeTighten.onRequestKey();
+      return true;
     }
 
     const selection = shortcutView.state.selection.main;
@@ -862,7 +878,7 @@ export function SelectionCommentsOverlay({
     : [];
 
   const tightenSelectionMetrics =
-    tighten?.enabled && floatingPos !== null && !view.state.selection.main.empty
+    tighten && floatingPos !== null && !view.state.selection.main.empty
       ? (() => {
           const selection = view.state.selection.main;
           const slice = view.state.sliceDoc(selection.from, selection.to);
@@ -879,8 +895,9 @@ export function SelectionCommentsOverlay({
       : null;
   const showEditAction = Boolean(tighten && tightenSelectionMetrics?.hasSafeRange);
   const tightenOverCap = Boolean(
-    tighten && tightenSelectionMetrics && tightenSelectionMetrics.safeLength > tighten.maxChars
+    tighten?.enabled && tightenSelectionMetrics && tightenSelectionMetrics.safeLength > tighten.maxChars
   );
+  const aiNeedsKey = Boolean(tighten && !tighten.enabled);
   const floatingWidth = 96 + (showEditAction ? 96 : 0);
   const floatingPosition =
     floatingPos !== null
@@ -897,14 +914,14 @@ export function SelectionCommentsOverlay({
   const tightenErrorLabel =
     tighten && tightenState.phase === "error"
       ? tightenState.kind === "edit"
-        ? tightenState.reason === "no_key" || tightenState.reason === "invalid_api_key"
+        ? tightenState.reason === "no_key"
           ? tighten.labels.editNoKey
           : tightenState.reason === "too_long"
             ? tighten.labels.editTooLong
-            : tighten.labels.editFailed
-        : tightenState.reason === "no_key" || tightenState.reason === "invalid_api_key"
+            : sharedTightenErrorLabel(tightenState.reason, tighten.labels) ?? tighten.labels.editFailed
+        : tightenState.reason === "no_key"
           ? tighten.labels.noKey
-          : tighten.labels.failed
+          : sharedTightenErrorLabel(tightenState.reason, tighten.labels) ?? tighten.labels.failed
       : "";
   const composerPosition = composer
     ? overlayPositionAt(view, composer.anchorPos, { width: 280, height: 92 }, "below")
@@ -960,11 +977,19 @@ export function SelectionCommentsOverlay({
           {showEditAction && tighten ? (
             <button
               type="button"
-              className="editor-ai-action"
+              className={aiNeedsKey ? "editor-ai-action is-unavailable" : "editor-ai-action"}
               disabled={tightenOverCap}
-              title={tightenOverCap ? tighten.labels.editTooLong : tighten.labels.aiMenuLabel}
+              aria-disabled={aiNeedsKey || undefined}
+              title={
+                aiNeedsKey ? tighten.labels.addKey : tightenOverCap ? tighten.labels.editTooLong : tighten.labels.aiMenuLabel
+              }
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
+                if (aiNeedsKey) {
+                  tighten.onRequestKey?.();
+                  return;
+                }
+
                 if (!tightenOverCap) {
                   openEditComposer(view);
                 }
@@ -1143,4 +1168,17 @@ export function SelectionCommentsOverlay({
       ) : null}
     </div>
   );
+}
+
+function sharedTightenErrorLabel(reason: TightenFailureReason, labels: TightenOverlayLabels) {
+  switch (reason) {
+    case "invalid_api_key":
+      return labels.invalidKey;
+    case "incomplete":
+      return labels.incomplete;
+    case "blocked":
+      return labels.blocked;
+    default:
+      return null;
+  }
 }

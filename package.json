@@ -26,14 +26,10 @@
     "dist:linux": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --linux",
     "dist:mac:signed": "npm run build && electron-builder --mac",
     "preview": "vite preview --host 127.0.0.1",
-    "smoke:review": "tsc -p electron/tsconfig.json && node scripts/reviewDiffSmoke.mjs",
-    "benchmark:autocomplete": "tsc -p electron/tsconfig.json && node scripts/benchmarkAutocomplete.mjs",
     "release:refresh-update-metadata": "node scripts/refreshMacUpdateMetadata.mjs",
     "release:verify-update-metadata": "node scripts/verifyUpdateMetadata.mjs",
     "test": "vitest run",
     "typecheck": "tsc -b && tsc -p electron/tsconfig.json --noEmit",
-    "relay:typecheck": "tsc -p relay/telegram/tsconfig.json --noEmit",
-    "relay:test": "vitest run relay/telegram/tests",
     "lint:css": "stylelint \"src/styles/**/*.css\""
   },
   "dependencies": {
@@ -48,11 +44,7 @@
     "katex": "^0.16.47",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-markdown": "^10.1.0",
-    "rehype-katex": "^7.0.1",
-    "remark-gfm": "^4.0.1",
-    "remark-math": "^6.0.0"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
@@ -90,9 +82,6 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "notarize": true,
-      "extendInfo": {
-        "NSMicrophoneUsageDescription": "Iliad usa el micrófono para el dictado por voz."
-      },
       "target": [
         "dmg",
         "zip"

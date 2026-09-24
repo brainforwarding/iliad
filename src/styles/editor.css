@@ -442,6 +442,15 @@
   cursor: default;
 }
 
+/* No Gemini key: looks disabled, but a click opens Writing assists at the key field. */
+.editor-ai-action.is-unavailable {
+  color: var(--muted-3);
+}
+
+.editor-ai-action.is-unavailable kbd {
+  color: var(--muted-3);
+}
+
 @keyframes editor-comment-action-enter {
   from {
     opacity: 0;

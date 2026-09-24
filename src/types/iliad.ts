@@ -116,73 +116,6 @@ export interface MarkdownContentSearchResponse {
   invalidRegexMessage?: string;
 }
 
-export type AgentMode = "fast" | "balanced" | "deep";
-export type AgentRunProfile = "desktop" | "remote_read_only";
-export type AgentModelId =
-  | "gpt-5.5"
-  | "gpt-5.4"
-  | "gpt-5.4-mini";
-
-export interface AgentRuntimeCapabilities {
-  text: boolean;
-  thinkingSummaries: boolean;
-  reviewableProposals: boolean;
-  workspaceEvents: boolean;
-  managedAccountAuth: boolean;
-  rateLimits: boolean;
-  media: {
-    transcription: boolean;
-    images: boolean;
-    realtime: boolean;
-  };
-}
-
-export interface AgentRuntimeProviderMetadata {
-  id: "openai-api" | "codex-app-server";
-  label: string;
-  billing: "openai_platform_api" | "codex_account";
-  capabilities: AgentRuntimeCapabilities;
-}
-
-export interface AgentSettingsSnapshot {
-  hasOpenAiApiKey: boolean;
-  hasGeminiApiKey?: boolean;
-  model: AgentModelId;
-  mode: AgentMode;
-  runtimeProvider: AgentRuntimeProviderMetadata;
-}
-
-export interface AgentSettingsUpdate {
-  openAiApiKey?: string;
-  geminiApiKey?: string;
-  model?: string;
-  mode?: AgentMode;
-}
-
-export interface AgentMessage {
-  role: "user" | "assistant";
-  content: string;
-}
-
-export interface AgentPatchProposal {
-  id: string;
-  runId: string;
-  summary: string;
-  path: string;
-  relativePath: string;
-  baseHash: string;
-  replacement: string;
-  unifiedDiff: string;
-}
-
-export interface AgentCreateDocumentProposal {
-  id: string;
-  runId: string;
-  summary: string;
-  relativePath: string;
-  content: string;
-}
-
 export type AgentProposalStatus = "pending" | "partially_applied" | "applied" | "rejected" | "stale" | "failed";
 
 export type AgentProposalFileStatus =
@@ -234,7 +167,7 @@ export interface ExternalFilesystemProposalMetadata {
 export type AgentChangeProposalMetadata = ExternalFilesystemProposalMetadata;
 
 export interface AgentProposalSource {
-  kind: "openai_response" | "legacy_marker_adapter" | "tool_call" | "subagent" | "codex_app_server" | "external_agent";
+  kind: "external_agent";
   agentName?: string;
   parentRunId?: string;
 }
@@ -301,159 +234,6 @@ export type WriteMarkdownResult =
   | { status: "written"; savedAt: string }
   | { status: "conflict"; reason: MarkdownWriteConflictReason };
 
-export type AgentErrorCode =
-  | "missing_api_key"
-  | "invalid_api_key"
-  | "rate_limited"
-  | "provider_unavailable"
-  | "network_unreachable"
-  | "dns_failure"
-  | "request_timeout"
-  | "request_canceled"
-  | "model_not_found"
-  | "malformed_provider_response"
-  | "unknown";
-
-export interface AgentError {
-  code: AgentErrorCode;
-  userMessage: string;
-  detail?: string;
-  providerStatus?: number;
-  retryable: boolean;
-}
-
-export type AgentRunContextManifestStatus = "running" | "completed" | "failed" | "canceled";
-export type AgentRunContextItemKind =
-  | "current_file"
-  | "proposal"
-  | "workspace_scope"
-  | "runtime_workspace"
-  | "document_read"
-  | "document_reference"
-  | "conversation_history";
-export type AgentRunContextInclusion = "full" | "reference" | "available" | "excluded";
-export interface AgentContextAttachment {
-  relativePath: string;
-  source: "manual_attachment";
-}
-
-export type AgentContextDocumentSource = "explicit_file_mention" | "manual_attachment";
-export type AgentContextReferenceReason =
-  | "not_found"
-  | "unsafe"
-  | "not_markdown"
-  | "oversized"
-  | "budget_exceeded"
-  | "ambiguous"
-  | "duplicate"
-  | "unknown";
-
-export interface AgentContextDocument {
-  correlationId: string;
-  relativePath: string;
-  content: string;
-  baseHash: string;
-  estimatedTokens: number;
-  source: AgentContextDocumentSource;
-}
-
-export interface AgentContextReference {
-  correlationId: string;
-  safeDisplayPath?: string;
-  reason: AgentContextReferenceReason;
-  source?: AgentContextDocumentSource;
-}
-
-export interface AgentMarkdownContextDocumentSummary {
-  relativePath: string;
-  name: string;
-  sizeBytes: number;
-  estimatedTokens: number;
-}
-
-export interface AgentMarkdownContextDocumentListResponse {
-  files: AgentMarkdownContextDocumentSummary[];
-  truncated: boolean;
-}
-
-export type NormalizeContextDropResponse =
-  | { ok: true; relativePath: string }
-  | { ok: false; reason: "outside_workspace" | "not_markdown" | "unsafe" | "not_found" };
-
-export interface AgentRunContextItem {
-  id: string;
-  kind: AgentRunContextItemKind;
-  label: string;
-  relativePath?: string;
-  inclusion: AgentRunContextInclusion;
-  reason: string;
-  baseHash?: string;
-  estimatedTokens?: number;
-  correlationId?: string;
-  resultCount?: number;
-  searchedPaths?: number;
-  searchedFiles?: number;
-  truncated?: boolean;
-  errorCode?: string;
-  /** 1-based line range for editor_selection receipt rows. */
-  lineStart?: number;
-  lineEnd?: number;
-}
-
-export interface AgentRunContextManifest {
-  id: string;
-  runId: string;
-  createdAt: string;
-  updatedAt: string;
-  status: AgentRunContextManifestStatus;
-  workspaceLabel: string;
-  workspaceId: string;
-  workspaceRootPersisted: false;
-  provider: AgentRuntimeProviderMetadata;
-  model: AgentModelId | string;
-  mode: AgentMode;
-  language: "en" | "es";
-  policy: "auto";
-  items: AgentRunContextItem[];
-  estimatedInputTokens: number;
-  responseId?: string;
-  proposalIds: string[];
-  error?: {
-    code: AgentErrorCode;
-    userMessage: string;
-    retryable: boolean;
-    providerStatus?: number;
-  };
-}
-
-export interface AgentRunRequest {
-  runId: string;
-  workspaceRoot: string;
-  runProfile?: AgentRunProfile;
-  activeFile: {
-    path: string;
-    relativePath: string;
-    content: string;
-    baseHash: string;
-  } | null;
-  messages: AgentMessage[];
-  prompt: string;
-  mode: AgentMode;
-  language: "en" | "es";
-  contextAttachments?: AgentContextAttachment[];
-  /**
-   * Identifier-only index of documents referenced earlier in the conversation
-   * (ADR-0014), derived in-session from prior run manifests. Sanitized again in
-   * the main process; content is never re-sent.
-   */
-  previouslyReferencedDocuments?: string[];
-  /**
-   * Live editor selection at send time, as offsets into activeFile.content
-   * (ADR-0017). Main re-validates bounds and slices from the snapshot itself.
-   */
-  editorSelection?: { from: number; to: number };
-}
-
 export interface TightenSelectionRequest {
   /** Monotonic, renderer-owned; lets a late resolve be discarded as stale (ADR-0020). */
   requestId: string;
@@ -474,6 +254,8 @@ export type TightenFailureReason =
   | "empty"
   | "timeout"
   | "provider"
+  | "incomplete"
+  | "blocked"
   | "aborted"
   | "untrusted";
 
@@ -499,7 +281,6 @@ export interface IdeaAutocompleteRequest {
   suggestionKind?: "inline" | "sentence" | "paragraph" | "idea";
   /** The prefix ends with the visible, unaccepted suggestion being extended. */
   extend?: boolean;
-  autocompleteApiFallbackEnabled: boolean;
 }
 
 export type IdeaAutocompleteFailureReason =
@@ -526,11 +307,10 @@ export interface WritingAssistStatus {
   };
   autocomplete: {
     available: boolean;
-    provider: "codex-app-server" | "openai-api" | "gemini-api" | null;
-    apiFallbackAvailable: boolean;
-    apiFallbackEnabled: boolean;
-    model: AgentModelId | string | null;
+    provider: "gemini-api" | null;
+    model: string | null;
   };
+  geminiKey: GeminiKeyState;
 }
 
 export type SelectionCommentStatus = "pending" | "sent" | "discarded";
@@ -585,272 +365,6 @@ export interface WritingCorrectorMemoryApi {
   addDictionaryWord: (request: { language: "en" | "es"; word: string }) => Promise<{ customWords: string[] }>;
 }
 
-export type AgentChatThreadTitleSource = "fallback" | "ai";
-
-export interface AgentChatHistoryEntry {
-  id: string;
-  kind: "user" | "assistant" | "error" | "status";
-  text: string;
-  createdAt: string;
-  source?: "desktop" | "telegram";
-}
-
-export interface AgentChatThread {
-  id: string;
-  workspaceRoot: string;
-  title: string;
-  titleSource: AgentChatThreadTitleSource;
-  createdAt: string;
-  updatedAt: string;
-  entries: AgentChatHistoryEntry[];
-}
-
-export interface AgentChatThreadSummary {
-  id: string;
-  title: string;
-  titleSource: AgentChatThreadTitleSource;
-  updatedAt: string;
-  messageCount: number;
-}
-
-export interface AgentRunResponse {
-  runId: string;
-  responseId?: string;
-  text: string;
-  proposalIds: string[];
-  proposals: AgentChangeProposal[];
-  patch: AgentPatchProposal | null;
-  newDocument: AgentCreateDocumentProposal | null;
-  contextManifest?: AgentRunContextManifest;
-  error?: AgentError;
-}
-
-export interface AgentTranscribeAudioRequest {
-  requestId: string;
-  audio: ArrayBuffer | Uint8Array;
-  mimeType: string;
-  language?: string;
-}
-
-export type AgentTranscribeAudioResponse =
-  | {
-      requestId: string;
-      text: string;
-      error?: undefined;
-    }
-  | {
-      requestId: string;
-      text: "";
-      error: AgentError;
-    };
-
-export interface CodexAccount {
-  type: "chatgpt" | "apiKey" | "amazonBedrock";
-  email?: string;
-  planType?: string;
-}
-
-export interface CodexAccountRateLimitBucket {
-  usedPercent?: number | null;
-  windowDurationMins?: number | null;
-  resetsAtUnixSeconds?: number | null;
-  resetsAtIso?: string | null;
-}
-
-export interface CodexAccountRateLimitSummary {
-  limitId?: string | null;
-  limitName?: string | null;
-  planType?: string | null;
-  primary?: CodexAccountRateLimitBucket;
-  secondary?: CodexAccountRateLimitBucket;
-  rateLimitReachedType?: string | null;
-  credits?: {
-    hasCredits?: boolean | null;
-    unlimited?: boolean | null;
-    balance?: string | null;
-  };
-}
-
-export interface CodexAccountConnectionError {
-  code:
-    | "app_server_unavailable"
-    | "protocol_error"
-    | "request_timeout"
-    | "unsupported_method"
-    | "untrusted_ipc_sender"
-    | "unknown";
-  message: string;
-  detail?: string;
-}
-
-export interface CodexAccountStatusResponse {
-  available: boolean;
-  connected: boolean;
-  requiresOpenaiAuth: boolean;
-  pendingLogin: boolean;
-  account?: CodexAccount;
-  rateLimits?: CodexAccountRateLimitSummary;
-  error?: CodexAccountConnectionError;
-}
-
-export interface CodexDeviceLoginResponse extends CodexAccountStatusResponse {
-  login?: {
-    verificationUrl: string;
-    userCode: string;
-  };
-}
-
-export type CodexOpenDeviceLoginResponse =
-  | {
-      ok: true;
-    }
-  | {
-      ok: false;
-      error: CodexAccountConnectionError;
-    };
-
-export interface CodexCliProbeRequest {
-  executablePath?: string;
-  timeoutMs?: number;
-}
-
-export type CodexCliProbeResponse =
-  | {
-      ok: true;
-      executablePath: string;
-      version: string;
-      rawVersion: string;
-    }
-  | {
-      ok: false;
-      executablePath: string;
-      error: {
-        code: "invalid_path" | "not_found" | "not_codex_executable" | "timeout" | "failed" | "invalid_output";
-        message: string;
-        detail?: string;
-        exitCode?: number;
-      };
-    };
-
-export interface RemotePairedTelegramChat {
-  chatId: string;
-  username?: string;
-  displayName?: string;
-  pairedAt: string;
-}
-
-export interface TelegramRemotePairingStartResponse {
-  token: string;
-  pairingSessionId: string;
-  expiresAt: string;
-  pairingUrl?: string;
-}
-
-export interface TelegramRemoteErrorSummary {
-  message: string;
-  at: string;
-}
-
-export interface TelegramRemoteSettings {
-  enabled: boolean;
-  relayDeviceId: string;
-  pairedChat: RemotePairedTelegramChat | null;
-  lastConnectedAt?: string;
-  lastError?: TelegramRemoteErrorSummary | null;
-  boundWorkspaceRoot?: string;
-  activeThreadId?: string;
-  activeThreadWorkspaceRoot?: string;
-  updatedAt: string;
-}
-
-export interface TelegramRemoteSettingsUpdateRequest {
-  enabled?: boolean;
-  activeThreadId?: string;
-  workspaceSessionId?: string;
-}
-
-export type AgentRunPhase =
-  | "reading_context"
-  | "asking_model"
-  | "reviewing_changes"
-  | "waiting_for_review"
-  | "completed"
-  | "failed"
-  | "canceled";
-
-export type AgentRunPhaseEvent = {
-  type: "run_phase";
-  runId: string;
-  phase: AgentRunPhase;
-  source: "agent_service";
-  proposalFileCount?: number;
-  errorCode?: AgentErrorCode;
-};
-
-export type AgentLegacyStatusRunEvent = { type: "status"; runId: string; message: string };
-
-export type AgentActivityKind =
-  | "document_list"
-  | "document_search"
-  | "document_read"
-  | "document_read_failed"
-  | "document_open";
-export type AgentActivityStatus = "started" | "completed" | "failed";
-
-export interface AgentActivityRunEvent {
-  type: "activity";
-  runId: string;
-  activityId: string;
-  sequence: number;
-  kind: AgentActivityKind;
-  status: AgentActivityStatus;
-  title: string;
-  relativePath?: string;
-  query?: string;
-  resultCount?: number;
-  searchedPaths?: number;
-  searchedFiles?: number;
-  truncated?: boolean;
-}
-
-export type AgentThinkingRunEvent =
-  | {
-      type: "thinking_delta";
-      runId: string;
-      itemId: string;
-      summaryIndex: number;
-      delta: string;
-    }
-  | {
-      type: "thinking_done";
-      runId: string;
-      itemId: string;
-      summaryIndex: number;
-      text: string;
-    };
-
-export type AgentTextRunEvent = {
-  type: "text_delta";
-  runId: string;
-  /** Streamed-payload counter; a change tells the renderer to replace, not append. */
-  generation: number;
-  delta: string;
-};
-
-export type AgentOpenDocumentRunEvent = {
-  type: "open_document";
-  runId: string;
-  relativePath: string;
-};
-
-export type AgentRunEvent =
-  | AgentRunPhaseEvent
-  | AgentLegacyStatusRunEvent
-  | AgentThinkingRunEvent
-  | AgentActivityRunEvent
-  | AgentTextRunEvent
-  | AgentOpenDocumentRunEvent;
-
 export type ApplyAgentProposalFileResponse =
   | {
       kind: "edit_file";
@@ -874,67 +388,27 @@ export type ApplyAgentProposalFileResponse =
       status: AgentProposalFileStatus;
     };
 
-export interface ResolveAgentProposalHunkResponse {
-  proposal: AgentChangeProposal;
-  fileId: string;
-  hunkId: string;
-  status: AgentReviewHunkStatus;
-  content?: string;
+export interface GeminiKeyState {
+  hasKey: boolean;
+  /** Last four characters of the key in use, for display only. */
+  last4: string | null;
 }
 
+/** Outside-change review (channel names keep their historical `agent:` prefix). */
 export interface AgentApi {
-  getSettings: () => Promise<AgentSettingsSnapshot>;
-  updateSettings: (update: AgentSettingsUpdate) => Promise<AgentSettingsSnapshot>;
-  probeCodexCli: (request?: CodexCliProbeRequest) => Promise<CodexCliProbeResponse>;
-  codexStatus: () => Promise<CodexAccountStatusResponse>;
-  startCodexDeviceLogin: () => Promise<CodexDeviceLoginResponse>;
-  cancelCodexLogin: () => Promise<CodexAccountStatusResponse>;
-  logoutCodex: () => Promise<CodexAccountStatusResponse>;
-  openCodexDeviceLogin: () => Promise<CodexOpenDeviceLoginResponse>;
-  startRun: (request: AgentRunRequest) => Promise<AgentRunResponse>;
-  transcribeAudio: (request: AgentTranscribeAudioRequest) => Promise<AgentTranscribeAudioResponse>;
-  onRunEvent: (listener: (event: AgentRunEvent) => void) => () => void;
-  cancelRun: (runId: string) => Promise<void>;
-  listProposals: (workspaceRoot: string) => Promise<AgentChangeProposal[]>;
   getExternalReview: (request: { workspaceSessionId: string }) => Promise<ExternalReviewSnapshot>;
   onExternalReviewChanged: (listener: (snapshot: ExternalReviewSnapshot) => void) => () => void;
   applyProposalFile: (request: {
-    workspaceRoot: string;
+    workspaceSessionId: string;
     proposalId: string;
     fileId: string;
   }) => Promise<ApplyAgentProposalFileResponse>;
   rejectProposalFile: (request: {
-    workspaceRoot: string;
+    workspaceSessionId: string;
     proposalId: string;
     fileId: string;
   }) => Promise<AgentChangeProposal>;
-  rejectProposal: (request: { workspaceRoot: string; proposalId: string }) => Promise<AgentChangeProposal>;
-  resolveProposalHunk: (request: {
-    workspaceRoot: string;
-    proposalId: string;
-    fileId: string;
-    hunkId: string;
-    decision: "accept" | "reject";
-  }) => Promise<ResolveAgentProposalHunkResponse>;
-  listChatThreads: (workspaceRoot: string) => Promise<AgentChatThreadSummary[]>;
-  getChatThread: (request: { workspaceRoot: string; threadId: string }) => Promise<AgentChatThread | null>;
-  saveChatThread: (request: {
-    workspaceRoot: string;
-    thread: Omit<AgentChatThread, "workspaceRoot"> & { workspaceRoot?: string };
-  }) => Promise<AgentChatThread>;
-  clearChatHistory: (workspaceRoot: string) => Promise<void>;
-  generateChatThreadTitle: (request: {
-    workspaceRoot: string;
-    threadId: string;
-    language: "en" | "es";
-  }) => Promise<AgentChatThread | null>;
-}
-
-export interface TelegramRemoteApi {
-  getSettings: () => Promise<TelegramRemoteSettings>;
-  startPairing: () => Promise<TelegramRemotePairingStartResponse>;
-  updateSettings: (update: TelegramRemoteSettingsUpdateRequest) => Promise<TelegramRemoteSettings>;
-  revokeSettings: () => Promise<TelegramRemoteSettings>;
+  rejectProposal: (request: { workspaceSessionId: string; proposalId: string }) => Promise<AgentChangeProposal>;
 }
 
 export type UpdateCheckResult =
@@ -1002,8 +476,6 @@ export interface IliadApi {
   referenceImageAsset: (request: ReferenceImageAssetRequest) => Promise<SavedImageAsset>;
   referenceImageAssetByRelativePath: (request: ReferenceImageAssetByRelativePathRequest) => Promise<SavedImageAsset>;
   pathForFile?: (file: File) => string;
-  listMarkdownContextDocuments?: (workspaceSessionId: string) => Promise<AgentMarkdownContextDocumentListResponse>;
-  normalizeContextDrop?: (workspaceSessionId: string, absolutePath: string) => Promise<NormalizeContextDropResponse>;
   selectionComments?: SelectionCommentsApi;
   writingCorrectorMemory?: WritingCorrectorMemoryApi;
   tightenSelection: (request: TightenSelectionRequest) => Promise<TightenResult>;
@@ -1011,10 +483,11 @@ export interface IliadApi {
   autocompleteIdea: (request: IdeaAutocompleteRequest) => Promise<IdeaAutocompleteResult>;
   onAutocompletePartial: (listener: (event: { requestId: string; insert: string }) => void) => () => void;
   cancelAutocompleteIdea: (requestId: string) => void;
-  getWritingAssistStatus: (request: { autocompleteApiFallbackEnabled: boolean }) => Promise<WritingAssistStatus>;
+  getWritingAssistStatus: () => Promise<WritingAssistStatus>;
+  getGeminiKeyState: () => Promise<GeminiKeyState>;
+  setGeminiApiKey: (key: string | null) => Promise<GeminiKeyState>;
   assetUrl: (absolutePath: string) => string;
   agent: AgentApi;
-  remote: TelegramRemoteApi;
 }
 
 declare global {

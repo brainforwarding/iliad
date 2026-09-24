@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { tryAcquireWorkspaceMutationLease } from "../../electron/agent/workspaceMutationLease";
 import { externalReviewFileId } from "../../electron/review/externalReviewProjection";
 import { WorkspaceBaselineService, type ExternalReviewSnapshot } from "../../electron/review/workspaceBaseline";
 
@@ -161,13 +160,18 @@ describe("WorkspaceBaselineService", () => {
     expect(itemPaths(baseline.currentReview(root))).toEqual(["edit_file:a.md", "edit_file:b.md"]);
   });
 
-  it("defers refreshes while the Codex lease is held and reconciles after release", async () => {
+  it("defers refreshes while an Iliad mutation is in flight and reconciles after it", async () => {
     const root = await workspace();
     await writeFile(path.join(root, "doc.md"), "one\n", "utf8");
     const baseline = service();
     await baseline.attach(root, subscriber());
-    const release = tryAcquireWorkspaceMutationLease(root, "codex_app_server");
-    expect(release).not.toBeNull();
+    let finish: () => void = () => undefined;
+    const mutation = baseline.runIliadMutation(root, {
+      paths: [],
+      operation: () => new Promise<void>((resolve) => {
+        finish = resolve;
+      })
+    });
 
     try {
       await writeFile(path.join(root, "doc.md"), "two\n", "utf8");
@@ -175,7 +179,8 @@ describe("WorkspaceBaselineService", () => {
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(baseline.currentReview(root).proposal).toBeNull();
     } finally {
-      release?.();
+      finish();
+      await mutation;
     }
 
     await waitFor(() => baseline.currentReview(root).proposal !== null);
