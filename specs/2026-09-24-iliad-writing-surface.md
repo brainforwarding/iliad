@@ -1,7 +1,7 @@
 # Iliad Writing Surface: Remove the Internal Agent, Work With Outside Agents
 
 Date: 2026-09-24
-Status: v1 — pending review panel
+Status: v2 — review panel folded in; pending Codex go/no-go
 Branch: `iliad-writing-surface` (from `master` at `3e16899`)
 Target release: Iliad MD 0.3.0 (GitHub release + local install + iliad.md site)
 Figma: "Iliad — AI writing interactions" (file `i2BTwgceho8SqRYGZKjLhB`), page 1 = final Iliad, page 2 = website
@@ -321,6 +321,143 @@ pages for removed features) and deploy with `deploy.sh`; verify live.
   "Iliad MD" iliad.mjs`) via a sh wrapper — no Dock icon, no dependency on a
   system Node. Preferred.
 
+## v2 decisions (override the stage text above where they differ)
+
+Review panel: UI/UX agent, architecture agent, Codex `gpt-6-sol` high (NO-GO on v1).
+
+Stage order and scope
+
+- V1 Stage A keeps `selectionCommentsStore` + its IPC and the comment UI working
+  (only the send-to-agent path is removed). They are retired in Stage D after
+  file-backed comments and the migration exist.
+- V2 Review IPC keeps the existing `agent:*` channel names (no rename); handlers
+  move to `electron/ipc/review.ts`, call the baseline service directly, and
+  resolve the workspace root from `workspaceSessionId` instead of trusting a
+  renderer-sent root. Keep the `externalRevisionRef = 0` reset on workspace
+  change when `getExternalReview` replaces `listProposals`.
+
+Per-chunk review (Stage B)
+
+- V3 Chunk ids stay positional (`${fileId}-hunk-${n}`); every action carries the
+  baseline and disk hashes the renderer saw and main rejects mismatches as
+  `stale`. Content-addressed ids are cut.
+- V4 Guarded replacement for every outside-review Restore (chunk and file):
+  rename the current file to a hidden holding path (atomic), verify the held
+  bytes hash to the expected disk hash; on mismatch rename it back and return
+  `stale`; on match write the new content to a temp file in the same folder and
+  rename it into place, then delete the held file. Replaces the
+  read-then-truncate write (`writeNoFollow`) for restores.
+- V5 Conflict mode: no Keep action (file, chunk, Keep all, last chunk) may load
+  disk over a dirty buffer. After any review action, resume autosave only if
+  disk still equals the buffer's `savedText` hash; otherwise stay in conflict.
+- V6 Labels: outside edits use **Keep / Restore** (chunk) and **Keep all /
+  Restore all** (file toolbar and tree strip); outside-created files **Keep
+  file / Move to Trash**; outside deletions **Confirm deletion / Restore file**;
+  tighten stays **Accept / Reject** (singular labels). Drop `rejectRemaining`.
+- V7 Keyboard: Esc and Tab never act on outside chunks (no disk write by
+  accident); after Keep/Restore focus moves to the next chunk's Keep button.
+  Tighten keeps Tab/Esc.
+- V8 Whitespace-only chunks stay separate in v1 (backlog: merge with neighbour).
+
+Companion files (Stage D)
+
+- V9 One pure `isCompanionPath(relPath)` by name shape only
+  (`*.notes.md`, `*.comments.md`; the companion of any Markdown document
+  extension is `stem.notes.md` / `stem.comments.md`), never by sibling
+  existence. Applied in `classify` (null), `scanDirectory`, before every
+  baseline `set`/move/reconcile record, and as an early return in
+  `noteDiskChange`. Companions never enter outside review and never lock.
+- V10 Main annotates `FileTreeNode` with `companion: {kind, documentPath}` when
+  the sibling document exists (no mirrored renderer helpers). Orphans are
+  ordinary rows (no marker, no reattach UI).
+- V11 Tree: companion child rows appear only under the active document and
+  when search reveals them; labels "Notes" and "Comments · N". Companion
+  context menu: Open, Reveal in Finder, Move to Trash.
+- V12 No companions of companions: comments and "Open notes" are disabled when
+  the active file is a companion; creating/renaming documents to
+  companion-shaped names is rejected.
+- V13 File ops: preflight every target path of the group (document +
+  companions); duplicate picks a stem free for the whole group; companion
+  moves use hard-link-then-remove-source (no silent overwrite); all group paths
+  go into `runIliadMutation.paths`; trash the document first, then companions,
+  reporting failures (no rollback for trash).
+- V14 Comments file format: entries separated by a blank line, `---`, blank
+  line. Each entry: a metadata line `<!-- iliad:comment id=<id> -->`
+  (plus `occurrence=N prefix="…"` only when the quote is not unique), the
+  quoted passage as a blockquote (multi-line allowed), then the comment text.
+  Comment lines that equal `---` or start with `>` are escaped (`\---`, `\>`);
+  unknown text between entries is preserved as comment text. Round-trip tests
+  cover separators, `>` lines, multi-line quotes, duplicates.
+- V15 Re-anchoring: a duplicate quote anchors only if its stored prefix still
+  matches that occurrence; otherwise the comment is detached (never guesses).
+- V16 File-backed comments hook: positions are kept in memory; the file is
+  written only when the serialized entries differ from the last disk text
+  (not on every position change). Merge on `disk_changed` is three-way by id
+  (last-read disk, local, fresh disk): an outside deletion wins unless the
+  comment text was edited locally. `flushPersist` returns a promise chained into
+  `flushSave`; a read of a path waits for that path's pending write.
+- V17 Comments removed outside during this session are remembered per document;
+  if the writer restores the outside edit of that document (chunk or file),
+  those comments whose quote is found again are re-added automatically.
+- V18 Detached comments: "N detached comments" in the existing editor toolbar
+  slot, hidden while that document has a pending outside review; list with
+  Delete only.
+- V19 Migration of legacy comments is per workspace on attach: move that
+  workspace's entries (skip documents that no longer exist), rewrite the JSON
+  without them, delete the JSON when empty. The reader remains for migration.
+- V20 Notes: the whole file is guidance (no template, no heading parsing);
+  "Open notes" creates an empty `stem.notes.md` and opens it (Back returns).
+  Autocomplete ranks lines with `selectWritingGuidance` over the whole text.
+- V21 `file:remove-companion` reuses `removeMarkdownIfUnchanged`, limited to
+  companion paths.
+
+Gemini (Stage C)
+
+- V22 Share request/response handling with autocomplete but keep the SSE
+  streaming path, cancellation and `STOP` rules; tighten maps MAX_TOKENS and
+  SAFETY to explicit failures with neutral wording.
+- V23 Writing assists: with no key, the Gemini key field is the first row; with
+  a key, a quiet bottom row "Gemini key ••••1234 · Change". No "Using Gemini"
+  note. ✦ AI without a key is shown disabled; clicking opens Writing assists
+  at the key field. Leftover copy ("Check assistant settings", Codex, API
+  fallback) removed.
+
+CLI (Stage E)
+
+- V24 Launcher chosen by where the script lives: inside an app bundle → that
+  app; inside a checkout with `node_modules/.bin/electron` → the checkout;
+  `ILIAD_APP` overrides. The packaged wrapper runs the script with
+  `ELECTRON_RUN_AS_NODE=1` and the spawned GUI app gets an env **without**
+  `ELECTRON_RUN_AS_NODE`.
+- V25 `open`: `realpath` the file; target window = open window whose canonical
+  workspace contains it (longest root), else a new window for the file's own
+  directory (no git-root). Cold start: launch the app with that folder (never
+  the file or a subcommand as argv), then retry the socket. The open request is
+  queued in the window manager and pulled by the renderer once the workspace is
+  loaded (same pattern as `getLaunchWorkspace`); the socket replies only after
+  the renderer acknowledges the document opened and the line was revealed, and
+  returns its failure otherwise.
+- V26 Socket: `chmod 0600` right after `listen`.
+- V27 Output: `status` one line per window (`~/dev/book  chapters/03.md
+  (focused)` or `no document open`); not running → `Iliad is not open.` exit 3;
+  `open` silent on success; `skill install` → `Installed skill: <path>`. Menu
+  "Install ‘iliad’ Command…" shows where it installed and warns if that folder
+  is not on PATH.
+- V28 Skill description: "Use when editing Markdown in a folder open in the
+  Iliad app, or when the user refers to 'this document', 'my comments' or 'my
+  notes'." Rules: run `iliad status` first; read `stem.notes.md` before
+  writing; address `stem.comments.md` entries and delete only handled ones
+  (keep the metadata line with its entry); minimal edits (no reflow or
+  whitespace churn — each chunk becomes a review item); finish with `iliad open
+  <file> --line N`; never create or rename companions; Markdown only.
+
+Rejected or deferred
+
+- Attribution ("changed by …"), per-chunk review of creates/deletes, baseline
+  persistence across restarts: deferred (non-goals).
+- Orphan marker and "reattach" UI, "reattach to selection" for detached
+  comments, heading-parsed notes, notes template: cut.
+
 ## Acceptance criteria
 
 1. No chat panel, no Codex/OpenAI settings, no dictation, no Telegram anywhere
@@ -348,8 +485,8 @@ pages for removed features) and deploy with `deploy.sh`; verify live.
 
 ## Implementation plan (stages and order)
 
-1. A (removal + slim services + review IPC rename) — foundation; everything
-   else builds on it. Verify: typecheck/test/build, outside review still works
+1. A (removal + slim services + review IPC move, comments store kept) —
+   foundation; everything else builds on it. Verify: typecheck/test/build, outside review still works
    in the app.
 2. C (Gemini tighten + key UI) — small, depends on A.
 3. B (per-chunk) and E (CLI + skill) in parallel (different areas; E touches
@@ -390,8 +527,8 @@ integrated by the main agent, committed on the branch with tests green.
 
 ## State (resumable)
 
-- [ ] v1 spec written
-- [ ] Review panel (UI/UX, architecture, Codex) → v2
+- [x] v1 spec written
+- [x] Review panel (UI/UX, architecture, Codex) → v2
 - [ ] Codex go/no-go on v2
 - [ ] A removal
 - [ ] C Gemini tighten + key UI
@@ -431,3 +568,14 @@ Docs wholly about the removed agent: `docs/agent-panel-v1-architecture.md`,
 
 - v1: written from four code maps (removal, per-chunk review, companions/file
   ops, CLI/launch).
+- v2: UI/UX review (labels, keyboard safety, comments serializer, tree
+  companions only under the active document, notes without template, key
+  placement, skill wording, CLI output); architecture review (companion
+  exclusion across all baseline paths, ELECTRON_RUN_AS_NODE leak, store
+  sequencing and per-workspace migration, comment write churn and 3-way merge,
+  comments lost on restore, open queueing/ack, no git-root, companions of
+  companions, launcher by script location, group preflight); Codex NO-GO
+  (conflict-buffer overwrite on Keep, restore truncate race, exclusion
+  coverage, migration sequencing, anchor guessing, merge identity, open ack,
+  streaming preserved; cuts: content-addressed ids, channel rename, mirrored
+  helpers). All adopted as V1–V28 except the listed cuts.
