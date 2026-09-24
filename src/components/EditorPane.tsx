@@ -10,8 +10,8 @@ import { reviewHunksForDisplay, type DisplayReviewHunk } from "../editor/aiRevie
 import type { EditorReviewState } from "../editor/aiReview/types";
 import { CodeMirrorHost } from "../editor/CodeMirrorHost";
 import { imageDropPasteExtension } from "../editor/imageDropPaste";
-import { ideaAutocompleteExtension, runAutocompleteAction, type IdeaAutocompleteStatus } from "../editor/ideaAutocomplete/extension";
-import type { AutocompletePreferences, WritingGuidance } from "../editor/ideaAutocomplete/options";
+import { ideaAutocompleteExtension, ideaAutocompleteManualKey, runAutocompleteAction, type IdeaAutocompleteStatus, type IdeaAutocompleteSuggestionKind } from "../editor/ideaAutocomplete/extension";
+import { shortcutLabel, type AutocompletePreferences, type WritingGuidance } from "../editor/ideaAutocomplete/options";
 import { Check, ChevronLeft, ChevronRight, RotateCw, X } from "lucide-react";
 import {
   selectionCommentsExtension,
@@ -92,6 +92,7 @@ export interface EditorWritingAssistsProps {
     };
     autocomplete: {
       accept: string; another: string; previous: string; next: string; dismiss: string; suggestion: string;
+      longer: string; steer: string; steerLabel: string; steerPlaceholder: string;
       working: string;
       noProvider: string;
       invalidApiKey: string;
@@ -302,6 +303,10 @@ export function EditorPane({
   } | null>(null);
   const [autocompleteStatus, setAutocompleteStatus] = useState<IdeaAutocompleteStatus>({ state: "idle" });
   const [autocompleteStatusAnchor, setAutocompleteStatusAnchor] = useState<{ left: number; top: number } | null>(null);
+  // Steering moves focus out of the editor (which clears the ghost), so the field
+  // keeps its own anchor and the length to regenerate.
+  const [autocompleteSteer, setAutocompleteSteer] = useState<{ kind: IdeaAutocompleteSuggestionKind; left: number; top: number } | null>(null);
+  const [autocompleteSteerDraft, setAutocompleteSteerDraft] = useState("");
   const [writingIssues, setWritingIssues] = useState<WritingIssue[]>([]);
   const [ignoredWritingIssueKeys, setIgnoredWritingIssueKeys] = useState<Set<string>>(() => new Set());
   const [customCorrectorWords, setCustomCorrectorWords] = useState<Set<string>>(() => new Set());
@@ -344,6 +349,11 @@ export function EditorPane({
     (view: EditorView) => overlayApiRef.current?.handleTightenShortcut(view) ?? false,
     []
   );
+  const handleOverlayAiMenuShortcut = useCallback(
+    (view: EditorView) => overlayApiRef.current?.handleAiMenuShortcut(view) ?? false,
+    []
+  );
+  const aiKey = writingAssists?.preferences?.shortcuts.continue ?? ideaAutocompleteManualKey;
   const handleRejectTightenReview = useCallback(() => {
     setTightenReview(null);
     setProvisionalTightenRange(null);
@@ -374,6 +384,11 @@ export function EditorPane({
     });
     editorView.focus();
   }, [editorView, file?.path, tightenReview]);
+  const handleAcceptReviewShortcut = useCallback(() => {
+    if (!tightenReview) return false;
+    handleAcceptTightenReview();
+    return true;
+  }, [handleAcceptTightenReview, tightenReview]);
 
   const activeSelectionCallbackRef = useRef(onActiveSelectionChange);
   const lastReportedSelectionRef = useRef<{ from: number; to: number } | null>(null);
@@ -852,6 +867,9 @@ export function EditorPane({
             onEditorUpdate: handleOverlayEditorUpdate,
             onCommentShortcut: handleOverlayShortcut,
             onTightenShortcut: handleOverlayTightenShortcut,
+            aiMenuKey: aiKey,
+            onAiMenuShortcut: handleOverlayAiMenuShortcut,
+            onAcceptReviewShortcut: handleAcceptReviewShortcut,
             onEscape: handleOverlayEscape
           })
         );
@@ -944,6 +962,9 @@ export function EditorPane({
       handleOverlayMouseUp,
       handleOverlayShortcut,
       handleOverlayTightenShortcut,
+      handleOverlayAiMenuShortcut,
+      handleAcceptReviewShortcut,
+      aiKey,
       handleRejectTightenReview,
       handleAutocompleteStatusChange,
       ignoredWritingIssueKeys,
@@ -1111,6 +1132,7 @@ export function EditorPane({
                     minChars: tighten.minChars,
                     maxChars: tighten.maxChars,
                     labels: tighten.labels,
+                    aiKeyLabel: shortcutLabel(aiKey),
                     run: tighten.run,
                     cancel: tighten.cancel,
                     filePath: file.path,
@@ -1175,21 +1197,61 @@ export function EditorPane({
             </div>
           </div>
         ) : null}
-        {autocompleteStatus.state === "shown" && writingAssists && autocompleteStatusAnchor ? (
+        {autocompleteStatus.state === "shown" && writingAssists && autocompleteStatusAnchor && !autocompleteSteer ? (
           <div className="editor-autocomplete-toolbar" role="group" aria-label={writingAssists.labels.autocomplete.suggestion}
             style={{ left: autocompleteStatusAnchor.left, top: autocompleteStatusAnchor.top }}
             onMouseDown={(event) => event.preventDefault()}>
-            {([
-              ["accept", writingAssists.labels.autocomplete.accept, <Check size={13} />],
-              ["new", writingAssists.labels.autocomplete.another, <RotateCw size={13} />]
-            ] as const).map(([action, label, icon]) => <button type="button" key={action} onClick={() => editorView && runAutocompleteAction(editorView, action)}>{icon}{label}{action === "accept" ? <kbd>Tab</kbd> : null}</button>)}
+            <button type="button" onClick={() => editorView && runAutocompleteAction(editorView, "accept")}>
+              <Check size={13} />{writingAssists.labels.autocomplete.accept}<kbd>Tab</kbd>
+            </button>
+            {autocompleteStatus.kind !== "idea" ? (
+              <button type="button" onClick={() => editorView && runAutocompleteAction(editorView, "longer")}>
+                {writingAssists.labels.autocomplete.longer}
+                <kbd>{shortcutLabel(writingAssists.preferences?.shortcuts[autocompleteStatus.kind === "paragraph" ? "idea" : autocompleteStatus.kind === "sentence" ? "paragraph" : "sentence"] ?? aiKey)}</kbd>
+              </button>
+            ) : null}
+            <button type="button" onClick={() => editorView && runAutocompleteAction(editorView, "new")}>
+              <RotateCw size={13} />{writingAssists.labels.autocomplete.another}
+            </button>
             {(autocompleteStatus.alternativeCount ?? 0) > 1 ? <>
               <button type="button" aria-label={writingAssists.labels.autocomplete.previous} onClick={() => editorView && runAutocompleteAction(editorView, "previous")}><ChevronLeft size={13} /></button>
               <span>{(autocompleteStatus.alternativeIndex ?? 0) + 1}/{autocompleteStatus.alternativeCount}</span>
               <button type="button" aria-label={writingAssists.labels.autocomplete.next} onClick={() => editorView && runAutocompleteAction(editorView, "next")}><ChevronRight size={13} /></button>
             </> : null}
+            <button type="button" onClick={() => {
+              setAutocompleteSteerDraft("");
+              setAutocompleteSteer({ kind: autocompleteStatus.kind ?? "sentence", ...autocompleteStatusAnchor });
+            }}>{writingAssists.labels.autocomplete.steer}</button>
             <button type="button" aria-label={writingAssists.labels.autocomplete.dismiss} onClick={() => editorView && runAutocompleteAction(editorView, "dismiss")}><X size={13} /></button>
           </div>
+        ) : null}
+        {autocompleteSteer && writingAssists ? (
+          <form className="editor-autocomplete-toolbar editor-autocomplete-steer"
+            style={{ left: autocompleteSteer.left, top: autocompleteSteer.top }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              const direction = autocompleteSteerDraft.trim();
+              const kind = autocompleteSteer.kind;
+              setAutocompleteSteer(null);
+              if (!editorView) return;
+              editorView.focus();
+              if (direction) runAutocompleteAction(editorView, { kind, direction });
+            }}>
+            <input autoFocus value={autocompleteSteerDraft} maxLength={240}
+              aria-label={writingAssists.labels.autocomplete.steerLabel}
+              placeholder={writingAssists.labels.autocomplete.steerPlaceholder}
+              onChange={(event) => setAutocompleteSteerDraft(event.target.value)}
+              onBlur={() => setAutocompleteSteer(null)}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setAutocompleteSteer(null);
+                  editorView?.focus();
+                }
+              }} />
+            <kbd>↵</kbd>
+          </form>
         ) : null}
         <span className="autocomplete-announcement" role="status" aria-live="polite" aria-atomic="true">
           {writingAssists?.preferences?.announce && autocompleteStatus.state === "shown" && !autocompleteStatus.streaming

@@ -20,6 +20,37 @@ describe("agent autocomplete helpers", () => {
     expect(autocompleteMaxOutputTokens()).toBe(48);
     expect(autocompleteMaxOutputTokens("paragraph")).toBe(180);
     expect(autocompleteMaxOutputTokens("sentence")).toBe(80);
+    expect(autocompleteMaxOutputTokens("idea")).toBe(700);
+  });
+
+  it("asks a full idea to finish the section without headings, and extensions to continue the draft", () => {
+    const idea = autocompleteInstructions("en", "idea");
+    expect(idea).toContain("until the current idea is complete");
+    expect(idea).toContain("Never write headings");
+    expect(idea).not.toContain("unaccepted");
+    expect(autocompleteInstructions("es", "idea", true)).toContain("borrador que el autor aún no acepta");
+    expect(autocompleteInstructions("en", "paragraph", true)).toContain("Do not start a new paragraph");
+    expect(autocompleteInstructions("en", "paragraph")).toContain("start the next paragraph");
+  });
+
+  it("keeps a multi-paragraph idea, but rejects headings and code fences", () => {
+    const prefix = "Al terminar, cada pareja comparte una frase.";
+    expect(cleanAutocompleteOutput("Luego conversan.\n\n- Duración: 20 minutos.\n- Variación: tríos.", { prefix, suffix: "", suggestionKind: "idea" }))
+      .toBe("\n\nLuego conversan.\n\n- Duración: 20 minutos.\n- Variación: tríos.");
+    expect(cleanAutocompleteOutput("Luego conversan.\n\n## Cierre\nFin.", { prefix, suffix: "", suggestionKind: "idea" })).toBe("");
+    expect(cleanAutocompleteOutput("Luego:\n```\ncode\n```", { prefix, suffix: "", suggestionKind: "idea" })).toBe("");
+    expect(cleanAutocompleteOutput("x".repeat(2401), { prefix, suffix: "", suggestionKind: "idea" })).toBe("");
+  });
+
+  it("continues an extended draft inline unless the model starts a new block", () => {
+    const prefix = "She walked into the quiet room";
+    expect(cleanAutocompleteOutput("with the lamps off.", { prefix, suffix: "", suggestionKind: "paragraph", extend: true }))
+      .toBe(" with the lamps off.");
+    expect(cleanAutocompleteOutput("First.\n\nSecond.", { prefix, suffix: "", suggestionKind: "paragraph", extend: true })).toBe("");
+    expect(cleanAutocompleteOutput("and waited.\n\nLater, she left.", { prefix, suffix: "", suggestionKind: "idea", extend: true }))
+      .toBe(" and waited.\n\nLater, she left.");
+    expect(cleanAutocompleteOutput("\n\nLater, she left.", { prefix: `${prefix}.`, suffix: "", suggestionKind: "idea", extend: true }))
+      .toBe("\n\nLater, she left.");
   });
 
   it("builds bounded fill-in-the-middle input without chat framing", () => {

@@ -66,7 +66,6 @@ import {
 } from "./preferences/sidebarPreferences";
 import { useWritingAssistPreferences } from "./preferences/writingAssistPreferences";
 import { useAutocompletePreferences } from "./preferences/autocompletePreferences";
-import { runAutocompleteAction } from "./editor/ideaAutocomplete/extension";
 import type { EditorView } from "@codemirror/view";
 import type {
   AgentChangeProposal,
@@ -1735,11 +1734,6 @@ export default function App() {
               snoozed={autocompleteOptions.snoozedUntil > Date.now()}
               onToggleSnooze={autocompleteOptions.toggleSnooze}
               onResetShortcuts={autocompleteOptions.resetShortcuts}
-              onAutocompleteAction={(action) => {
-                setWritingAssistsOpen(false);
-                const view = editorViewRef.current;
-                if (view) { view.focus(); runAutocompleteAction(view, action); }
-              }}
               labels={strings.writingAssists}
               menuRef={writingAssistsMenuRef}
               open={writingAssistsOpen}

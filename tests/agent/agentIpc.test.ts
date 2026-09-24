@@ -317,7 +317,7 @@ describe("agent IPC trust validation", () => {
         expect(request.direction.length).toBe(240);
         expect(request.guidance.length).toBe(1800);
         expect(request.avoid).toHaveLength(3);
-        expect(request.avoid.every((text: string) => text.length <= 700)).toBe(true);
+        expect(request.avoid.every((text: string) => text.length <= 2400)).toBe(true);
         request.onPartial(" next useful words ");
         controllers.get("19:stream-test")!.abort();
         request.onPartial(" late words must not appear ");
@@ -329,7 +329,7 @@ describe("agent IPC trust validation", () => {
       senderFrame: { url: "file:///Applications/Iliad.app/index.html" } } as never, {
       requestId: "stream-test", workspaceSessionId: "session", documentRelativePath: "draft.md",
       prefix: "This paragraph has enough context", suffix: "", language: "en", suggestionKind: "sentence",
-      direction: "x".repeat(1000), guidance: "y".repeat(5000), avoid: Array(5).fill("z".repeat(1000))
+      direction: "x".repeat(1000), guidance: "y".repeat(5000), avoid: Array(5).fill("z".repeat(3000))
     }, { service, controllers, resolveWorkspaceRootForSession: () => workspaceRoot });
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith("autocomplete:partial", { requestId: "stream-test", insert: " next useful words " });

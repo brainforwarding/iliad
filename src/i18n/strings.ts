@@ -141,14 +141,12 @@ export const appStrings = {
       autocompleteCodex: "Using Codex",
       autocompleteApi: "Using OpenAI API",
       autocompleteGemini: "Using Gemini 3.8 Flash",
-      timing: "Suggestion timing", automatic: "Automatic", onDemand: "On demand",
-      phrase: "Phrase", sentence: "Sentence", paragraph: "Paragraph",
-      example: "Example", transition: "Transition", tension: "Tension",
-      directions: { example: "Continue with a concrete example that supports the current idea.", transition: "Bridge naturally from the current idea to the next.", tension: "Build tension in the current scene without introducing new characters." },
-      direction: "Continue with…", suggest: "Suggest", snooze: "Pause for 10 min", resume: "Resume suggestions",
+      suggestWhileTyping: "Suggest while I type", suggestWhileTypingOff: (key: string) => `Off: only when you press ${key}`,
+      snooze: "Pause for 10 min", resume: "Resume suggestions",
       writingNotes: "Writing notes", useNotes: "Use for this document", voice: "Voice & audience", facts: "Facts, characters, things to remember…",
-      shortcuts: "Shortcuts & accessibility", accept: "Accept", word: "One word", alternatives: "Alternatives", reset: "Reset shortcuts", announce: "Announce suggestions",
-      autocompleteShortcuts: "Ctrl+Space: phrase · Cmd/Ctrl+Enter: sentence · Cmd/Ctrl+Shift+Enter: paragraph · Tab: accept · Option/Alt+→: accept one word · Esc: dismiss. Repeat a length shortcut for another suggestion.",
+      shortcuts: "Shortcuts & accessibility", continueKey: "AI key", sentenceKey: "Sentence", paragraphKey: "Paragraph", ideaKey: "Full idea",
+      continueKeyHint: "Sentence, Paragraph and Full idea ask for that length at once. The AI key suggests a sentence (press again for longer); with text selected it opens the AI menu.",
+      accept: "Accept", alternatives: "Another", dismiss: "Dismiss", reset: "Reset shortcuts", announce: "Announce suggestions",
       autocompleteEnableApiFallback: "Enable API fallback or connect Codex",
       autocompleteUnavailable: "Connect Codex or add an API key"
     },
@@ -180,12 +178,12 @@ export const appStrings = {
         delete: "Delete"
       },
       tighten: {
-        action: "Tighten",
-        working: "Tightening…",
-        alreadyTight: "Already tight",
-        failed: "Couldn't tighten — try again",
-        noKey: "Connect Codex or add an OpenAI API key in the assistant to tighten",
-        tooLong: "Selection too long to tighten",
+        action: "Shorten",
+        working: "Shortening…",
+        alreadyTight: "Already concise",
+        failed: "Couldn't shorten — try again",
+        noKey: "Connect Codex or add an OpenAI API key in the assistant to shorten",
+        tooLong: "Selection too long to shorten",
         editAction: "Edit",
         editComposerLabel: "Edit selected text",
         editComposerPlaceholder: "Describe the change…",
@@ -193,7 +191,17 @@ export const appStrings = {
         editUnchanged: "No changes",
         editFailed: "Couldn't edit — try again",
         editNoKey: "Connect Codex or add an OpenAI API key in the assistant to edit",
-        editTooLong: "Selection or instruction too long to edit"
+        editTooLong: "Selection or instruction too long to edit",
+        aiAction: "AI",
+        aiMenuLabel: "AI actions for the selection",
+        aiMenuPlaceholder: "Tell the AI what to do…",
+        presets: { rewrite: "Rewrite", expand: "Expand", shorten: "Shorten", summarize: "Summarize", list: "Turn into a list" },
+        presetInstructions: {
+          rewrite: "Rewrite this so it reads more clearly and naturally, keeping the same meaning.",
+          expand: "Expand this with more detail and development, keeping the same point and voice.",
+          summarize: "Summarize this in fewer words, keeping only the key points.",
+          list: "Turn this into a Markdown bulleted list, one idea per item."
+        }
       },
       writingCorrector: {
         apply: "Apply",
@@ -205,7 +213,7 @@ export const appStrings = {
         openActions: "Open correction actions"
       },
       ideaAutocomplete: {
-        accept: "Accept", another: "Another", previous: "Previous suggestion", next: "Next suggestion", dismiss: "Dismiss", suggestion: "Suggestion",
+        accept: "Accept", another: "Another", longer: "Longer", steer: "Steer…", steerLabel: "Direction for this suggestion", steerPlaceholder: "e.g. give an example", previous: "Previous suggestion", next: "Next suggestion", dismiss: "Dismiss", suggestion: "Suggestion",
         working: "Suggesting…",
         noProvider: "Add a Gemini API key in assistant settings, connect Codex, or enable API fallback.",
         invalidApiKey: "The autocomplete API key was rejected. Check assistant settings.",
@@ -706,14 +714,12 @@ export const appStrings = {
       autocompleteCodex: "Usando Codex",
       autocompleteApi: "Usando la API de OpenAI",
       autocompleteGemini: "Usando Gemini 3.8 Flash",
-      timing: "Cuándo sugerir", automatic: "Automático", onDemand: "A pedido",
-      phrase: "Frase", sentence: "Oración", paragraph: "Párrafo",
-      example: "Ejemplo", transition: "Transición", tension: "Tensión",
-      directions: { example: "Continúa con un ejemplo concreto que apoye la idea actual.", transition: "Conecta de forma natural la idea actual con la siguiente.", tension: "Aumenta la tensión de la escena actual sin introducir personajes nuevos." },
-      direction: "Continuar con…", suggest: "Sugerir", snooze: "Pausar 10 min", resume: "Reanudar sugerencias",
+      suggestWhileTyping: "Sugerir mientras escribo", suggestWhileTypingOff: (key: string) => `Desactivado: solo al presionar ${key}`,
+      snooze: "Pausar 10 min", resume: "Reanudar sugerencias",
       writingNotes: "Notas de escritura", useNotes: "Usar para este documento", voice: "Voz y audiencia", facts: "Hechos, personajes, cosas que recordar…",
-      shortcuts: "Atajos y accesibilidad", accept: "Aceptar", word: "Una palabra", alternatives: "Alternativas", reset: "Restablecer atajos", announce: "Anunciar sugerencias",
-      autocompleteShortcuts: "Ctrl+Espacio: frase breve · Cmd/Ctrl+Enter: oración · Cmd/Ctrl+Shift+Enter: párrafo · Tab: aceptar · Option/Alt+→: aceptar una palabra · Esc: descartar. Repite un atajo de longitud para otra sugerencia.",
+      shortcuts: "Atajos y accesibilidad", continueKey: "Tecla de IA", sentenceKey: "Oración", paragraphKey: "Párrafo", ideaKey: "Idea completa",
+      continueKeyHint: "Oración, Párrafo e Idea completa piden ese largo de una vez. La tecla de IA sugiere una oración (presiona de nuevo para alargar); con texto seleccionado abre el menú de IA.",
+      accept: "Aceptar", alternatives: "Otra", dismiss: "Descartar", reset: "Restablecer atajos", announce: "Anunciar sugerencias",
       autocompleteEnableApiFallback: "Activa el respaldo API o conecta Codex",
       autocompleteUnavailable: "Conecta Codex o agrega una clave API"
     },
@@ -745,12 +751,12 @@ export const appStrings = {
         delete: "Eliminar"
       },
       tighten: {
-        action: "Ajustar",
-        working: "Ajustando…",
+        action: "Acortar",
+        working: "Acortando…",
         alreadyTight: "Ya está conciso",
-        failed: "No se pudo ajustar; inténtalo de nuevo",
-        noKey: "Conecta Codex o añade una clave de OpenAI en el asistente para ajustar",
-        tooLong: "Selección demasiado larga para ajustar",
+        failed: "No se pudo acortar; inténtalo de nuevo",
+        noKey: "Conecta Codex o añade una clave de OpenAI en el asistente para acortar",
+        tooLong: "Selección demasiado larga para acortar",
         editAction: "Editar",
         editComposerLabel: "Editar la selección",
         editComposerPlaceholder: "Describe el cambio…",
@@ -758,7 +764,17 @@ export const appStrings = {
         editUnchanged: "Sin cambios",
         editFailed: "No se pudo editar; inténtalo de nuevo",
         editNoKey: "Conecta Codex o añade una clave de OpenAI en el asistente para editar",
-        editTooLong: "Selección o instrucción demasiado larga para editar"
+        editTooLong: "Selección o instrucción demasiado larga para editar",
+        aiAction: "IA",
+        aiMenuLabel: "Acciones de IA para la selección",
+        aiMenuPlaceholder: "Dile a la IA qué hacer…",
+        presets: { rewrite: "Reescribir", expand: "Ampliar", shorten: "Acortar", summarize: "Resumir", list: "Convertir en lista" },
+        presetInstructions: {
+          rewrite: "Reescribe esto para que se lea de forma más clara y natural, con el mismo significado.",
+          expand: "Amplía esto con más detalle y desarrollo, manteniendo la misma idea y voz.",
+          summarize: "Resume esto en menos palabras, conservando solo los puntos clave.",
+          list: "Convierte esto en una lista Markdown con viñetas, una idea por elemento."
+        }
       },
       writingCorrector: {
         apply: "Aplicar",
@@ -770,7 +786,7 @@ export const appStrings = {
         openActions: "Abrir acciones de corrección"
       },
       ideaAutocomplete: {
-        accept: "Aceptar", another: "Otra", previous: "Sugerencia anterior", next: "Siguiente sugerencia", dismiss: "Descartar", suggestion: "Sugerencia",
+        accept: "Aceptar", another: "Otra", longer: "Más largo", steer: "Guiar…", steerLabel: "Dirección para esta sugerencia", steerPlaceholder: "p. ej. da un ejemplo", previous: "Sugerencia anterior", next: "Siguiente sugerencia", dismiss: "Descartar", suggestion: "Sugerencia",
         working: "Sugiriendo…",
         noProvider: "Agrega una clave Gemini en ajustes del asistente, conecta Codex o activa el respaldo API.",
         invalidApiKey: "La clave API de autocompletar fue rechazada. Revisa los ajustes del asistente.",

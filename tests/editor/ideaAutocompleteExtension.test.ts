@@ -1,15 +1,14 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   applySharedAutocompleteCooldown,
-  autocompleteWordPrefix,
   consumeAutocompleteSuggestion,
   autocompleteSuggestionKindForTrigger,
   autocompleteCooldownMsForFailure,
-  ideaAutocompleteFallbackManualKey,
   hasMeaningfulAutocompleteEdit,
   ideaAutocompleteDebounceMs,
   ideaAutocompleteManualKey,
   isAutocompleteParagraphBoundary,
+  nextAutocompleteKind,
   resetSharedAutocompleteCooldownForTests,
   sharedAutocompleteCooldownActive
 } from "../../src/editor/ideaAutocomplete/extension";
@@ -23,10 +22,11 @@ describe("idea autocomplete extension helpers", () => {
     expect(ideaAutocompleteDebounceMs).toBe(450);
   });
 
-  it("accepts one word with its spacing, including paragraph breaks and accented prose", () => {
-    expect(autocompleteWordPrefix("\n\nDespués, siguió escribiendo.")).toBe("\n\nDespués, ");
-    expect(autocompleteWordPrefix(" a quiet room.")).toBe(" a ");
-    expect(autocompleteWordPrefix("fin.")).toBe("fin.");
+  it("grows a visible suggestion one length per press and stops at the full idea", () => {
+    expect(nextAutocompleteKind("inline")).toBe("sentence");
+    expect(nextAutocompleteKind("sentence")).toBe("paragraph");
+    expect(nextAutocompleteKind("paragraph")).toBe("idea");
+    expect(nextAutocompleteKind("idea")).toBeNull();
   });
 
   it("keeps the ghost remainder only for matching typing at the same cursor", () => {
@@ -55,7 +55,6 @@ describe("idea autocomplete extension helpers", () => {
 
   it("uses a manual trigger shortcut separate from Tab acceptance", () => {
     expect(ideaAutocompleteManualKey).toBe("Mod-Enter");
-    expect(ideaAutocompleteFallbackManualKey).toBe("Ctrl-Space");
   });
 
   it("treats typing, paste, and drop as autocomplete intent", () => {

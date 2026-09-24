@@ -75,12 +75,12 @@ export async function generateGeminiAutocomplete(
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       signal: request.signal,
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: autocompleteInstructions(request.language, request.suggestionKind) }] },
+        systemInstruction: { parts: [{ text: autocompleteInstructions(request.language, request.suggestionKind, request.extend) }] },
         contents: [{ role: "user", parts: [{ text: autocompleteModelInput(request) }] }],
         generationConfig: {
           // Gemini counts thinking in the output budget. Prose length is bounded
           // by the prompt and the shared output cleaner, not this token budget.
-          maxOutputTokens: request.suggestionKind === "paragraph" ? 2048 : 1024,
+          maxOutputTokens: request.suggestionKind === "idea" ? 4096 : request.suggestionKind === "paragraph" ? 2048 : 1024,
           thinkingConfig: { thinkingLevel: "low", includeThoughts: false },
           candidateCount: 1
         }

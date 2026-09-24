@@ -483,7 +483,7 @@ export class AgentService {
         this.logProviderSelected(logRequest, model, provider.metadata);
         const result = await provider.generateText({
           request: {
-            instructions: autocompleteInstructions(request.language, request.suggestionKind),
+            instructions: autocompleteInstructions(request.language, request.suggestionKind, request.extend),
             input: autocompleteModelInput(request),
             maxOutputTokens: autocompleteMaxOutputTokens(request.suggestionKind),
             language: request.language,

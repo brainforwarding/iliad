@@ -28,8 +28,10 @@ function harness(request = vi.fn<() => Promise<IdeaAutocompleteResult>>().mockRe
   const plugin = (extensions[0] as unknown as { create(view: EditorView): {
     suggestion: { insert: string } | null;
     update(update: ViewUpdate): void;
-    triggerManual(kind?: "inline" | "sentence" | "paragraph"): boolean;
-    accept(word?: boolean): boolean;
+    triggerManual(kind?: "inline" | "sentence" | "paragraph" | "idea"): boolean;
+    continueKey(): boolean;
+    lengthKey(kind: "sentence" | "paragraph" | "idea"): boolean;
+    accept(): boolean;
     dismiss(): boolean;
     destroy(): void;
     setComposing(composing: boolean): void;
@@ -61,14 +63,14 @@ describe("autocomplete lifecycle", () => {
     const requestId = (request.mock.calls[0] as unknown as [{ requestId: string }])[0].requestId;
     emit({ requestId, insert: "quiet room with " });
     expect(plugin.suggestion?.insert).toBe("quiet room with ");
-    plugin.accept(true);
-    expect(view.state.doc.toString()).toBe("She walked into the quiet ");
-    expect(plugin.suggestion?.insert).toBe("room with ");
+    plugin.accept();
+    expect(view.state.doc.toString()).toBe("She walked into the quiet room with ");
+    expect(plugin.suggestion).toBeNull();
     expect(cancel).toHaveBeenCalledTimes(1);
     emit({ requestId, insert: "quiet room with a view." });
     resolve({ ok: true, insert: "quiet room with a view." });
     await vi.advanceTimersByTimeAsync(0);
-    expect(plugin.suggestion?.insert).toBe("room with ");
+    expect(plugin.suggestion).toBeNull();
     plugin.destroy();
     expect(unsubscribe).toHaveBeenCalledOnce();
   });
@@ -120,18 +122,136 @@ describe("autocomplete lifecycle", () => {
     expect(request).toHaveBeenCalledTimes(1);
     plugin.destroy();
   });
-  it("accepts a word, retains the rest, and undoes acceptance separately", async () => {
+  it("accepts everything shown in one step and undoes acceptance separately", async () => {
     const { view, plugin, request } = harness();
     plugin.triggerManual();
     await vi.advanceTimersByTimeAsync(0);
-    expect(plugin.accept(true)).toBe(true);
-    expect(view.state.doc.toString()).toBe("She walked into the quiet ");
-    expect(plugin.suggestion?.insert).toBe("room.");
     expect(plugin.accept()).toBe(true);
     expect(view.state.doc.toString()).toBe("She walked into the quiet room.");
+    expect(plugin.suggestion).toBeNull();
     undo(view as unknown as EditorView);
-    expect(view.state.doc.toString()).toBe("She walked into the quiet ");
+    expect(view.state.doc.toString()).toBe("She walked into the ");
     expect(request).toHaveBeenCalledTimes(1);
+    plugin.destroy();
+  });
+
+  it("grows one suggestion with the AI key: sentence, then paragraph, then idea", async () => {
+    const request = vi.fn<() => Promise<IdeaAutocompleteResult>>()
+      .mockResolvedValueOnce({ ok: true, insert: "quiet room." })
+      .mockResolvedValueOnce({ ok: true, insert: " The lamps were off." })
+      .mockResolvedValueOnce({ ok: true, insert: "\n\nShe waited." });
+    const { view, plugin } = harness(request);
+    expect(plugin.continueKey()).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ suggestionKind: "sentence", extend: false }));
+    expect(plugin.continueKey()).toBe(true);
+    // The visible draft stays while the extension is requested.
+    expect(plugin.suggestion?.insert).toBe("quiet room.");
+    expect(request).toHaveBeenLastCalledWith(expect.objectContaining({
+      suggestionKind: "paragraph", extend: true, prefix: "She walked into the quiet room.", avoid: []
+    }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(plugin.suggestion?.insert).toBe("quiet room. The lamps were off.");
+    plugin.continueKey();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ suggestionKind: "idea", extend: true }));
+    expect(plugin.suggestion?.insert).toBe("quiet room. The lamps were off.\n\nShe waited.");
+    // Idea is the last step: the key is swallowed without another request.
+    expect(plugin.continueKey()).toBe(true);
+    expect(request).toHaveBeenCalledTimes(3);
+    plugin.accept();
+    expect(view.state.doc.toString()).toBe("She walked into the quiet room. The lamps were off.\n\nShe waited.");
+    plugin.destroy();
+  });
+
+  it("keeps the visible draft when extending it fails, and drops it on an edit", async () => {
+    const request = vi.fn<() => Promise<IdeaAutocompleteResult>>()
+      .mockResolvedValueOnce({ ok: true, insert: "quiet room." })
+      .mockResolvedValueOnce({ ok: false, reason: "timeout" });
+    const { view, plugin, cancel, status } = harness(request);
+    plugin.continueKey();
+    await vi.advanceTimersByTimeAsync(0);
+    plugin.continueKey();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(plugin.suggestion?.insert).toBe("quiet room.");
+    expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ state: "shown", insert: "quiet room.", kind: "sentence" }));
+    view.dispatch({ changes: { from: 20, insert: "x" }, selection: { anchor: 21 }, userEvent: "input.type" });
+    expect(plugin.suggestion).toBeNull();
+    expect(cancel).not.toHaveBeenCalled();
+    plugin.destroy();
+  });
+
+  it("cancels an in-flight extension when the cursor moves", async () => {
+    let resolve!: (result: IdeaAutocompleteResult) => void;
+    const request = vi.fn<() => Promise<IdeaAutocompleteResult>>()
+      .mockResolvedValueOnce({ ok: true, insert: "quiet room." })
+      .mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const { view, plugin, cancel } = harness(request);
+    plugin.continueKey();
+    await vi.advanceTimersByTimeAsync(0);
+    plugin.continueKey();
+    view.dispatch({ selection: { anchor: 3 } });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    resolve({ ok: true, insert: " The lamps were off." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(plugin.suggestion).toBeNull();
+    plugin.destroy();
+  });
+
+  it("asks for a full idea in one request with its direct key", async () => {
+    const request = vi.fn<() => Promise<IdeaAutocompleteResult>>().mockResolvedValue({ ok: true, insert: "quiet room.\n\nShe waited." });
+    const { plugin } = harness(request);
+    expect(plugin.lengthKey("idea")).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ suggestionKind: "idea", extend: false }));
+    expect(plugin.suggestion?.insert).toBe("quiet room.\n\nShe waited.");
+    plugin.destroy();
+  });
+
+  it("extends a visible shorter suggestion straight to the requested length", async () => {
+    const request = vi.fn<() => Promise<IdeaAutocompleteResult>>()
+      .mockResolvedValueOnce({ ok: true, insert: "quiet room." })
+      .mockResolvedValueOnce({ ok: true, insert: "\n\nShe waited." });
+    const { plugin } = harness(request);
+    plugin.lengthKey("sentence");
+    await vi.advanceTimersByTimeAsync(0);
+    plugin.lengthKey("idea");
+    expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ suggestionKind: "idea", extend: true }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(plugin.suggestion?.insert).toBe("quiet room.\n\nShe waited.");
+    plugin.destroy();
+  });
+
+  it("switches to a longer length mid-request instead of waiting", async () => {
+    const request = vi.fn<() => Promise<IdeaAutocompleteResult>>()
+      .mockImplementationOnce(() => new Promise(() => undefined))
+      .mockResolvedValueOnce({ ok: true, insert: "quiet room. The lamps were off." });
+    const { plugin, cancel } = harness(request);
+    plugin.lengthKey("sentence");
+    plugin.lengthKey("paragraph");
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ suggestionKind: "paragraph", extend: false }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(plugin.suggestion?.insert).toBe("quiet room. The lamps were off.");
+    plugin.destroy();
+  });
+
+  it("never lets a length key act on a selection", () => {
+    const { view, plugin, request } = harness();
+    view.dispatch({ selection: { anchor: 4, head: 10 } });
+    expect(plugin.lengthKey("idea")).toBe(true);
+    expect(request).not.toHaveBeenCalled();
+    plugin.destroy();
+  });
+
+  it("never lets the AI key edit a selection", () => {
+    const { view, plugin, request } = harness();
+    view.dispatch({ selection: { anchor: 4, head: 10 } });
+    expect(plugin.continueKey()).toBe(true);
+    expect(request).not.toHaveBeenCalled();
+    expect(view.state.doc.toString()).toBe("She walked into the ");
     plugin.destroy();
   });
 

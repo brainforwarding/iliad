@@ -4,7 +4,6 @@ import { createRoot } from "react-dom/client";
 import type { EditorView } from "@codemirror/view";
 import { EditorPane } from "../../src/components/EditorPane";
 import { WritingAssistsMenu } from "../../src/components/WritingAssistsMenu";
-import { runAutocompleteAction } from "../../src/editor/ideaAutocomplete/extension";
 import { useAutocompletePreferences } from "../../src/preferences/autocompletePreferences";
 import { appStrings } from "../../src/i18n/strings";
 import type { IdeaAutocompleteRequest, IdeaAutocompleteResult, FileTreeNode } from "../../src/types/iliad";
@@ -18,7 +17,11 @@ let generation = 0;
 async function requestAutocomplete(request: IdeaAutocompleteRequest): Promise<IdeaAutocompleteResult> {
   const variants = ["the tide had already turned, leaving the harbor strangely quiet.", "a light moved behind the glass, then vanished.", "someone had left a cup of tea beside the window."];
   const text = variants[generation++ % variants.length];
-  const insert = request.suggestionKind === "paragraph" && /[.!?]$/.test(request.prefix) ? `\n\n${text[0].toUpperCase()}${text.slice(1)}` : text;
+  const insert = request.extend
+    ? request.suggestionKind === "idea"
+      ? "\n\nBy noon the fog had lifted. From the gallery she could see the whole bay.\n\n- The boats were back.\n- The bell had stopped."
+      : " The stairs curled upward into the dark, and every step rang like a bell."
+    : request.suggestionKind === "paragraph" && /[.!?]$/.test(request.prefix) ? `\n\n${text[0].toUpperCase()}${text.slice(1)}` : text;
   await new Promise((resolve) => setTimeout(resolve, 250));
   for (const length of [26, 45]) {
     if (canceled.delete(request.requestId)) return { ok: false, reason: "aborted" };
@@ -29,6 +32,15 @@ async function requestAutocomplete(request: IdeaAutocompleteRequest): Promise<Id
   return canceled.delete(request.requestId) ? { ok: false, reason: "aborted" } : { ok: true, insert };
 }
 const cancel = (id: string) => { canceled.add(id); };
+// A fake selection rewrite so the ✦ AI menu and its inline review can be exercised.
+const selectionComments = { comments: [], onCreateComment: () => undefined, onUpdateComment: () => undefined, onDeleteComment: () => undefined,
+  onPositionsChanged: () => undefined, onFullReplacement: () => undefined };
+const fakeRewrite = async (_id: string, text: string, selection: { from: number; to: number }, options?: { mode?: "tighten" | "edit"; instruction?: string }) => {
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  const selected = text.slice(selection.from, selection.to);
+  const rewrite = options?.mode === "edit" ? `${selected.trim()} (${options.instruction?.split(" ").slice(0, 3).join(" ")}…)` : selected.split(" ").slice(0, -2).join(" ");
+  return { ok: true as const, rewrite: text.slice(0, selection.from) + rewrite + text.slice(selection.to), unchanged: false };
+};
 const nothing = async () => null;
 const ignoreLink = () => undefined;
 
@@ -59,10 +71,11 @@ function Preview() {
         autocompleteEnabled={enabled} onSetAutocompleteEnabled={setEnabled} autocompleteApiFallbackEnabled={fallback} onSetAutocompleteApiFallbackEnabled={setFallback}
         autocompleteNote="Gemini 3.8 Flash" showApiFallback={false} hasDocument={true}
         preferences={options.preferences} onPreferencesChange={options.setPreferences} guidance={options.guidance} onGuidanceChange={options.setGuidance}
-        snoozed={options.snoozedUntil > Date.now()} onToggleSnooze={options.toggleSnooze} onResetShortcuts={options.resetShortcuts}
-        onAutocompleteAction={(action) => { setOpen(false); if (view.current) { view.current.focus(); runAutocompleteAction(view.current, action); } }} />
+        snoozed={options.snoozedUntil > Date.now()} onToggleSnooze={options.toggleSnooze} onResetShortcuts={options.resetShortcuts} />
     </header>
     <EditorPane file={files[chapter]} value={text[chapter]} editorFontSize={19} editorFontPreset="serif" labels={strings.editor} review={null}
+      selectionComments={selectionComments}
+      tighten={{ enabled: true, minChars: 12, maxChars: 4000, labels: strings.editor.tighten, run: fakeRewrite, cancel: () => undefined }}
       writingAssists={writingAssists} onChange={(value) => setText((current) => current.map((item, index) => index === chapter ? value : item))}
       onInsertImage={nothing} onInsertImageReference={nothing} onOpenLink={ignoreLink}
       onEditorViewChange={(editor) => { view.current = editor; editor.dispatch({ selection: { anchor: editor.state.doc.length } }); }} />

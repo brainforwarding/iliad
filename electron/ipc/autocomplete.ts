@@ -3,9 +3,11 @@ import type { IpcMainInvokeEvent } from "electron";
 import path from "node:path";
 import {
   AUTOCOMPLETE_MAX_HEADING_COUNT,
+  AUTOCOMPLETE_MAX_IDEA_OUTPUT_CHARS,
   AUTOCOMPLETE_MAX_PREFIX_CHARS,
   AUTOCOMPLETE_MAX_SUFFIX_CHARS,
   AUTOCOMPLETE_MAX_TITLE_CHARS,
+  AUTOCOMPLETE_IDEA_TIMEOUT_MS,
   AUTOCOMPLETE_TIMEOUT_MS,
   autocompleteReasonFromAgentError,
   cleanAutocompleteOutput,
@@ -40,6 +42,7 @@ interface AutocompleteIdeaRequest {
   nearbyHeadings?: unknown;
   trigger?: unknown;
   suggestionKind?: unknown;
+  extend?: unknown;
   autocompleteApiFallbackEnabled?: unknown;
   direction?: unknown;
   guidance?: unknown;
@@ -61,6 +64,7 @@ interface AutocompleteRuntimeService {
     nearbyHeadings: string[];
     trigger: IdeaAutocompleteTrigger;
     suggestionKind: IdeaAutocompleteSuggestionKind;
+    extend?: boolean;
     allowApiFallback: boolean;
     direction?: string;
     guidance?: string;
@@ -151,7 +155,7 @@ export async function handleAutocompleteIpc(
   const timeout = setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, AUTOCOMPLETE_TIMEOUT_MS);
+  }, normalized.request.suggestionKind === "idea" ? AUTOCOMPLETE_IDEA_TIMEOUT_MS : AUTOCOMPLETE_TIMEOUT_MS);
 
   try {
     const rawText = await deps.service.autocompleteIdea({
@@ -167,7 +171,8 @@ export async function handleAutocompleteIpc(
     const insert = cleanAutocompleteOutput(rawText, {
       prefix: normalized.request.prefix,
       suffix: normalized.request.suffix,
-      suggestionKind: normalized.request.suggestionKind
+      suggestionKind: normalized.request.suggestionKind,
+      extend: normalized.request.extend
     });
 
     return insert ? { ok: true, insert } : { ok: false, reason: "no_suggestion" };
@@ -200,6 +205,7 @@ async function normalizeAutocompleteRequest(
         nearbyHeadings: string[];
         trigger: IdeaAutocompleteTrigger;
         suggestionKind: IdeaAutocompleteSuggestionKind;
+        extend: boolean;
         allowApiFallback: boolean;
         direction?: string;
         guidance?: string;
@@ -242,6 +248,9 @@ async function normalizeAutocompleteRequest(
     return { ok: false, reason: "too_long" };
   }
 
+  const trigger = normalizeAutocompleteTrigger(request.trigger);
+  // Automatic suggestions stay short; longer lengths are always explicitly requested.
+  const suggestionKind = trigger === "automatic" ? "inline" : normalizeAutocompleteSuggestionKind(request.suggestionKind);
   return {
     ok: true,
     request: {
@@ -252,12 +261,13 @@ async function normalizeAutocompleteRequest(
       headingPath: sanitizeStringList(request.headingPath, AUTOCOMPLETE_MAX_HEADING_COUNT),
       documentTitle: sanitizeString(request.documentTitle, AUTOCOMPLETE_MAX_TITLE_CHARS),
       nearbyHeadings: sanitizeStringList(request.nearbyHeadings, AUTOCOMPLETE_MAX_HEADING_COUNT),
-      trigger: normalizeAutocompleteTrigger(request.trigger),
-      suggestionKind: normalizeAutocompleteSuggestionKind(request.suggestionKind),
+      trigger,
+      suggestionKind,
+      extend: trigger === "manual" && request.extend === true,
       allowApiFallback: request.autocompleteApiFallbackEnabled === true,
       direction: sanitizeString(request.direction, 240),
       guidance: sanitizeString(request.guidance, 1800),
-      avoid: Array.isArray(request.avoid) ? request.avoid.filter((text): text is string => typeof text === "string").slice(-3).map((text) => text.slice(0, 700)) : []
+      avoid: Array.isArray(request.avoid) ? request.avoid.filter((text): text is string => typeof text === "string").slice(-3).map((text) => text.slice(0, AUTOCOMPLETE_MAX_IDEA_OUTPUT_CHARS)) : []
     }
   };
 }
@@ -267,7 +277,7 @@ function normalizeAutocompleteTrigger(value: unknown): IdeaAutocompleteTrigger {
 }
 
 function normalizeAutocompleteSuggestionKind(value: unknown): IdeaAutocompleteSuggestionKind {
-  return value === "paragraph" || value === "sentence" ? value : "inline";
+  return value === "idea" || value === "paragraph" || value === "sentence" ? value : "inline";
 }
 
 function sanitizeString(value: unknown, maxChars: number) {

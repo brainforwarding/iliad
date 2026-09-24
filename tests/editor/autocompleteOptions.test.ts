@@ -6,11 +6,27 @@ describe("autocomplete preferences and writing memory", () => {
     expect(writingGuidanceStorageKey("/a", "chapter.md")).not.toBe(writingGuidanceStorageKey("/b", "chapter.md"));
     expect(writingGuidanceStorageKey("/a", "chapter.md")).not.toBe(writingGuidanceStorageKey("/a", "other.md"));
   });
-  it("rejects duplicate and malformed shortcut maps", () => {
-    expect(normalizeAutocompletePreferences({ shortcuts: { inline: "Mod-Enter", sentence: "Mod-Enter", paragraph: "Alt-Enter" } }).shortcuts).toEqual(defaultAutocompletePreferences.shortcuts);
-    expect(normalizeAutocompletePreferences({ shortcuts: { wrong: "Ctrl-Space", fields: "Mod-Enter", here: "Alt-Enter" } }).shortcuts).toEqual(defaultAutocompletePreferences.shortcuts);
-    expect(normalizeAutocompletePreferences({ shortcuts: { inline: "Mod-Alt-Enter", sentence: "Mod-Enter", paragraph: "Alt-Enter" } }).shortcuts.inline).toBe("Mod-Alt-Enter");
+  it("defaults to the AI key plus three neighbouring length keys", () => {
+    expect(defaultAutocompletePreferences.shortcuts).toEqual({ continue: "Mod-Enter", sentence: "Mod-,", paragraph: "Mod-.", idea: "Mod-/" });
+    expect(normalizeAutocompletePreferences(null).shortcuts).toEqual(defaultAutocompletePreferences.shortcuts);
   });
+
+  it("migrates older key maps to the AI key and keeps every key distinct", () => {
+    // Original per-length map: its sentence key was the main manual key.
+    expect(normalizeAutocompletePreferences({ shortcuts: { inline: "Ctrl-Space", sentence: "Mod-Alt-Enter", paragraph: "Mod-Shift-Enter" } }).shortcuts)
+      .toEqual({ ...defaultAutocompletePreferences.shortcuts, continue: "Mod-Alt-Enter" });
+    // Single-key map from the first one-key version.
+    expect(normalizeAutocompletePreferences({ shortcuts: { continue: "Alt-Enter" } }).shortcuts.continue).toBe("Alt-Enter");
+    expect(normalizeAutocompletePreferences({ shortcuts: { continue: "Mod-q", sentence: "Alt-Enter" } }).shortcuts.continue).toBe("Alt-Enter");
+    // Custom length keys survive; a duplicate falls back to a free default.
+    const custom = normalizeAutocompletePreferences({ shortcuts: { continue: "Mod-Enter", sentence: "Mod-1", paragraph: "Mod-2", idea: "Mod-2" } }).shortcuts;
+    expect(custom).toMatchObject({ sentence: "Mod-1", paragraph: "Mod-2", idea: "Mod-/" });
+    // The AI key may take a default length key; that length then gets another free key.
+    const taken = normalizeAutocompletePreferences({ shortcuts: { continue: "Mod-,", sentence: "Mod-,", paragraph: "Mod-.", idea: "Mod-/" } }).shortcuts;
+    expect(new Set(Object.values(taken)).size).toBe(4);
+    expect(taken.continue).toBe("Mod-,");
+  });
+
   it("uses opt-in notes with a bounded selection of relevant facts", () => {
     const notes = normalizeWritingGuidance({ enabled: true, voice: "Close third person, past tense.", facts: Array.from({ length: 8 }, (_, i) => `Detail ${i}`).join("\n") + "\nMara has an injured hand." });
     const selected = selectWritingGuidance(notes, "Mara opened the door.");

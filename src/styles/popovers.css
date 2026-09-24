@@ -124,66 +124,22 @@
   white-space: nowrap;
 }
 
-.writing-assist-mode,
-.writing-assist-lengths,
-.writing-assist-directions {
+.writing-assist-quiet {
   display: flex;
-  gap: 4px;
-  padding: 4px;
-}
-
-.writing-assist-mode {
-  margin: 4px;
-  border-radius: 7px;
-  background: var(--card);
-}
-
-.writing-assist-mode button,
-.writing-assist-lengths button,
-.writing-assist-directions button,
-.writing-assist-quiet,
-.writing-assist-direction-input button {
   flex: 1;
+  align-items: center;
+  gap: 7px;
   padding: 7px 8px;
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--ink-2);
+  color: var(--muted-1);
   font: inherit;
   font-size: var(--text-xs);
+  text-align: left;
   cursor: pointer;
 }
 
-.writing-assist-mode button[aria-pressed="true"] {
-  background: var(--editor);
-  box-shadow: var(--shadow-sm);
-  color: var(--ink-1);
-}
-
-.writing-assist-lengths button {
-  border: 1px solid var(--hairline);
-}
-
-.writing-assist-directions button {
-  background: var(--card);
-}
-
-.writing-assist-quiet {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  text-align: left;
-  color: var(--muted-1);
-}
-
-.writing-assist-direction-input {
-  display: flex;
-  margin: 3px 5px;
-  border: 1px solid var(--hairline);
-  border-radius: 6px;
-}
-
-.writing-assist-direction-input input,
 .writing-assist-details > input,
 .writing-assist-details textarea,
 .writing-assist-shortcut-row select {
@@ -195,17 +151,6 @@
   color: var(--ink-1);
   font: inherit;
   font-size: var(--text-xs);
-}
-
-.writing-assist-direction-input input {
-  flex: 1;
-  width: 100%;
-  border: 0;
-  background: transparent;
-}
-
-.writing-assist-direction-input button {
-  flex: 0;
 }
 
 .writing-assist-details {
@@ -237,6 +182,12 @@
 
 .writing-assist-shortcut-row {
   justify-content: space-between;
+}
+
+.writing-assist-shortcut-hint {
+  margin: 6px 0 0;
+  color: var(--muted-2);
+  line-height: 1.35;
 }
 
 .writing-assist-note-dot {

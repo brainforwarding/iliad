@@ -1,26 +1,47 @@
 export type AutocompleteDirection = "continue" | "example" | "transition" | "tension";
-export type AutocompleteLength = "inline" | "sentence" | "paragraph";
+export type AutocompleteLength = "sentence" | "paragraph" | "idea";
 export interface WritingGuidance { enabled: boolean; voice: string; facts: string }
+export type AutocompleteShortcutAction = "continue" | AutocompleteLength;
 export interface AutocompletePreferences {
   manualOnly: boolean;
   announce: boolean;
-  shortcuts: Record<AutocompleteLength, string>;
+  /**
+   * `continue` is the AI key: a sentence (press again for longer) with nothing
+   * selected, the AI menu over a selection. Each length also has a direct key
+   * that asks for that length in one request.
+   */
+  shortcuts: Record<AutocompleteShortcutAction, string>;
 }
+export const autocompleteShortcutActions: AutocompleteShortcutAction[] = ["continue", "sentence", "paragraph", "idea"];
 export const defaultAutocompletePreferences: AutocompletePreferences = {
   manualOnly: false, announce: false,
-  shortcuts: { inline: "Ctrl-Space", sentence: "Mod-Enter", paragraph: "Mod-Shift-Enter" }
+  // Three neighbouring keys on an English keyboard: short → long, left → right.
+  shortcuts: { continue: "Mod-Enter", sentence: "Mod-,", paragraph: "Mod-.", idea: "Mod-/" }
 };
-export const autocompleteShortcutChoices = ["Ctrl-Space", "Mod-Enter", "Mod-Shift-Enter", "Mod-Alt-Enter", "Mod-Shift-Space", "Alt-Enter"];
+export const autocompleteShortcutChoices = [
+  "Mod-Enter", "Mod-Alt-Enter", "Alt-Enter", "Mod-Shift-Enter", "Mod-Shift-Space", "Ctrl-Space",
+  "Mod-,", "Mod-.", "Mod-/", "Mod-1", "Mod-2", "Mod-3", "Mod-Alt-1", "Mod-Alt-2", "Mod-Alt-3"
+];
 export const emptyWritingGuidance: WritingGuidance = { enabled: true, voice: "", facts: "" };
 
 export function normalizeAutocompletePreferences(value: unknown): AutocompletePreferences {
-  const saved = value as Partial<AutocompletePreferences> | null;
-  const shortcuts = { ...defaultAutocompletePreferences.shortcuts };
-  const values = (["inline", "sentence", "paragraph"] as const).map((kind) => saved?.shortcuts?.[kind]);
-  if (new Set(values).size === 3 && values.every((key) => typeof key === "string" && autocompleteShortcutChoices.includes(key))) {
-    for (const kind of ["inline", "sentence", "paragraph"] as const) {
-      shortcuts[kind] = saved!.shortcuts![kind];
-    }
+  const saved = value as { manualOnly?: unknown; announce?: unknown; shortcuts?: Record<string, unknown> } | null;
+  const valid = (key: unknown): key is string => typeof key === "string" && autocompleteShortcutChoices.includes(key);
+  const used = new Set<string>();
+  const take = (...candidates: unknown[]) => {
+    const key = candidates.find((candidate): candidate is string => valid(candidate) && !used.has(candidate)) ??
+      autocompleteShortcutChoices.find((choice) => !used.has(choice))!;
+    used.add(key);
+    return key;
+  };
+  const defaults = defaultAutocompletePreferences.shortcuts;
+  const current = saved?.shortcuts;
+  // Before the direct length keys existed, `sentence` held the main manual key
+  // (and `continue` briefly held the only key); both migrate to the AI key.
+  const legacy = current && !("idea" in current);
+  const shortcuts = { continue: take(current?.continue, legacy ? current?.sentence : undefined, defaults.continue) } as AutocompletePreferences["shortcuts"];
+  for (const kind of ["sentence", "paragraph", "idea"] as const) {
+    shortcuts[kind] = take(legacy ? undefined : current?.[kind], defaults[kind]);
   }
   return { manualOnly: saved?.manualOnly === true, announce: saved?.announce === true, shortcuts };
 }

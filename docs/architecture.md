@@ -302,6 +302,25 @@ single provider call and apply review-first to exactly one range, with no
 transcript turn and no proposal store. Tighten is the first (ADR-0020); its
 apply uses the same exact-match-or-discard safety as anchored edits (ADR-0019).
 
+**One AI key, and the selection decides** (`specs/2026-09-24-one-ai-key.md`).
+Continuation keys never rewrite. Three direct length keys (defaults ⌘, ⌘. ⌘/,
+neighbours on an English keyboard) ask for a Sentence, Paragraph, or full Idea
+(until the current idea/section is complete; no headings) in one request; if a
+shorter suggestion is visible they extend it, generating only the missing part.
+The AI key (default ⌘↵) suggests a Sentence and each repeat extends it one
+length. All four keys are configurable and kept distinct; the length keys run at
+highest precedence (they outrank the corrector's ⌘. and CodeMirror's ⌘/ comment
+toggle) and do nothing over a selection. Automatic suggestions stay short. With text selected the same key opens the selection AI
+menu (typed instruction, or Rewrite / Expand / Shorten / Summarize / Turn into a
+list); every menu action is selection-scoped (Shorten = Tighten mode, the rest
+are canned Edit instructions) and lands in the inline review. Keys are shared
+across both: Tab accepts (pending selection review → ghost → indentation), Esc
+dismisses or rejects, ⌥↑/↓ cycles alternatives. The selection keymap is
+registered before autocomplete and always consumes the key over a selection, so
+the AI key can never fall through to CodeMirror's `insertBlankLine` there. The
+Writing assists menu holds settings only; in-the-moment controls (Longer,
+Another, Steer…) live on the suggestion toolbar.
+
 Codex is the preferred runtime for the main workspace agent when connected.
 OpenAI API-key paths remain for dictation/media, fallback text runs, and other
 non-agent API features. Keep provider transport, app-server protocol handling,

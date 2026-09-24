@@ -1,7 +1,6 @@
 import { PenLine, Moon, RotateCcw } from "lucide-react";
-import { useState, type Dispatch, type RefObject, type SetStateAction } from "react";
-import { autocompleteShortcutChoices, shortcutLabel, type AutocompletePreferences, type WritingGuidance } from "../editor/ideaAutocomplete/options";
-import type { AutocompleteAction } from "../editor/ideaAutocomplete/extension";
+import type { Dispatch, RefObject, SetStateAction } from "react";
+import { autocompleteShortcutActions, autocompleteShortcutChoices, shortcutLabel, type AutocompletePreferences, type WritingGuidance } from "../editor/ideaAutocomplete/options";
 import type { AppStrings } from "../i18n/strings";
 
 interface WritingAssistsMenuLabels {
@@ -11,7 +10,6 @@ interface WritingAssistsMenuLabels {
   autocomplete: string;
   apiFallback: string;
   correctorUnavailable: string;
-  autocompleteShortcuts: string;
 }
 
 interface WritingAssistsMenuProps {
@@ -24,7 +22,6 @@ interface WritingAssistsMenuProps {
   snoozed: boolean;
   onToggleSnooze: () => void;
   onResetShortcuts: () => void;
-  onAutocompleteAction: (action: AutocompleteAction) => void;
   menuRef: RefObject<HTMLDivElement>;
   open: boolean;
   correctorEnabled: boolean;
@@ -73,7 +70,7 @@ function SwitchRow({
 }
 
 export function WritingAssistsMenu({
-  preferences, onPreferencesChange, guidance, onGuidanceChange, hasDocument, snoozed, onToggleSnooze, onResetShortcuts, onAutocompleteAction,
+  preferences, onPreferencesChange, guidance, onGuidanceChange, hasDocument, snoozed, onToggleSnooze, onResetShortcuts,
   labels,
   menuRef,
   open,
@@ -88,8 +85,8 @@ export function WritingAssistsMenu({
   onSetAutocompleteEnabled,
   onSetAutocompleteApiFallbackEnabled
 }: WritingAssistsMenuProps) {
-  const [direction, setDirection] = useState("");
-  const lengthLabels = { inline: labels.phrase, sentence: labels.sentence, paragraph: labels.paragraph };
+  const continueKey = shortcutLabel(preferences.shortcuts.continue);
+  const shortcutActionLabels = { continue: labels.continueKey, sentence: labels.sentenceKey, paragraph: labels.paragraphKey, idea: labels.ideaKey };
   return (
     <div className="writing-assists-menu" ref={menuRef}>
       <button
@@ -120,28 +117,13 @@ export function WritingAssistsMenu({
             onToggle={() => onSetAutocompleteEnabled((enabled) => !enabled)}
           />
           {autocompleteEnabled ? <>
-            <div className="writing-assist-mode" aria-label={labels.timing}>
-              <button type="button" aria-pressed={!preferences.manualOnly} onClick={() => onPreferencesChange({ ...preferences, manualOnly: false })}>{labels.automatic}</button>
-              <button type="button" aria-pressed={preferences.manualOnly} onClick={() => onPreferencesChange({ ...preferences, manualOnly: true })}>{labels.onDemand}</button>
-            </div>
-            <div className="writing-assist-lengths">
-              {(["inline", "sentence", "paragraph"] as const).map((kind) => <button key={kind} type="button" disabled={!hasDocument}
-                title={shortcutLabel(preferences.shortcuts[kind])} onMouseDown={(event) => event.preventDefault()}
-                onClick={() => onAutocompleteAction({ kind })}>{lengthLabels[kind]}</button>)}
-            </div>
-            <div className="writing-assist-directions">
-              {(["example", "transition", "tension"] as const).map((intent) => <button key={intent} type="button" disabled={!hasDocument}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => onAutocompleteAction({ kind: "paragraph", direction: labels.directions[intent] })}>{labels[intent]}</button>)}
-            </div>
-            <form className="writing-assist-direction-input" onSubmit={(event) => {
-              event.preventDefault();
-              if (direction.trim()) { onAutocompleteAction({ kind: "paragraph", direction: direction.trim() }); setDirection(""); }
-            }}>
-              <input value={direction} maxLength={240} disabled={!hasDocument} aria-label={labels.direction} placeholder={labels.direction}
-                onChange={(event) => setDirection(event.target.value)} />
-              <button type="submit" disabled={!hasDocument || !direction.trim()} aria-label={labels.suggest}>↵</button>
-            </form>
+            {/* In-the-moment actions live on the suggestion and selection bars; this menu is settings only. */}
+            <SwitchRow
+              label={labels.suggestWhileTyping}
+              checked={!preferences.manualOnly}
+              note={preferences.manualOnly ? labels.suggestWhileTypingOff(continueKey) : undefined}
+              onToggle={() => onPreferencesChange({ ...preferences, manualOnly: !preferences.manualOnly })}
+            />
             <button type="button" className="writing-assist-quiet" onClick={onToggleSnooze}><Moon size={14} />{snoozed ? labels.resume : labels.snooze}</button>
             <details className="writing-assist-details">
               <summary>{labels.writingNotes}{guidance.enabled && (guidance.voice || guidance.facts) ? <span className="writing-assist-note-dot" /> : null}</summary>
@@ -154,16 +136,17 @@ export function WritingAssistsMenu({
             </details>
             <details className="writing-assist-details">
               <summary>{labels.shortcuts}</summary>
-              {(["inline", "sentence", "paragraph"] as const).map((kind) => <label className="writing-assist-shortcut-row" key={kind}>
-                {lengthLabels[kind]}<select value={preferences.shortcuts[kind]} aria-label={lengthLabels[kind]}
-                  onChange={(event) => onPreferencesChange({ ...preferences, shortcuts: { ...preferences.shortcuts, [kind]: event.target.value } })}>
+              {autocompleteShortcutActions.map((action) => <label className="writing-assist-shortcut-row" key={action}>
+                {shortcutActionLabels[action]}<select value={preferences.shortcuts[action]} aria-label={shortcutActionLabels[action]}
+                  onChange={(event) => onPreferencesChange({ ...preferences, shortcuts: { ...preferences.shortcuts, [action]: event.target.value } })}>
                   {autocompleteShortcutChoices.map((key) => <option key={key} value={key}
-                    disabled={key !== preferences.shortcuts[kind] && Object.values(preferences.shortcuts).includes(key)}>{shortcutLabel(key)}</option>)}
+                    disabled={key !== preferences.shortcuts[action] && Object.values(preferences.shortcuts).includes(key)}>{shortcutLabel(key)}</option>)}
                 </select>
               </label>)}
+              <p className="writing-assist-shortcut-hint">{labels.continueKeyHint}</p>
               <div className="writing-assist-shortcut-row"><span>{labels.accept}</span><kbd>Tab</kbd></div>
-              <div className="writing-assist-shortcut-row"><span>{labels.word}</span><kbd>{shortcutLabel("Alt-→")}</kbd></div>
               <div className="writing-assist-shortcut-row"><span>{labels.alternatives}</span><kbd>{shortcutLabel("Alt-↑/↓")}</kbd></div>
+              <div className="writing-assist-shortcut-row"><span>{labels.dismiss}</span><kbd>Esc</kbd></div>
               <button className="writing-assist-quiet" type="button" onClick={onResetShortcuts}><RotateCcw size={13} />{labels.reset}</button>
               <label className="writing-assist-check"><input type="checkbox" checked={preferences.announce}
                 onChange={(event) => onPreferencesChange({ ...preferences, announce: event.target.checked })} />{labels.announce}</label>

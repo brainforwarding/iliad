@@ -33,6 +33,11 @@ export interface SelectionCommentsExtensionOptions {
   onEditorUpdate?: (update: ViewUpdate) => void;
   onCommentShortcut?: (view: EditorView) => boolean;
   onTightenShortcut?: (view: EditorView) => boolean;
+  /** The single AI key (shared with continuation); handled here first when text is selected. */
+  aiMenuKey?: string;
+  onAiMenuShortcut?: (view: EditorView) => boolean;
+  /** Tab accepts a pending inline selection rewrite before any ghost or indentation. */
+  onAcceptReviewShortcut?: (view: EditorView) => boolean;
   onEscape?: (view: EditorView) => boolean;
 }
 
@@ -255,6 +260,13 @@ export function selectionCommentsExtension(options: SelectionCommentsExtensionOp
       {
         key: "Mod-Shift-j",
         run: (view) => options.onTightenShortcut?.(view) ?? false
+      },
+      ...(options.aiMenuKey
+        ? [{ key: options.aiMenuKey, run: (view: EditorView) => options.onAiMenuShortcut?.(view) ?? false }]
+        : []),
+      {
+        key: "Tab",
+        run: (view) => options.onAcceptReviewShortcut?.(view) ?? false
       },
       {
         key: "Escape",

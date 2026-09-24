@@ -496,7 +496,9 @@ export interface IdeaAutocompleteRequest {
   documentTitle: string;
   nearbyHeadings: string[];
   trigger?: "automatic" | "manual";
-  suggestionKind?: "inline" | "sentence" | "paragraph";
+  suggestionKind?: "inline" | "sentence" | "paragraph" | "idea";
+  /** The prefix ends with the visible, unaccepted suggestion being extended. */
+  extend?: boolean;
   autocompleteApiFallbackEnabled: boolean;
 }
 

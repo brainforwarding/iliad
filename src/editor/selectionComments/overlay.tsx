@@ -11,11 +11,7 @@ import type { SelectionComment, TightenFailureReason, TightenResult } from "../.
 import { isAnchoredSelectionComment } from "../../app/selectionCommentsAnchor";
 import { anchoredOverlayPosition, type OverlayPosition } from "./positioning";
 import { safeTightenRangeForSelection, type SafeTightenRange, type TightenInlineReview } from "../tightenSafeRange";
-import {
-  normalizeSelectionEditInstruction,
-  selectionEditInstructionIsTooLong,
-  selectionEditScopeForInstruction
-} from "../selectionEditScope";
+import { normalizeSelectionEditInstruction, selectionEditInstructionIsTooLong } from "../selectionEditScope";
 
 const SETTLE_DELAY_MS = 180;
 const HOVER_SHOW_DELAY_MS = 300;
@@ -35,8 +31,13 @@ export interface SelectionCommentsOverlayApi {
   handleEditorUpdate: (update: ViewUpdate) => void;
   handleCommentShortcut: (view: EditorView) => boolean;
   handleTightenShortcut: (view: EditorView) => boolean;
+  /** The single AI key on a selection: open the AI menu. Always consumes the key over a selection. */
+  handleAiMenuShortcut: (view: EditorView) => boolean;
   handleEscape: (view: EditorView) => boolean;
 }
+
+export const selectionAiPresets = ["rewrite", "expand", "shorten", "summarize", "list"] as const;
+export type SelectionAiPreset = (typeof selectionAiPresets)[number];
 
 export interface TightenOverlayLabels {
   action: string;
@@ -53,6 +54,12 @@ export interface TightenOverlayLabels {
   editFailed: string;
   editNoKey: string;
   editTooLong: string;
+  aiAction: string;
+  aiMenuLabel: string;
+  aiMenuPlaceholder: string;
+  presets: Record<SelectionAiPreset, string>;
+  /** Shorten runs the dedicated tighten mode; every other preset is a canned edit instruction. */
+  presetInstructions: Record<Exclude<SelectionAiPreset, "shorten">, string>;
 }
 
 export interface TightenOverlayApi {
@@ -63,6 +70,8 @@ export interface TightenOverlayApi {
   /** Current active-file path — compared at accept time to discard a file-switch race. */
   filePath: string;
   labels: TightenOverlayLabels;
+  /** Display label of the AI key (e.g. ⌘+Enter), shown on the selection bar. */
+  aiKeyLabel?: string;
   run: (
     requestId: string,
     text: string,
@@ -181,6 +190,7 @@ export function SelectionCommentsOverlay({
   const [draft, setDraft] = useState("");
   const [editComposer, setEditComposer] = useState<EditComposerState | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  const [aiPresetIndex, setAiPresetIndex] = useState(0);
   const [hover, setHover] = useState<HoverState | null>(null);
   const [, setLayoutVersion] = useState(0);
   const [tightenState, setTightenState] = useState<TightenViewState>({ phase: "idle" });
@@ -319,6 +329,7 @@ export function SelectionCommentsOverlay({
       });
       setEditComposer({ safeRange, anchorPos: selection.head });
       setEditDraft("");
+      setAiPresetIndex(0);
     },
     [hideHover]
   );
@@ -546,44 +557,42 @@ export function SelectionCommentsOverlay({
     }, 1600);
   };
 
-  const startTighten = (startView: EditorView) => {
+  /**
+   * Every selection AI action (Shorten, presets, typed instructions) changes only
+   * the selected text; the surrounding safe unit is sent as context. The result
+   * goes through the inline review — nothing is written until it is accepted.
+   */
+  const runSelectionTransform = (safeRange: SafeTightenRange, mode: "tighten" | "edit", instruction?: string) => {
     const activeTighten = tightenRef.current;
 
-    if (!activeTighten?.enabled || composerRef.current || editComposerRef.current) {
+    if (!activeTighten?.enabled) {
       return;
     }
 
-    const selection = startView.state.selection.main;
-
-    if (selection.empty) {
-      return;
-    }
-
-    const safeRange = safeTightenRangeForSelection(startView.state.doc.toString(), {
-      from: selection.from,
-      to: selection.to
-    });
-
-    if (!safeRange || safeRange.originalText.length > activeTighten.maxChars) {
-      return;
-    }
-
-    const requestId = `t${(tightenSeqRef.current += 1)}`;
-    currentTightenIdRef.current = requestId;
+    const kind = mode;
     const anchorPos = safeRange.from;
+    const requestId = `${mode === "edit" ? "e" : "t"}${(tightenSeqRef.current += 1)}`;
+    currentTightenIdRef.current = requestId;
 
     clearTimer(settleTimer);
     setFloatingPos(null);
     hideHover();
+    setEditComposer(null);
+    setEditDraft("");
     activeTighten.onRejectReview();
-    setTightenState({ phase: "working", requestId, anchorPos, kind: "tighten" });
+    setTightenState({ phase: "working", requestId, anchorPos, kind });
     activeTighten.onProposedRangeChange({
       from: safeRange.from + safeRange.selectedFrom,
       to: safeRange.from + safeRange.selectedTo
     });
 
     activeTighten
-      .run(requestId, safeRange.originalText, { from: safeRange.selectedFrom, to: safeRange.selectedTo })
+      .run(
+        requestId,
+        safeRange.originalText,
+        { from: safeRange.selectedFrom, to: safeRange.selectedTo },
+        mode === "edit" ? { mode: "edit", instruction } : undefined
+      )
       .then((result) => {
         if (currentTightenIdRef.current !== requestId) {
           return;
@@ -591,7 +600,7 @@ export function SelectionCommentsOverlay({
 
         if (!result.ok) {
           activeTighten.onProposedRangeChange(null);
-          setTightenState({ phase: "error", reason: result.reason, anchorPos, kind: "tighten" });
+          setTightenState({ phase: "error", reason: result.reason, anchorPos, kind });
           scheduleTightenAutoDismiss();
           return;
         }
@@ -599,7 +608,7 @@ export function SelectionCommentsOverlay({
         if (result.unchanged) {
           activeTighten.onProposedRangeChange(null);
           currentTightenIdRef.current = null;
-          setTightenState({ phase: "alreadyTight", anchorPos, kind: "tighten" });
+          setTightenState({ phase: "alreadyTight", anchorPos, kind });
           scheduleTightenAutoDismiss();
           return;
         }
@@ -622,9 +631,57 @@ export function SelectionCommentsOverlay({
         }
 
         activeTighten.onProposedRangeChange(null);
-        setTightenState({ phase: "error", reason: "provider", anchorPos, kind: "tighten" });
+        setTightenState({ phase: "error", reason: "provider", anchorPos, kind });
         scheduleTightenAutoDismiss();
       });
+  };
+
+  const startTighten = (startView: EditorView) => {
+    const activeTighten = tightenRef.current;
+
+    if (!activeTighten?.enabled || composerRef.current || editComposerRef.current) {
+      return;
+    }
+
+    const selection = startView.state.selection.main;
+
+    if (selection.empty) {
+      return;
+    }
+
+    const safeRange = safeTightenRangeForSelection(startView.state.doc.toString(), {
+      from: selection.from,
+      to: selection.to
+    });
+
+    if (!safeRange || safeRange.originalText.length > activeTighten.maxChars) {
+      return;
+    }
+
+    runSelectionTransform(safeRange, "tighten");
+  };
+
+  const shortenAvailable = (safeRange: SafeTightenRange) =>
+    Boolean(tightenRef.current) &&
+    safeRange.originalText.slice(safeRange.selectedFrom, safeRange.selectedTo).trim().length >=
+      (tightenRef.current?.minChars ?? 0);
+
+  const runAiPreset = (preset: SelectionAiPreset) => {
+    const activeTighten = tightenRef.current;
+    const current = editComposerRef.current;
+
+    if (!activeTighten?.enabled || !current) {
+      return;
+    }
+
+    if (preset === "shorten") {
+      if (shortenAvailable(current.safeRange)) {
+        runSelectionTransform(current.safeRange, "tighten");
+      }
+      return;
+    }
+
+    runSelectionTransform(current.safeRange, "edit", activeTighten.labels.presetInstructions[preset]);
   };
 
   const submitEdit = () => {
@@ -650,74 +707,7 @@ export function SelectionCommentsOverlay({
       return;
     }
 
-    const scope = selectionEditScopeForInstruction(instruction);
-    const selection =
-      scope === "safe_unit"
-        ? { from: 0, to: current.safeRange.originalText.length }
-        : { from: current.safeRange.selectedFrom, to: current.safeRange.selectedTo };
-
-    const requestId = `e${(tightenSeqRef.current += 1)}`;
-    currentTightenIdRef.current = requestId;
-
-    clearTimer(settleTimer);
-    setFloatingPos(null);
-    hideHover();
-    setEditComposer(null);
-    setEditDraft("");
-    activeTighten.onRejectReview();
-    setTightenState({ phase: "working", requestId, anchorPos, kind: "edit" });
-    activeTighten.onProposedRangeChange(
-      scope === "safe_unit"
-        ? { from: current.safeRange.from, to: current.safeRange.to }
-        : {
-            from: current.safeRange.from + current.safeRange.selectedFrom,
-            to: current.safeRange.from + current.safeRange.selectedTo
-          }
-    );
-
-    activeTighten
-      .run(requestId, current.safeRange.originalText, selection, { mode: "edit", instruction })
-      .then((result) => {
-        if (currentTightenIdRef.current !== requestId) {
-          return;
-        }
-
-        if (!result.ok) {
-          activeTighten.onProposedRangeChange(null);
-          setTightenState({ phase: "error", reason: result.reason, anchorPos, kind: "edit" });
-          scheduleTightenAutoDismiss();
-          return;
-        }
-
-        if (result.unchanged) {
-          activeTighten.onProposedRangeChange(null);
-          currentTightenIdRef.current = null;
-          setTightenState({ phase: "alreadyTight", anchorPos, kind: "edit" });
-          scheduleTightenAutoDismiss();
-          return;
-        }
-
-        currentTightenIdRef.current = null;
-        activeTighten.onProposedRangeChange(null);
-        activeTighten.onReviewReady({
-          requestId,
-          range: {
-            ...current.safeRange,
-            filePath: activeTighten.filePath
-          },
-          rewrite: result.rewrite
-        });
-        setTightenState({ phase: "idle" });
-      })
-      .catch(() => {
-        if (currentTightenIdRef.current !== requestId) {
-          return;
-        }
-
-        activeTighten.onProposedRangeChange(null);
-        setTightenState({ phase: "error", reason: "provider", anchorPos, kind: "edit" });
-        scheduleTightenAutoDismiss();
-      });
+    runSelectionTransform(current.safeRange, "edit", instruction);
   };
 
   const handleTightenShortcut = (shortcutView: EditorView) => {
@@ -747,12 +737,29 @@ export function SelectionCommentsOverlay({
     return true;
   };
 
+  const handleAiMenuShortcut = (shortcutView: EditorView) => {
+    const selection = shortcutView.state.selection;
+
+    if (selection.ranges.length !== 1 || selection.main.empty) {
+      return false;
+    }
+
+    if (!composerRef.current && !editComposerRef.current && tightenStateRef.current.phase !== "working") {
+      openEditComposer(shortcutView);
+    }
+
+    // Consume the AI key over any selection so it never falls through to a
+    // default that edits the document (CodeMirror binds Mod-Enter to insertBlankLine).
+    return true;
+  };
+
   apiRef.current = {
     handleMouseUp,
     handleMouseMove,
     handleEditorUpdate,
     handleCommentShortcut,
     handleTightenShortcut,
+    handleAiMenuShortcut,
     handleEscape
   };
 
@@ -871,13 +878,10 @@ export function SelectionCommentsOverlay({
         })()
       : null;
   const showEditAction = Boolean(tighten && tightenSelectionMetrics?.hasSafeRange);
-  const showTightenAction = Boolean(
-    tighten && tightenSelectionMetrics?.hasSafeRange && tightenSelectionMetrics.trimmedLength >= tighten.minChars
-  );
   const tightenOverCap = Boolean(
     tighten && tightenSelectionMetrics && tightenSelectionMetrics.safeLength > tighten.maxChars
   );
-  const floatingWidth = 96 + (showTightenAction ? 82 : 0) + (showEditAction ? 74 : 0);
+  const floatingWidth = 96 + (showEditAction ? 96 : 0);
   const floatingPosition =
     floatingPos !== null
       ? overlayPositionAt(view, floatingPos, { width: floatingWidth, height: 26 }, "above")
@@ -906,7 +910,7 @@ export function SelectionCommentsOverlay({
     ? overlayPositionAt(view, composer.anchorPos, { width: 280, height: 92 }, "below")
     : null;
   const editComposerPosition = editComposer
-    ? overlayPositionAt(view, editComposer.anchorPos, { width: 320, height: 104 }, "below")
+    ? overlayPositionAt(view, editComposer.anchorPos, { width: 320, height: 250 }, "below")
     : null;
   const hoverPosition =
     hoveredComments.length > 0 && hover
@@ -953,28 +957,12 @@ export function SelectionCommentsOverlay({
           >
             {labels.action}
           </button>
-          {showTightenAction && tighten ? (
-            <button
-              type="button"
-              className="editor-tighten-action"
-              disabled={tightenOverCap}
-              title={tightenOverCap ? tighten.labels.tooLong : undefined}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                if (!tightenOverCap) {
-                  startTighten(view);
-                }
-              }}
-            >
-              {tighten.labels.action}
-            </button>
-          ) : null}
           {showEditAction && tighten ? (
             <button
               type="button"
-              className="editor-edit-action"
+              className="editor-ai-action"
               disabled={tightenOverCap}
-              title={tightenOverCap ? tighten.labels.editTooLong : undefined}
+              title={tightenOverCap ? tighten.labels.editTooLong : tighten.labels.aiMenuLabel}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
                 if (!tightenOverCap) {
@@ -982,7 +970,9 @@ export function SelectionCommentsOverlay({
                 }
               }}
             >
-              {tighten.labels.editAction}
+              <span aria-hidden="true">✦</span>
+              {tighten.labels.aiAction}
+              {tighten.aiKeyLabel ? <kbd>{tighten.aiKeyLabel}</kbd> : null}
             </button>
           ) : null}
         </div>
@@ -1041,37 +1031,78 @@ export function SelectionCommentsOverlay({
         </div>
       ) : null}
 
-      {editComposer && editComposerPosition && tighten ? (
-        <div
-          className="editor-comment-composer editor-edit-composer"
-          style={{ top: editComposerPosition.top, left: editComposerPosition.left }}
-          role="dialog"
-          aria-label={tighten.labels.editComposerLabel}
-        >
-          <textarea
-            ref={editTextareaRef}
-            value={editDraft}
-            placeholder={tighten.labels.editComposerPlaceholder}
-            rows={1}
-            autoFocus
-            aria-label={tighten.labels.editComposerLabel}
-            onChange={(event) => setEditDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                event.stopPropagation();
-                closeEditComposer(true);
-                return;
-              }
+      {editComposer && editComposerPosition && tighten ? (() => {
+        const presetEnabled = (preset: SelectionAiPreset) => preset !== "shorten" || shortenAvailable(editComposer.safeRange);
+        const enabledPresets = selectionAiPresets.filter(presetEnabled);
+        const activePreset = editDraft.trim() ? null : enabledPresets[Math.min(aiPresetIndex, enabledPresets.length - 1)] ?? null;
 
-              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                submitEdit();
-              }
-            }}
-          />
-        </div>
-      ) : null}
+        return (
+          <div
+            className="editor-comment-composer editor-edit-composer editor-ai-menu"
+            style={{ top: editComposerPosition.top, left: editComposerPosition.left }}
+            role="dialog"
+            aria-label={tighten.labels.aiMenuLabel}
+          >
+            <textarea
+              ref={editTextareaRef}
+              value={editDraft}
+              placeholder={tighten.labels.aiMenuPlaceholder}
+              rows={1}
+              autoFocus
+              aria-label={tighten.labels.editComposerLabel}
+              onChange={(event) => setEditDraft(event.target.value)}
+              onKeyDown={(event) => {
+                // Menu keys never reach the editor keymaps behind the menu.
+                event.stopPropagation();
+
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  closeEditComposer(true);
+                  return;
+                }
+
+                if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !editDraft.trim()) {
+                  event.preventDefault();
+                  const step = event.key === "ArrowDown" ? 1 : -1;
+                  setAiPresetIndex((index) => (Math.min(index, enabledPresets.length - 1) + step + enabledPresets.length) % enabledPresets.length);
+                  return;
+                }
+
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+
+                  if (editDraft.trim()) {
+                    submitEdit();
+                  } else if (activePreset) {
+                    runAiPreset(activePreset);
+                  }
+                }
+              }}
+            />
+            <div className="editor-ai-menu-presets" role="listbox" aria-label={tighten.labels.aiMenuLabel}>
+              {selectionAiPresets.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  role="option"
+                  aria-selected={preset === activePreset}
+                  className={preset === activePreset ? "editor-ai-menu-preset is-active" : "editor-ai-menu-preset"}
+                  disabled={!presetEnabled(preset)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => {
+                    const index = enabledPresets.indexOf(preset);
+                    if (index >= 0 && !editDraft.trim()) setAiPresetIndex(index);
+                  }}
+                  onClick={() => runAiPreset(preset)}
+                >
+                  <span>{tighten.labels.presets[preset]}</span>
+                  {preset === activePreset ? <kbd>↵</kbd> : null}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })() : null}
 
       {hoverPosition && hoveredComments.length > 0 ? (
         <div

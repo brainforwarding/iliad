@@ -165,6 +165,8 @@
 }
 
 .cm-idea-autocomplete-ghost {
+  /* An Idea spans paragraphs: show its line breaks exactly as Tab will insert them. */
+  white-space: pre-wrap;
   color: var(--autocomplete-ghost);
   pointer-events: none;
   user-select: none;
@@ -233,6 +235,20 @@
 .editor-autocomplete-toolbar kbd {
   opacity: 0.55;
   font: inherit;
+}
+
+.editor-autocomplete-steer input {
+  width: 220px;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-1);
+  font: inherit;
+}
+
+.editor-autocomplete-steer input:focus {
+  outline: none;
 }
 
 .autocomplete-announcement {
@@ -391,8 +407,7 @@
 }
 
 .editor-comment-action,
-.editor-tighten-action,
-.editor-edit-action {
+.editor-ai-action {
   padding: 3px 11px;
   border: 0;
   background: transparent;
@@ -405,18 +420,24 @@
 }
 
 .editor-comment-action:hover,
-.editor-tighten-action:not(:disabled):hover,
-.editor-edit-action:not(:disabled):hover {
+.editor-ai-action:not(:disabled):hover {
   background: var(--accent-soft);
 }
 
-.editor-tighten-action,
-.editor-edit-action {
+.editor-ai-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   border-left: 1px solid var(--hairline);
 }
 
-.editor-tighten-action:disabled,
-.editor-edit-action:disabled {
+.editor-ai-action kbd {
+  color: var(--muted-2);
+  font: inherit;
+  font-weight: 400;
+}
+
+.editor-ai-action:disabled {
   color: var(--muted-3);
   cursor: default;
 }
@@ -466,6 +487,59 @@
 
 .editor-edit-composer textarea {
   max-height: 88px;
+}
+
+/* Selection AI menu: type an instruction, or pick a preset with ↑/↓ + Enter. */
+.editor-ai-menu {
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+}
+
+.editor-ai-menu textarea {
+  box-sizing: border-box;
+  padding: 7px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--editor);
+}
+
+.editor-ai-menu-presets {
+  display: grid;
+  gap: 1px;
+}
+
+.editor-ai-menu-preset {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.editor-ai-menu-preset.is-active {
+  background: var(--accent-soft);
+  color: var(--ink-1);
+  font-weight: 500;
+}
+
+.editor-ai-menu-preset kbd {
+  color: var(--muted-2);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 400;
+}
+
+.editor-ai-menu-preset:disabled {
+  color: var(--muted-3);
+  cursor: default;
 }
 
 .editor-comment-popover {

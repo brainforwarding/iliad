@@ -103,6 +103,27 @@ completes: the created file is activated" as a known limitation. The live
 run respected navigation and typing. Re-check the note against the code and
 drop it if the limitation is gone.
 
+## Writing assists
+
+### Another / Steer for selection rewrites
+
+From `specs/2026-09-24-one-ai-key.md`: the continue suggestion has ⌥↑/↓ and
+Steer…, but a selection rewrite review only offers Accept (Tab) and Reject
+(Esc). Add "another version" and a steer field to the inline review so both
+flows share the full set of review controls.
+
+### Gemini for selection edits
+
+Selection AI actions still need Codex or an OpenAI API key; a Gemini key only
+powers autocomplete. Route selection edits through Gemini when that is the only
+configured provider.
+
+### Selection bar position after triple-click
+
+The selection bar anchors above the selection head. A triple-click puts the
+head at the start of the next line, so the bar can cover the selection's last
+line. Anchor above the selection start (or its first line) instead.
+
 ## Agent direction
 
 ### Codex as an attributed external-review source
