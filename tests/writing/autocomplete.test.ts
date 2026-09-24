@@ -31,6 +31,21 @@ describe("agent autocomplete helpers", () => {
     expect(cleanAutocompleteOutput("x".repeat(2401), { prefix, suffix: "", suggestionKind: "idea" })).toBe("");
   });
 
+  it("keeps a paragraph suggestion inside the list item at the cursor", () => {
+    const list = "1. Formen parejas.\n2. Una persona habla.\n3. Quien escuchó resume.\n";
+    // An empty item: the marker's period is not the end of a sentence.
+    expect(cleanAutocompleteOutput("\n\nCambien de roles y repitan los pasos.", { prefix: `${list}4. `, suffix: "", suggestionKind: "paragraph" }))
+      .toBe("Cambien de roles y repitan los pasos.");
+    expect(cleanAutocompleteOutput("Cambien de roles.", { prefix: `${list}4.`, suffix: "", suggestionKind: "paragraph" }))
+      .toBe(" Cambien de roles.");
+    expect(cleanAutocompleteOutput("Cambien de roles.", { prefix: "- [ ] ", suffix: "", suggestionKind: "paragraph" }))
+      .toBe("Cambien de roles.");
+    // An item with text continues on the same line, never as a new paragraph.
+    expect(cleanAutocompleteOutput("Luego cambian de roles.", { prefix: `${list}4. Repitan.`, suffix: "", suggestionKind: "paragraph" }))
+      .toBe(" Luego cambian de roles.");
+    expect(autocompleteInstructions("es", "paragraph")).toContain("elemento de lista");
+  });
+
   it("continues an extended draft inline unless the model starts a new block", () => {
     const prefix = "She walked into the quiet room";
     expect(cleanAutocompleteOutput("with the lamps off.", { prefix, suffix: "", suggestionKind: "paragraph", extend: true }))
