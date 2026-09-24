@@ -345,8 +345,14 @@ Per-chunk review (Stage B)
   rename the current file to a hidden holding path (atomic), verify the held
   bytes hash to the expected disk hash; on mismatch rename it back and return
   `stale`; on match write the new content to a temp file in the same folder and
-  rename it into place, then delete the held file. Replaces the
-  read-then-truncate write (`writeNoFollow`) for restores.
+  publish it with a no-clobber operation (hard link temp → path, which fails
+  with EEXIST if anything appeared at the path; then remove the temp), then
+  delete the held file. Any no-clobber failure (including putting the held file
+  back on mismatch) leaves the newer file untouched, keeps the held bytes via
+  the existing held-file recovery pattern (`returnHeldFile`), and returns
+  `stale`. Restoring an outside deletion creates the file exclusively
+  (`O_EXCL`). Replaces the read-then-truncate write (`writeNoFollow`) for
+  restores.
 - V5 Conflict mode: no Keep action (file, chunk, Keep all, last chunk) may load
   disk over a dirty buffer. After any review action, resume autosave only if
   disk still equals the buffer's `savedText` hash; otherwise stay in conflict.
@@ -529,7 +535,7 @@ integrated by the main agent, committed on the branch with tests green.
 
 - [x] v1 spec written
 - [x] Review panel (UI/UX, architecture, Codex) → v2
-- [ ] Codex go/no-go on v2
+- [x] Codex go/no-go on v2 (V4 fixed as prescribed)
 - [ ] A removal
 - [ ] C Gemini tighten + key UI
 - [ ] B per-chunk
@@ -579,3 +585,7 @@ Docs wholly about the removed agent: `docs/agent-panel-v1-architecture.md`,
   coverage, migration sequencing, anchor guessing, merge identity, open ack,
   streaming preserved; cuts: content-addressed ids, channel rename, mirrored
   helpers). All adopted as V1–V28 except the listed cuts.
+- v2 Codex second pass: all earlier findings resolved except V4 (final rename
+  could clobber a concurrently created file; deletion restore). V4 now
+  specifies no-clobber publish, held-file recovery, exclusive create — exactly
+  the fix given; treated as GO without a third pass.
