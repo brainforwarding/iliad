@@ -113,3 +113,11 @@ flows share the full set of review controls.
 The selection bar (✦ AI, comment) anchors above the selection head. A triple-click puts the
 head at the start of the next line, so the bar can cover the selection's last
 line. Anchor above the selection start (or its first line) instead.
+
+### CLI socket path length
+
+From the 0.3.0 install check: macOS limits Unix socket paths to ~104 bytes. The
+default `~/Library/Application Support/Iliad MD/iliad.sock` fits, but a long
+`ILIAD_USER_DATA` makes `listen`/`connect` fail with EINVAL and the CLI prints
+a raw error. Detect the length and say so (or fall back to a short path under
+`$TMPDIR` keyed by the profile).

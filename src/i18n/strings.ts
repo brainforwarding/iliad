@@ -228,6 +228,7 @@ export const appStrings = {
       ideaAutocomplete: {
         accept: "Accept", another: "Another", longer: "Longer", steer: "Steer…", steerLabel: "Direction for this suggestion", steerPlaceholder: "e.g. give an example", previous: "Previous suggestion", next: "Next suggestion", dismiss: "Dismiss", suggestion: "Suggestion",
         working: "Suggesting…",
+        autocompleteOff: "Autocomplete is off. Turn it on in Writing assists.",
         noProvider: "Add a Gemini API key in Writing assists.",
         invalidApiKey: "The Gemini API key was rejected. Check it in Writing assists.",
         rateLimited: "Autocomplete is rate-limited. Try again shortly.",
@@ -556,6 +557,7 @@ export const appStrings = {
       ideaAutocomplete: {
         accept: "Aceptar", another: "Otra", longer: "Más largo", steer: "Guiar…", steerLabel: "Dirección para esta sugerencia", steerPlaceholder: "p. ej. da un ejemplo", previous: "Sugerencia anterior", next: "Siguiente sugerencia", dismiss: "Descartar", suggestion: "Sugerencia",
         working: "Sugiriendo…",
+        autocompleteOff: "Autocompletar está desactivado. Actívalo en Ayudas de escritura.",
         noProvider: "Agrega una clave API de Gemini en Ayudas de escritura.",
         invalidApiKey: "La clave API de Gemini fue rechazada. Revísala en Ayudas de escritura.",
         rateLimited: "Autocompletar está limitado. Intenta de nuevo en un momento.",

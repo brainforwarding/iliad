@@ -1,7 +1,7 @@
 import { markdown } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { EditorState } from "@codemirror/state";
-import { EditorView, type ViewUpdate } from "@codemirror/view";
+import { EditorState, Prec } from "@codemirror/state";
+import { EditorView, keymap, type ViewUpdate } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { markdownLineCount, reviewBlockedLineRanges } from "../editor/aiReview/blockedRanges";
@@ -12,7 +12,7 @@ import type { EditorReviewState } from "../editor/aiReview/types";
 import { CodeMirrorHost } from "../editor/CodeMirrorHost";
 import { imageDropPasteExtension } from "../editor/imageDropPaste";
 import { ideaAutocompleteExtension, ideaAutocompleteManualKey, runAutocompleteAction, type IdeaAutocompleteStatus, type IdeaAutocompleteSuggestionKind } from "../editor/ideaAutocomplete/extension";
-import { shortcutLabel, type AutocompletePreferences, type WritingGuidance } from "../editor/ideaAutocomplete/options";
+import { defaultAutocompletePreferences, shortcutLabel, type AutocompletePreferences, type WritingGuidance } from "../editor/ideaAutocomplete/options";
 import { Check, ChevronLeft, ChevronRight, RotateCw, X } from "lucide-react";
 import {
   selectionCommentsExtension,
@@ -99,6 +99,7 @@ export interface EditorWritingAssistsProps {
       accept: string; another: string; previous: string; next: string; dismiss: string; suggestion: string;
       longer: string; steer: string; steerLabel: string; steerPlaceholder: string;
       working: string;
+      autocompleteOff: string;
       noProvider: string;
       invalidApiKey: string;
       rateLimited: string;
@@ -894,6 +895,30 @@ export function EditorPane({
     });
   }, [file?.path, file?.name, writingAssists, activeWritingIssue, review, readOnly, blockedLineRanges, handleAutocompleteStatusChange]);
 
+  // The length keys always belong to Iliad: with autocomplete off they explain
+  // how to turn it on instead of falling through to editor defaults (Mod-/
+  // would otherwise toggle an HTML comment around the line).
+  const [lengthKeyHint, setLengthKeyHint] = useState(false);
+  useEffect(() => {
+    if (!lengthKeyHint) return;
+    const timer = window.setTimeout(() => setLengthKeyHint(false), 2400);
+    return () => window.clearTimeout(timer);
+  }, [lengthKeyHint]);
+  const lengthKeyGuard = useMemo(() => {
+    if (!file || autocompleteExtensions.length > 0) return [];
+    const keys = { ...defaultAutocompletePreferences.shortcuts, ...writingAssists?.preferences?.shortcuts };
+    // With the corrector on, Mod-. keeps its "next issue" meaning while autocomplete is off.
+    const guarded = (["sentence", "paragraph", "idea"] as const)
+      .filter((kind) => !(writingAssists?.correctorEnabled && keys[kind] === "Mod-."));
+    return [Prec.highest(keymap.of(guarded.map((kind) => ({
+      key: keys[kind],
+      run: () => {
+        setLengthKeyHint(true);
+        return true;
+      }
+    }))))];
+  }, [file, autocompleteExtensions, writingAssists?.preferences?.shortcuts, writingAssists?.correctorEnabled]);
+
   const extensions = useMemo(
     () => {
       const nextExtensions = [
@@ -944,7 +969,7 @@ export function EditorPane({
         );
       }
 
-      nextExtensions.push(...autocompleteExtensions);
+      nextExtensions.push(...autocompleteExtensions, ...lengthKeyGuard);
 
       if (review?.mode === "edit_file" && editReviewDisplay && !editReviewDisplay.stale) {
         if (review.readOnly) {
@@ -1010,6 +1035,7 @@ export function EditorPane({
     },
     [
       autocompleteExtensions,
+      lengthKeyGuard,
       editReviewDisplay,
       outsideChunkHandlers,
       blockedLineRanges,
@@ -1325,6 +1351,9 @@ export function EditorPane({
           {writingAssists?.preferences?.announce && autocompleteStatus.state === "shown" && !autocompleteStatus.streaming
             ? `${writingAssists.labels.autocomplete.suggestion}: ${autocompleteStatus.insert ?? ""}` : ""}
         </span>
+        {lengthKeyHint && !autocompleteStatusMessage && writingAssists ? (
+          <div className="editor-autocomplete-status" role="status">{writingAssists.labels.autocomplete.autocompleteOff}</div>
+        ) : null}
         {autocompleteStatusMessage ? (
           <div
             className={autocompleteStatusAnchor ? "editor-autocomplete-status is-anchored" : "editor-autocomplete-status"}
