@@ -1,8 +1,15 @@
 # Review Navigation Persistent Diagnostics
 
+> **Current state (2026-09-24).** The internal agent was removed (ADR-0021);
+> review covers outside changes only. The files named below moved:
+> `src/assistant/reviewDebug.ts` → `src/review/reviewDebug.ts`,
+> `src/app/useAgentProposals.ts` → `src/app/useOutsideReview.ts`. "Proposal"
+> in identifiers (`targetProposalId`, `proposal_state_cleared_review_target`)
+> refers to the outside-review record type, which kept its historical name.
+
 ## Context
 
-Iliad now handles internal-agent and external-file review well, but there is still an intermittent navigation bug:
+Iliad handled outside-change review well, but there is still an intermittent navigation bug:
 
 - the user clicks a changed file in the file tree;
 - the document opens or appears selected briefly;
@@ -28,7 +35,7 @@ This is a diagnostics-only change. It must not change review selection, active d
 - Do not fix the navigation jump in this change.
 - Do not add Markdown content, absolute document paths, or full proposal objects to logs.
 - Do not require DevTools for the next reproduction.
-- Do not replace the existing main-process proposal action diagnostics.
+- Do not replace the existing main-process review action diagnostics.
 
 ## Logging Policy
 
@@ -85,7 +92,6 @@ The existing events should be persisted where they already exist:
 - `normal_navigation_cleared_review_target`
 - `proposal_state_cleared_review_target`
 - `external_capture_active_file_target`
-- `assistant_run_initial_review_target`
 
 ## Additional Detail Fields
 
@@ -129,7 +135,7 @@ It must not rename arbitrary absolute `path` fields into `*Rel`.
 
 ## Specific Enhancements
 
-### `src/assistant/reviewDebug.ts`
+### `src/review/reviewDebug.ts`
 
 Update `logReviewNavigation` so it:
 
@@ -145,7 +151,7 @@ Add helper functions in this file only:
 
 The helper should preserve primitive values only from an allowlist. Fields named `path`, `currentPath`, `previousPath`, `nodePath`, or similar should not be persisted raw. Use `nodePathKind`, `revealPathKind`, or `selectedTreePathKind` when path classification is useful.
 
-### `src/app/useAgentProposals.ts`
+### `src/app/useOutsideReview.ts`
 
 Keep existing log sites, but enrich the selection/reconciliation logs so the persisted trace can answer:
 
@@ -184,15 +190,15 @@ These should include enough context to compare user intent with the later active
 
 `file_tree_reveal_completed` should be logged from `onRevealComplete`.
 
-`file_tree_reveal_failed` should be logged if FileTree cannot find reveal ancestors or cannot find/register the target row. This is especially important for green proposed files because delayed reveal failure could look like a delayed navigation bounce.
+`file_tree_reveal_failed` should be logged if FileTree cannot find reveal ancestors or cannot find/register the target row. This is especially important for green created files because delayed reveal failure could look like a delayed navigation bounce.
 
 ## Reproduction Procedure After Implementation
 
 1. Start the dev app against `/Users/sebastian/dev/iliad-site/my-docs`.
-2. Ask the internal agent or an external editor to create a mixed proposal:
+2. Have an outside tool make a mixed set of changes:
    - one edited existing document;
-   - one proposed new document;
-   - one proposed deleted document;
+   - one new document;
+   - one deleted document;
    - optionally one emptied document.
 3. In the file tree, reproduce:
    - click orange edit, then red delete;

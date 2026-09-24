@@ -10,7 +10,7 @@ If a feature breaks either direction of that statement, it is risky and should b
 
 ## Why this matters
 
-1. **AI integration.** Iliad is on a path toward an AI assistant that reads and edits the same documents the user does. That only works when the `.md` file is ground truth. If the editor renders something the source doesn't justify, or stores meaning outside the file, the AI is at a permanent disadvantage.
+1. **AI integration.** Outside agents (Claude Code, Codex, any tool) read and edit the same documents the user does, and Iliad's own writing AI suggests changes to them. That only works when the `.md` file is ground truth. If the editor renders something the source doesn't justify, or stores meaning outside the file, every agent is at a permanent disadvantage.
 2. **Portability.** Iliad documents will be opened in GitHub previews, VS Code, mobile editors, pandoc, static-site generators. Features that depend on Iliad-specific behavior make those tools unreliable.
 3. **Trust.** When a user types `--`, they want `--` saved. When they reopen a file from yesterday, they want to see what they typed. Silent transformations erode the sense that the editor is on their side.
 
@@ -85,18 +85,20 @@ If you find yourself reaching for an exception more than once or twice across th
 
 ## Relationship to AI integration
 
-The agent operates on the same `.md` text the user sees. Every durable writing
-artifact it creates should be a Markdown document, whether the user calls that
-artifact a rubric, handout, lesson plan, script, deck outline, research annex,
-or template. Every diff it proposes should be a Markdown diff. Every edit the
-user accepts should be applied to the same source file.
+Iliad has no agent of its own. Outside agents operate on the same `.md` text
+the user sees, directly on disk; Iliad shows every change they make as a
+Markdown diff that the writer keeps or restores chunk by chunk. Iliad's
+built-in AI (autocomplete, the ✦ AI menu) suggests Markdown text that the
+writer accepts into the same source file. Every durable writing artifact is a
+Markdown document, whatever the user calls it: a rubric, handout, lesson plan,
+script, deck outline, research annex, or template.
 
 Features that pass this rule make agent workflows safe by default. Features
-that fail it would require special-case handling in the AI layer, which is
-exactly the complexity worth avoiding before it accrues.
+that fail it would require special-case handling for agents, which is exactly
+the complexity worth avoiding before it accrues.
 
 A useful side effect: Markdown diffs are human-reviewable. Keeping the source
-canonical means AI suggestions stay reviewable too.
+canonical means every AI change stays reviewable too.
 
-See [`agent-vision.md`](./agent-vision.md) for the Markdown-first agent
-boundary.
+See [`product-vision.md`](./product-vision.md) for what Iliad is and the
+boundary between built-in AI and outside agents.

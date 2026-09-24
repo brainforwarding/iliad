@@ -19,11 +19,11 @@ Run a single test file or pattern with vitest directly:
 
 ```bash
 npx vitest run tests/writing/tighten.test.ts # one file
-npx vitest run -t "applies anchored edit"     # tests matching a name
+npx vitest run -t "accepts valid text verbatim" # tests matching a name
 npx vitest                                     # watch mode
 ```
 
-Local CLI workspace launches are exercised with `npm run build`, `npm link`, then `iliad .` from a target folder.
+Local CLI launches are exercised with `npm run build`, `npm link`, then `iliad .` from a target folder; `iliad status`, `iliad open <file> --line N` and `iliad skill install|print` talk to the running app over its local socket.
 
 After meaningful changes, run `npm run typecheck`, `npm test`, and `npm run build`, then verify in the Electron app (see "Manual checks" in `docs/architecture.md`).
 
@@ -42,14 +42,14 @@ installer; URL-safe duplicate filenames are allowed only as extra assets.
 
 Iliad is a local-first Markdown writing workspace built as an Electron desktop app. It is a two-process app with a strict IPC contract:
 
-- **Main process** (`electron/`) — owns the file system, workspace dialog, custom protocol, and all file/folder mutation. `electron/main.ts` should stay thin: app lifecycle, protocol setup, IPC registration, and window creation only. Enforcement lives under `electron/fs/`: hidden paths, path traversal, Markdown-only read/write/rename, and URL restrictions are rechecked here, not just in the renderer. Workspaces are registered in `electron/fs/workspaceRegistry.ts`; `iliad-file://` will only serve files inside those roots.
+- **Main process** (`electron/`) — owns the file system, workspace dialog, custom protocol, all file/folder mutation, the outside-change baseline, Gemini requests, and the CLI socket. `electron/main.ts` should stay thin: app lifecycle, protocol setup, IPC registration, and window creation only. Enforcement lives under `electron/fs/`: hidden paths, path traversal, Markdown-only read/write/rename, and URL restrictions are rechecked here, not just in the renderer. Workspaces are registered in `electron/fs/workspaceRegistry.ts`; `iliad-file://` will only serve files inside those roots.
 - **Preload** (`electron/preload.ts`) — exposes the IPC surface as `window.iliad` via `contextBridge`. This is the only bridge; `nodeIntegration` is off and `contextIsolation` is on.
 - **Renderer** (`src/`) — React 18 + Vite + CodeMirror 6. `src/App.tsx` is a composition layer. Workspace state belongs in `src/app/useWorkspace.ts`, document persistence in `src/app/useDocumentPersistence.ts`, file orchestration in `src/files/fileActions.ts`, tree/path helpers in `src/files/`, and local display preferences in `src/preferences/`.
 - **IPC contract** — the full renderer-facing API is typed in `src/types/iliad.ts`. When changing IPC, update the handler under `electron/ipc/`, the preload exposure in `electron/preload.ts`, and `src/types/iliad.ts` (`IliadApi`) together.
-- **Review-first agent** — a right-side assistant proposes Markdown edits and new documents without persisting model-authored changes until the user approves. The provider/runtime layer lives in `electron/agent/` (Codex is the preferred main runtime; OpenAI API keys cover dictation/media/fallback), proposals and selection-scoped tools (e.g. Tighten) are stored as typed records, and the renderer renders them through the document-native review UI (`src/assistant/`, `src/components/assistant/`, `src/editor/aiReview/`). The renderer must never parse edits from chat text. **Read `docs/agent-vision.md` and the "Review-First Agent" section of `docs/architecture.md` before touching agent, context, proposal, or runtime code.**
+- **Writing AI and outside review** — Iliad has no internal agent (ADR-0021). Built-in AI is Gemini-only and works on one document: inline completion (`src/editor/ideaAutocomplete/`) and the ✦ AI selection menu (Tighten/Edit), both review-first (Tab/Accept), with the provider in `electron/writing/` and the key set in Writing assists. Outside agents (Claude Code, Codex, …) write Markdown in the folder; the main-process workspace baseline (`electron/review/`) derives their changes and the renderer shows them per chunk (Keep / Restore, Keep all / Restore all) through `src/app/useOutsideReview.ts`, `src/review/` and `src/editor/aiReview/`. Restores are guarded no-clobber replacements. Review records keep historical `Agent*` type names and `agent:*` IPC channels. Notes and comments are companion files (`name.notes.md`, `name.comments.md`) that never enter review. The bridge for outside agents is the `iliad` CLI (`bin/`, `electron/cli/`) and the bundled skill (`resources/skill/iliad/SKILL.md`). **Read `docs/product-vision.md` and the "Writing AI and Outside Review" and "Workspace Baseline" sections of `docs/architecture.md` before touching AI, review, companion, or CLI code.**
 - **App language** — the chrome is bilingual (English/Spanish) via `src/i18n/`. This is a display preference only; it must never translate Markdown content, file names, workspace names, or filesystem error details.
 
-The codebase grew well past a basic editor: it now includes the agent subsystem, document content/file-tree search, a writing corrector, voice dictation, selection comments, document navigation history, and a Telegram remote relay. `docs/architecture.md` is the authoritative, current map — prefer it over inferring structure from these summaries.
+The codebase grew well past a basic editor: it now includes Gemini writing AI, outside-change review, file-backed comments and notes, document content/file-tree search, a writing corrector, document navigation history, and the `iliad` CLI. `docs/architecture.md` is the authoritative, current map — prefer it over inferring structure from these summaries.
 
 ### Feature placement
 
@@ -61,8 +61,10 @@ Do not put new feature logic back into the old hotspot files. Use the owner modu
 - Autosave, dirty state, save flushing, and load/clear document state: `src/app/useDocumentPersistence.ts`.
 - User-facing file operations and save-before-action orchestration: `src/files/fileActions.ts`.
 - File tree traversal/path relocation helpers: `src/files/fileTree.ts` and `src/files/pathUtils.ts`.
-- Agent proposal/review orchestration: `src/app/useAgentProposals.ts`; assistant run state, transcript, and composer: `src/assistant/useAssistantRun.ts` plus `src/components/assistant/`.
-- Agent provider/runtime, proposal storage, and on-demand selection tools: `electron/agent/`; agent/search/remote IPC: `electron/ipc/`.
+- Outside-change review state and actions: `src/app/useOutsideReview.ts` and `src/review/`; inline review rendering: `src/editor/aiReview/`; baseline and guarded writes: `electron/review/`; review IPC: `electron/ipc/review.ts`.
+- Built-in writing AI (Gemini autocomplete, ✦ AI/tighten, key storage): `electron/writing/` with IPC in `electron/ipc/autocomplete.ts`, `tighten.ts`, `writingSettings.ts`.
+- Comments and notes (companion files): `src/app/useSelectionComments.ts`, `src/comments/`, `src/app/useWritingNotes.ts`, `src/notes/`; shared companion path and comments-file rules: `electron/shared/`.
+- CLI and agent skill: `bin/` (CLI script and packaged wrapper), `electron/cli/` (socket server, open requests, command install), `src/app/useCliBridge.ts`, `resources/skill/iliad/SKILL.md`.
 - Document navigation (Back/Forward) history: `src/app/useDocumentHistory.ts`.
 - App-language strings and persistence: `src/i18n/`.
 - Reusable UI surfaces and popovers: `src/components/`.
@@ -90,16 +92,17 @@ The renderer persists the last workspace and editor typography (`editorFontSize`
 
 ## Where decisions live
 
+- `docs/product-vision.md` — the product guardrail: what Iliad is (writing surface + review surface, no internal agent).
 - `docs/source-as-contract.md` — product lens for feature decisions: the on-disk Markdown file is the contract.
-- `docs/agent-vision.md` — the Markdown-first product boundary for agent work. Read before changing agent, context, proposal, or runtime architecture.
+- `docs/decisions.md` — ADRs; ADR-0021 records the removal of the internal agent (earlier agent ADRs are history).
 - `docs/architecture.md` — stable product and code decisions. **Read this before making non-trivial changes.** If a change intentionally alters one of those decisions, update the doc in the same change.
 - `specs/` — dated, per-change plans (one file per change). Look here for the rationale behind recent UI/UX moves.
 - `docs/backlog.md` — known gaps and follow-ups deferred during a change, each with where it came from. Add to it when you leave something out on purpose.
 
 ## Product constraints to respect
 
-The editing surface is intentionally minimal and the agent is intentionally Markdown-first. Per `docs/architecture.md` and `docs/agent-vision.md`:
+The editing surface is intentionally minimal and Iliad has no agent of its own. Per `docs/product-vision.md` and `docs/architecture.md`:
 
-- Keep the writing surface calm: typography lives in one compact popover (not the topbar), and there are no tabs — the file tree plus Back/Forward history is the navigation model. Don't add tabs, command palettes, or broad secondary navigation without evidence the current model is insufficient.
-- The agent is a Markdown workspace collaborator, not a general computer/coding agent. Allowed: list/read/search Markdown, open one visible document, propose review-first edits and new Markdown documents. Avoided as core primitives: direct AI writes (no approval), shell/git/package/browser automation, whole-workspace upload, and non-Markdown artifact builders.
-- Every UI feature should keep the on-disk Markdown file easy to inspect, edit elsewhere, and recover (`docs/source-as-contract.md`). Display preferences (language, typography, pending proposals) are local app data and must never be written into the user's Markdown.
+- Keep the writing surface calm: typography lives in one compact popover (not the topbar), and there are no tabs — the file tree plus Back/Forward history is the navigation model. Don't add tabs, command palettes, chat panels, or broad secondary navigation without evidence the current model is insufficient.
+- No internal agent: no chat panel, agent runtimes, or model-authored writes without review. Built-in AI stays small (current document and selection only, one Gemini key) and review-first. Large or multi-document work belongs to outside agents, which reach Iliad only through the `iliad` CLI (status, open, skill; it never writes documents) and the bundled skill; their changes are reviewed per chunk and always reversible.
+- Every UI feature should keep the on-disk Markdown file easy to inspect, edit elsewhere, and recover (`docs/source-as-contract.md`). Context for agents lives in companion Markdown files, not app data. Display preferences (language, typography) are local app data and must never be written into the user's Markdown.

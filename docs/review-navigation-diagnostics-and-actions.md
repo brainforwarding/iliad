@@ -2,9 +2,19 @@
 
 This document records the changes made to diagnose intermittent review-navigation jumps and to replace ambiguous review controls with explicit accept/reject actions.
 
+> **Current state (2026-09-24).** The internal agent, its assistant panel and
+> proposal cards were removed (ADR-0021). Review now covers outside changes
+> only; the review hook is `src/app/useOutsideReview.ts` and the logging helper
+> is `src/review/reviewDebug.ts`. Outside edits use **Keep / Restore** per
+> chunk and **Keep all / Restore all** per file and in the tree strip;
+> creates use **Keep file / Move to Trash** and deletions **Confirm deletion /
+> Restore file** (spec `specs/2026-09-24-iliad-writing-surface.md`, V6). The
+> Accept/Reject labels below are history. Renderer events tied to assistant
+> runs no longer exist.
+
 ## Context
 
-The observed bug was: after an agent changes several files, the user can move between changed files, but occasionally the app returns to another changed file. The right next step was to stop guessing and add logs at the state transitions that can change the active document or active review target.
+The observed bug was: after several files change, the user can move between changed files, but occasionally the app returns to another changed file. The right next step was to stop guessing and add logs at the state transitions that can change the active document or active review target.
 
 The UI concern was separate but related: a `Review` button was ambiguous and sometimes did not behave usefully. The requested model was:
 
@@ -14,7 +24,7 @@ The UI concern was separate but related: a `Review` button was ambiguous and som
 
 ## Files Added
 
-### `src/assistant/reviewDebug.ts`
+### `src/review/reviewDebug.ts` (then `src/assistant/reviewDebug.ts`)
 
 Added a small logging helper:
 
@@ -35,7 +45,7 @@ localStorage.removeItem("iliad.debug.reviewNavigation")
 
 ## Navigation Instrumentation
 
-### `src/app/useAgentProposals.ts`
+### `src/app/useOutsideReview.ts` (then `src/app/useAgentProposals.ts`)
 
 Added logging around the central review-target state machine:
 
@@ -78,75 +88,10 @@ Added logging around the central review-target state machine:
 - `select_target_clear_requested`
   - logs explicit clearing of review target.
 
-### `electron/agent/agentService.ts`
-
-Added persisted main-process diagnostics for proposal actions. Renderer console logs are useful in dev, but packaged-window testing can lose them, and IPC failures such as `Proposal not found for this workspace` need evidence from the process that owns the proposal store.
-
-The app now writes JSONL entries under:
-
-```text
-~/Library/Application Support/iliad-dev/logs/
-```
-
-For proposal action debugging, search for:
-
-```text
-agent.proposal_file.apply_started
-agent.proposal_file.apply_finished
-agent.proposal_file.apply_failed
-agent.proposal_file.reject_started
-agent.proposal_file.reject_finished
-agent.proposal_file.reject_failed
-agent.proposal.reject_started
-agent.proposal.reject_finished
-agent.proposal.reject_failed
-```
-
-Each entry includes safe identifiers and state only:
-
-- workspace fingerprint;
-- proposal id;
-- requested file id;
-- whether an external capture session was found;
-- whether the proposal/file was found;
-- source kind and metadata kind;
-- proposal/file status;
-- sanitized error details on failure.
-
-It intentionally does not log Markdown content or absolute document paths.
-
-Also exposed the existing file-level handlers from this hook so higher-level UI can call them directly:
-
-- `applyAgentProposalFile`
-- `rejectAgentProposalFile`
-
-### `src/assistant/useAssistantRun.ts`
-
-Added logging after an assistant run finishes and the app decides whether to auto-open a review target:
-
-- `assistant_run_initial_review_target`
-
-The log includes:
-
-- run id;
-- proposal ids returned by the run;
-- active file when the run started;
-- active file when the run finished;
-- whether the user navigated during the run;
-- the chosen review target, if any.
-
-This is important because auto-targeting is one likely source of unexpected file jumps.
-
 ### `src/App.tsx`
 
 Added logs around app-level navigation signals:
 
-- `navigation_mark_without_running_run`
-  - a navigation action happened when no assistant run was active.
-- `navigation_mark_during_run`
-  - user navigation happened while an assistant run was active.
-- `running_run_changed`
-  - assistant run id changed.
 - `manual_review_target_change`
   - user explicitly selected a pending review target.
 - `external_capture_active_file_target`
@@ -156,13 +101,13 @@ Added logs around app-level navigation signals:
 - `file_tree_open_pending_change`
   - user opened a pending review item from the file tree.
 - `bulk_accept_pending_changes_start`
-  - sidebar `Accept all` started.
+  - sidebar bulk keep started (now `Keep all`).
 - `bulk_accept_pending_changes_finish`
-  - sidebar `Accept all` finished.
+  - sidebar bulk keep finished.
 - `bulk_reject_pending_changes_start`
-  - sidebar `Reject all` started.
+  - sidebar bulk restore started (now `Restore all`).
 - `bulk_reject_pending_changes_finish`
-  - sidebar `Reject all` finished.
+  - sidebar bulk restore finished.
 
 ## Control Behavior Changes
 
@@ -190,38 +135,12 @@ What changed:
 
 This removes a navigation route from that strip. The strip no longer moves the user into a different changed file just to review; it directly accepts or rejects the pending set.
 
-### Assistant Pending Proposal Cards
-
-Files changed:
-
-- `src/App.tsx`
-- `src/components/AssistantPanel.tsx`
-- `src/components/assistant/AssistantPendingProposals.tsx`
-- `src/i18n/strings.ts`
-- `tests/components/AssistantPendingProposals.test.tsx`
-
-What changed:
-
-- Replaced the card action label:
-  - old: `Review`
-  - new: `Accept all`
-- Replaced the secondary action label:
-  - old: `Discard`
-  - new: `Reject all`
-- The card now calls file-level review actions directly instead of opening review navigation.
-- `Accept all` iterates every mutable file in that proposal and calls `onAcceptProposalFile`.
-- `Reject all` iterates every mutable file in that proposal and calls `onRejectProposalFile`.
-- Added a test that verifies both mutable files in a multi-file proposal are accepted/rejected.
-- Kept the existing internal/external separation:
-  - internal assistant proposals appear in the assistant card list;
-  - external filesystem review proposals do not appear there.
-
 ### Editor Review Toolbar And Inline Controls
 
 Files changed:
 
 - `src/i18n/strings.ts`
-- `src/app/useAgentProposals.ts`
+- `src/app/useOutsideReview.ts` (then `src/app/useAgentProposals.ts`)
 - Existing editor wiring in `src/components/EditorPane.tsx` consumes these labels.
 
 What changed:
@@ -235,7 +154,7 @@ What changed:
   - `Accept changes`
   - `Reject changes`
 
-The intent is that editor-surface actions are scoped to the file/change currently visible, while sidebar/assistant-card actions are bulk actions. File-system context stays in the toolbar header (`Pending document: ...`, `Pending delete: ...`) instead of changing the button labels to `Keep file`, `Move to Trash`, `Confirm deletion`, or similar specialized copy.
+The intent is that editor-surface actions are scoped to the file/change currently visible, while sidebar actions are bulk actions. (Superseded: the current labels are the specialized ones listed at the top of this document.)
 
 ## How To Capture The Next Repro
 
@@ -248,7 +167,7 @@ localStorage.setItem("iliad.debug.reviewNavigation", "1")
 ```
 
 4. Clear the console.
-5. Ask the agent to change several files.
+5. Have an outside tool (Claude Code, Codex, a script) change several files.
 6. Navigate through changed files the way that previously caused the jump.
 7. If the app jumps to another file, copy all console lines beginning with:
 
@@ -258,7 +177,6 @@ localStorage.setItem("iliad.debug.reviewNavigation", "1")
 
 The most useful events to look for are:
 
-- `assistant_run_initial_review_target`
 - `external_capture_active_file_target`
 - `manual_review_target_change`
 - `file_tree_open_pending_change`
@@ -266,20 +184,19 @@ The most useful events to look for are:
 - `select_target_set`
 - `active_file_cleared_review_target`
 
-Those should show whether the jump came from assistant auto-targeting, external-capture auto-targeting, a file-tree pending item click, or active-file/review state reconciliation.
+Those should show whether the jump came from external-capture auto-targeting, a file-tree pending item click, or active-file/review state reconciliation.
 
 ## Verification
 
 Focused tests run:
 
 ```sh
-npm test -- tests/components/AssistantPendingProposals.test.tsx tests/components/FileTreePendingReview.test.tsx tests/i18n/writingAssistsCopy.test.ts
+npm test -- tests/components/FileTreePendingReview.test.tsx tests/i18n/writingAssistsCopy.test.ts
 ```
 
 Result:
 
-- 3 test files passed.
-- 10 tests passed.
+- the focused test files passed (at the time, together with the removed assistant card test).
 
 Typecheck run:
 

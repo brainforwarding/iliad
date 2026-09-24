@@ -4,143 +4,83 @@ This document records product and implementation decisions that future contribut
 
 Before evaluating any new feature, read [`source-as-contract.md`](./source-as-contract.md). It is the lens through which feature decisions should pass: the on-disk Markdown file is the contract, and features that break that contract are risky regardless of how well they fit any other section below.
 
-Before changing the agent, context, proposal, or runtime architecture, read
-[`agent-vision.md`](./agent-vision.md). It defines the Markdown-first product
-boundary for agent work.
+Before changing what Iliad is for, read
+[`product-vision.md`](./product-vision.md) and ADR-0021 in
+[`decisions.md`](./decisions.md). Iliad has no internal agent: built-in AI is
+small and works on one document; larger work is done by outside agents whose
+changes Iliad reviews.
 
 ## Product Shape
 
-Iliad is a local-first Markdown writing app. The current milestone is a calm,
-minimal writing surface backed by real local files, plus a review-first agent
-that can propose Markdown edits and new Markdown documents without persisting
-model-authored changes until the user approves them.
+Iliad is a local-first Markdown writing app with two jobs:
 
-The agent should grow as a Markdown workspace collaborator, not as a general
-computer or coding agent. Rubrics, handouts, lesson plans, deck outlines,
-scripts, templates, and research annexes are all Markdown documents in Iliad;
-they should use the same document proposal contract rather than separate
-artifact-specific tools.
+1. A calm, minimal writing surface backed by real local files, with small
+   review-first writing AI (inline completion, the ✦ AI selection menu, and the
+   local corrector).
+2. The review surface for outside agents (Claude Code, Codex, any tool) that
+   write Markdown in the folder: every outside change is shown in the document
+   and the writer keeps or restores it chunk by chunk.
 
-Avoid broad navigation, command palettes, tabs, direct AI writes, whole
-workspace uploads, or subagent dashboards until each addition is backed by a
-real writing workflow, explicit context, runtime events, and the document-native
-review path.
+Outside agents reach Iliad only through the `iliad` CLI (status, open, skill)
+and the per-document companion files (`name.notes.md`, `name.comments.md`).
+
+Avoid broad navigation, command palettes, tabs, chat panels, direct AI writes,
+or dashboards until each addition is backed by a real writing workflow.
 
 ## Module Map
 
-The refactor keeps public contracts small and routes behavior to owner modules instead of concentrating it in the app shell.
+The code routes behavior to owner modules instead of concentrating it in the
+app shell.
 
 ```text
+bin/
+  iliad            packaged wrapper (runs iliad.mjs with ELECTRON_RUN_AS_NODE=1)
+  iliad.mjs        CLI entry (checkouts and npm link)
+  lib/             cli routing, launcher, socket protocol, paths, skill install
+resources/
+  skill/iliad/SKILL.md   bundled skill for outside agents
 electron/
   main.ts
   preload.ts
-  agent/
-    agentModels.ts
-    agentService.ts
-    errors.ts
-    documentTools.ts
-    openaiResponses.ts
-    proposalDrafts.ts
-    proposalStore.ts
-    settingsStore.ts
-    openai/
-      client.ts
-      providerErrors.ts
-      prompts.ts
-      request.ts
-      stream.ts
-      summaries.ts
-    runtime/
-      codexAppServerClient.ts
-      codexAppServerProvider.ts
-      codexFileChangeCapture.ts
-      codexPatchConversion.ts
-      codexRunJournal.ts
-      openaiResponsesProvider.ts
-      provider.ts
-    transcription.ts
-  review/
-    externalReviewProjection.ts
-    workspaceBaseline.ts
-  diagnostics/
-    logger.ts
-  fs/
-    fileOps.ts
-    pathSafety.ts
-    workspaceRegistry.ts
-  ipc/
-    assets.ts
-    files.ts
-    shell.ts
-    workspace.ts
-  launch/
-    argv.ts
-    workspace.ts
-  window/
-    createWindow.ts
-    windowManager.ts
+  cli/             local socket server, CLI commands, open-request queue,
+                   "Install 'iliad' Command…" symlink
+  comments/        legacy comments migration into companion files
+  diagnostics/     logger
+  fs/              pathSafety, fileOps, companionFiles, contentSearch,
+                   workspaceRegistry, workspaceMutationMarkers
+  ipc/             assets, autocomplete, diagnostics, files, review, search,
+                   shell, tighten, trust, updates, workspace,
+                   writingCorrectorMemory, writingSettings
+  launch/          argv parsing and launch workspace
+  review/          workspace baseline, outside-change projection, diffs,
+                   git advisory, review record types
+  shared/          code shared with the renderer (companion paths, comments file)
+  updates/         auto-update service
+  window/          window creation and window manager
+  writing/         Gemini text/autocomplete, tighten (✦ AI menu), key store,
+                   writingAiService
+  writingCorrector/ corrector memory store
 
 src/
   App.tsx
   main.tsx
-  app/
-    useAgentProposals.ts
-    useDocumentHistory.ts
-    useDocumentPersistence.ts
-    useWorkspace.ts
-  assistant/
-    assistantUtils.ts
-    useAssistantRun.ts
-  components/
-    assistant/
-      AssistantComposer.tsx
-      AssistantHeader.tsx
-      AssistantPendingProposals.tsx
-      AssistantSettings.tsx
-      AssistantTranscript.tsx
-    AssistantPanel.tsx
-    EditorErrorBoundary.tsx
-    EditorPane.tsx
-    FileTree.tsx
-    LanguageMenu.tsx
-    TreeContextMenu.tsx
-    TypographyMenu.tsx
-  i18n/
-    appLanguage.ts
-    strings.ts
-  editor/
-    imageDropPaste.ts
-    paths.ts
-    aiReview/
-      diff.ts
-      extension.ts
-      types.ts
-    visualMarkdown.ts
-    visualMarkdown/
-      activeRanges.ts
-      blocks.ts
-      index.ts
-      inline.ts
-      tables.ts
-      widgets.ts
-  files/
-    fileActions.ts
-    fileTree.ts
-    pathUtils.ts
-  preferences/
-    editorPreferences.ts
-  styles/
-    app.css
-    assistant.css
-    base.css
-    chrome.css
-    sidebar.css
-    editor.css
-    visual-markdown.css
-    popovers.css
-    responsive.css
-  types/
-    iliad.ts
+  app/             useWorkspace, useDocumentPersistence, useDocumentHistory,
+                   useOutsideReview, useSelectionComments, useWritingNotes,
+                   useCliBridge
+  comments/        comments file format, session and three-way merge
+  components/      EditorPane, FileTree, menus (Typography, Language,
+                   Workspace, WritingAssists), DetachedCommentsBar, …
+  editor/          CodeMirrorHost, documentSync, aiReview/ (inline review),
+                   ideaAutocomplete/, selectionComments/, writingCorrector/,
+                   visualMarkdown/, imageDropPaste, paths
+  files/           fileActions, fileTree, pathUtils, companionFiles, search
+  i18n/            appLanguage, strings
+  markdown/        math delimiters
+  notes/           legacy localStorage notes migration
+  preferences/     editor, sidebar, autocomplete, writing assist preferences
+  review/          review queue, reviewable files, pending tree markers
+  styles/          tokens.css plus responsibility-specific CSS
+  types/iliad.ts   IliadApi (the full IPC contract)
 ```
 
 `src/App.tsx` is the composition layer: it connects hooks, file actions, and components, but should not regain persistence, path helper, preference parsing, context menu, or typography popover implementation details.
@@ -342,41 +282,28 @@ Relevant files:
 - `src/files/fileActions.ts`
 - `src/styles/chrome.css`
 
-## Review-First Agent
+## Writing AI and Outside Review
 
-The agent is workspace-aware only through context that Iliad explicitly
-supplies or tools that Iliad explicitly runs. The active Markdown document is
-one context source, not the agent's identity. The UI may show context chips, but
-it should not imply that the agent has searched the whole workspace unless the
-runtime actually did so and recorded that work.
+Iliad has no chat panel and no agent of its own (ADR-0021). AI reaches the
+writer's Markdown in two ways, and both keep every change visible and
+reversible.
 
-Agent edits use a two-channel contract:
+**Built-in writing AI** works on the current document and the current selection
+only, runs on one Gemini key (`electron/writing/`, model in `geminiText.ts`),
+and is review-first: nothing lands in the buffer without Tab or Accept.
 
-- the transcript shows clean user-facing prose and transient status/thinking
-  summaries;
-- edit artifacts are stored as typed `AgentChangeProposal` records and rendered
-  in the document-native review UI.
-
-The renderer must not parse edits from chat text. Provider-specific transport
-markers may exist inside Electron as a legacy adapter, but they must be
-normalized into proposals before React renders the result.
-
-Agent writes are always review-first:
-
-- existing-file changes render as red/green document review blocks;
-- new documents render as all-green review previews;
-- users can accept/reject individual hunks where available, or accept/reject the
-  whole proposal/file;
-- applying an edit revalidates the base hash before writing;
-- applying a new file revalidates the generated relative path and refuses
-  unsafe or colliding paths;
-- pending proposal state is local app data, not Markdown document content.
-
-Distinct from the conversational agent (multi-turn, document-wide) are
-**on-demand selection tools**: stateless, selection-scoped rewrites that make a
-single provider call and apply review-first to exactly one range, with no
-transcript turn and no proposal store. Tighten is the first (ADR-0020); its
-apply uses the same exact-match-or-discard safety as anchored edits (ADR-0019).
+- Inline completion (`src/editor/ideaAutocomplete/`) shows ghost text; the
+  document's `name.notes.md` is its writing guidance.
+- The ✦ AI selection menu runs a selection-scoped rewrite (Tighten or a canned
+  Edit instruction) in one request and lands it in the inline review
+  (`src/editor/aiReview/`) with exact-match-or-discard apply: if the range
+  changed, the result is dropped.
+- The corrector (`src/editor/writingCorrector/`) is local and needs no key.
+- The Gemini key is stored in main (`userData/assistant/settings.json`, mode
+  0600; the path is historical) and set from Writing assists. With no key the
+  key field is the first row and ✦ AI is shown disabled; clicking it opens
+  Writing assists at the key field. Writing AI IPC is accepted only from
+  trusted app windows (`electron/ipc/trust.ts`).
 
 **One AI key, and the selection decides** (`specs/2026-09-24-one-ai-key.md`).
 Continuation keys never rewrite. Three direct length keys (defaults ⌘, ⌘. ⌘/,
@@ -384,49 +311,48 @@ neighbours on an English keyboard) ask for a Sentence, Paragraph, or full Idea
 (until the current idea/section is complete; no headings) in one request; if a
 shorter suggestion is visible they extend it, generating only the missing part.
 The AI key (default ⌘↵) suggests a Sentence and each repeat extends it one
-length. All four keys are configurable and kept distinct; the length keys run at
-highest precedence (they outrank the corrector's ⌘. and CodeMirror's ⌘/ comment
-toggle) and do nothing over a selection. Automatic suggestions stay short. With text selected the same key opens the selection AI
-menu (typed instruction, or Rewrite / Expand / Shorten / Summarize / Turn into a
-list); every menu action is selection-scoped (Shorten = Tighten mode, the rest
-are canned Edit instructions) and lands in the inline review. Keys are shared
-across both: Tab accepts (pending selection review → ghost → indentation), Esc
+length. All four keys are configurable and kept distinct; the length keys run
+at highest precedence (they outrank the corrector's ⌘. and CodeMirror's ⌘/
+comment toggle) and do nothing over a selection. Automatic suggestions stay
+short. With text selected the same key opens the ✦ AI menu (typed instruction,
+or Rewrite / Expand / Shorten / Summarize / Turn into a list); Shorten is
+Tighten mode, the rest are canned Edit instructions. Keys are shared across
+both: Tab accepts (pending selection review → ghost → indentation), Esc
 dismisses or rejects, ⌥↑/↓ cycles alternatives. The selection keymap is
-registered before autocomplete and always consumes the key over a selection, so
-the AI key can never fall through to CodeMirror's `insertBlankLine` there. The
+registered before autocomplete and always consumes the key over a selection,
+so the AI key never falls through to CodeMirror's `insertBlankLine` there. The
 Writing assists menu holds settings only; in-the-moment controls (Longer,
 Another, Steer…) live on the suggestion toolbar.
 
-Codex is the preferred runtime for the main workspace agent when connected.
-OpenAI API-key paths remain for dictation/media, fallback text runs, and other
-non-agent API features. Keep provider transport, app-server protocol handling,
-retry/error mapping, request construction, prompt text, thinking-summary
-sanitizing, and file-change capture separate from proposal persistence and file
-mutation.
+**Outside agents** write Markdown directly in the folder. Iliad derives their
+changes from the workspace baseline (next section) and shows them in the same
+document-native review UI, per chunk. Outside tools learn how to work with
+Iliad from the bundled skill and the CLI:
 
-The agent tool boundary is document-native:
+- `iliad status [--json]` prints each window's folder and open document
+  (`Iliad is not open.`, exit 3, when the app is not running).
+- `iliad open <file> [--line N]` shows a Markdown file in the window whose
+  workspace contains it (longest root), or a new window for the file's folder;
+  it replies only after the renderer opened the document and revealed the line.
+- `iliad skill install` copies `resources/skill/iliad/SKILL.md` to
+  `~/.claude/skills/iliad/SKILL.md`; `iliad skill print` prints it.
+- `iliad [folder]` keeps the old launch behavior.
 
-- allowed direction: list/read/search Markdown documents, open one visible
-  workspace Markdown document in the editor through a validated, receipted,
-  desktop-only navigation tool (ADR-0016), inspect explicit context, propose
-  Markdown changes through one review-first contract with anchored targeted
-  edits and explicit `edit_file` and `create_file` operations, ask the user,
-  and run bounded document-focused workers;
-- avoided direction: shell commands, package installation, arbitrary scripts,
-  git operations, browser automation, system inspection, hidden workspace-wide
-  upload, or non-Markdown artifact builders as core product primitives.
+The CLI talks to main over a user-only socket (`userData/iliad.sock`, chmod
+0600) and never writes documents. The packaged `Contents/Resources/bin/iliad`
+wrapper runs `iliad.mjs` with the app's own executable in Node mode; the app
+menu item "Install ‘iliad’ Command…" symlinks it into the first writable of
+`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` and warns when that
+folder is not on `PATH`.
 
-Assistant panel UI should stay minimal. Component extraction should preserve
-existing class names and layout unless a spec explicitly changes the UX.
+Relevant files:
 
-Codex runs write into the real workspace under a `workspace-write` sandbox.
-The provider snapshots visible Markdown before the turn, writes that snapshot
-to a recovery journal in `userData`, and restores every changed path after the
-turn on every exit: success, failure, cancel, timeout, or app-server loss.
-Cancel and timeout interrupt the turn and wait for its terminal notification
-(resetting the app-server if it stays silent) before restoring. Stale journals
-are recovered on the next workspace attach and become Codex proposals. See
-`specs/2026-09-01-workspace-baseline-review.md`.
+- `electron/writing/`, `electron/ipc/autocomplete.ts`, `electron/ipc/tighten.ts`,
+  `electron/ipc/writingSettings.ts`, `electron/ipc/trust.ts`
+- `src/editor/ideaAutocomplete/`, `src/editor/aiReview/`,
+  `src/components/WritingAssistsMenu.tsx`
+- `bin/iliad`, `bin/iliad.mjs`, `bin/lib/`, `resources/skill/iliad/SKILL.md`
+- `electron/cli/`, `src/app/useCliBridge.ts`
 
 ## Workspace Baseline and Outside Changes
 
@@ -434,7 +360,10 @@ Iliad keeps one accepted Markdown state per open workspace, the baseline, in
 the main-process `WorkspaceBaselineService` (`electron/review/`). Disk is
 compared against it whenever the watcher reports Markdown activity, and the
 difference is the outside-change review ("changed outside Iliad") that the
-renderer shows through the same proposal UI as assistant edits.
+renderer shows in the document-native review UI. Review records still use the
+historical `AgentChangeProposal` type names and `agent:*` IPC channel names;
+the handlers live in `electron/ipc/review.ts` and resolve the workspace root
+from the window's session, never from a renderer-sent root.
 
 Rules that must hold:
 
@@ -446,7 +375,7 @@ Rules that must hold:
   expected content immediately before writing. Structural file actions run
   inside `runIliadMutation`, which defers reconciliation while in flight and
   records the result.
-- Watcher hints are never dropped. Markers, the Codex lease, and in-flight
+- Watcher hints are never dropped. Mutation markers and in-flight
   mutations defer reconciliation; they do not cancel it. `change` events on
   known files refresh only those paths; renames, unknown filenames, and
   watcher restarts trigger a full scan. Create and delete items need a second
@@ -464,9 +393,11 @@ Rules that must hold:
   current file is renamed to a hidden holding path and its bytes verified
   against the reviewed hash, the new text is written to a temp file in the
   same folder and published with a hard link (fails if anything appeared at
-  the path), then the held file is removed. Any mismatch or collision leaves
-  the newer file untouched, keeps the held bytes beside it, and reports
-  `stale`. Restoring a deleted file creates it exclusively (`O_EXCL`).
+  the path), then the held original goes to the Trash (never deleted; if
+  trashing fails it stays at its hidden holding path). Any mismatch or
+  collision leaves the newer file untouched, keeps the held bytes beside it,
+  and reports `stale`. Restoring a deleted file creates it exclusively
+  (`O_EXCL`).
 - Keep never loads disk over a conflicted or dirty editor buffer (only the
   conflict banner's confirmed Keep discards it), Esc and Tab never act on
   outside chunks, and a conflicted buffer resumes autosave only when disk
@@ -479,53 +410,37 @@ Rules that must hold:
 
 Relevant files:
 
-- `electron/review/workspaceBaseline.ts`
-- `electron/review/externalReviewProjection.ts`
-- `electron/ipc/workspace.ts`
-- `electron/ipc/files.ts`
-- `electron/agent/agentService.ts`
-- `src/app/useAgentProposals.ts`
-- `src/app/useDocumentPersistence.ts`
-
-Relevant files:
-
-- `electron/agent/agentService.ts`
-- `electron/agent/openaiResponses.ts`
-- `electron/agent/openai/`
-- `electron/agent/runtime/`
-- `electron/agent/proposalDrafts.ts`
-- `electron/agent/proposalStore.ts`
-- `electron/ipc/agent.ts`
-- `electron/preload.ts`
-- `src/app/useAgentProposals.ts`
-- `src/assistant/useAssistantRun.ts`
-- `src/components/AssistantPanel.tsx`
-- `src/components/assistant/`
+- `electron/review/`
+- `electron/ipc/review.ts`, `electron/ipc/files.ts`, `electron/ipc/workspace.ts`
+- `electron/fs/workspaceMutationMarkers.ts`
+- `src/app/useOutsideReview.ts`, `src/review/`
 - `src/editor/aiReview/`
-- `src/styles/assistant.css`
-- `src/types/iliad.ts`
+- `src/app/useDocumentPersistence.ts`
 
 ## Styles
 
 CSS is imported through `src/styles/app.css` only. Keep imports in this order because later files intentionally layer on narrower responsibilities:
 
-1. `base.css`
-2. `chrome.css`
-3. `sidebar.css`
-4. `assistant.css`
+1. `tokens.css`
+2. `base.css`
+3. `chrome.css`
+4. `sidebar.css`
 5. `editor.css`
-6. `visual-markdown.css`
-7. `popovers.css`
-8. `responsive.css`
+6. `mark.css`
+7. `visual-markdown.css`
+8. `popovers.css`
+9. `responsive.css`
 
 Style ownership:
 
+- Every colour lives only in `tokens.css`, named by role; raw colours elsewhere fail `npm run lint:css`.
 - Reset, root fonts, launch screen, and generic primary button styles live in `base.css`.
 - App shell, topbar, document tab, shared icon buttons, and content grid styles live in `chrome.css`.
 - Sidebar, file tree, tree selection, and inline rename styles live in `sidebar.css`.
 - Editor container, empty editor state, and scroll geometry live in `editor.css`.
 - CodeMirror visual Markdown classes and widgets live in `visual-markdown.css`.
-- Right-side assistant panel, transcript, proposal cards, and composer styles live in `assistant.css`.
+- Inline review (outside chunks, ✦ AI results, review toolbar) lives in `editor.css`; pending-review tree markers live in `sidebar.css`.
+- The paperclip signature mark lives in `mark.css`.
 - Typography popover, tree context menu, toasts, and transient error text live in `popovers.css`.
 - Media queries live in `responsive.css` and stay last.
 
@@ -676,8 +591,9 @@ Relevant files:
 - App shell state and cross-feature coordination: `src/App.tsx`.
 - Workspace loading and persisted workspace state: `src/app/useWorkspace.ts`.
 - Autosave, dirty state, save flushing, and load/clear document state: `src/app/useDocumentPersistence.ts`.
-- Agent proposal/review orchestration: `src/app/useAgentProposals.ts`.
-- Assistant run state, transcript, settings, status events, and composer coordination: `src/assistant/useAssistantRun.ts` plus `src/components/assistant/`.
+- Outside-change review state and actions: `src/app/useOutsideReview.ts` and `src/review/`; inline review rendering: `src/editor/aiReview/`.
+- Comments and notes (companion files): `src/app/useSelectionComments.ts`, `src/comments/`, `src/app/useWritingNotes.ts`, `src/notes/`; companion path rules: `electron/shared/`.
+- CLI bridge: `bin/` (CLI), `electron/cli/` (socket and open requests), `src/app/useCliBridge.ts` (renderer side), `resources/skill/iliad/SKILL.md` (agent instructions).
 - File tree traversal and path relocation helpers: `src/files/fileTree.ts` and `src/files/pathUtils.ts`.
 - User-facing file operations and save-before-action orchestration: `src/files/fileActions.ts`.
 - Reusable UI surfaces and popovers: `src/components/`.
@@ -686,7 +602,7 @@ Relevant files:
 - Visual Markdown feature rules and shared decoration helpers: `src/editor/visualMarkdown/`.
 - Electron file safety and workspace boundary rules: `electron/fs/pathSafety.ts`.
 - Electron filesystem operations: `electron/fs/fileOps.ts`.
-- Electron assistant provider, proposal storage, settings, and diagnostics: `electron/agent/` and `electron/diagnostics/`.
+- Built-in writing AI (Gemini, tighten, key storage): `electron/writing/`; diagnostics: `electron/diagnostics/`.
 - Workspace baseline, outside-change review, and the guarded Markdown write primitive: `electron/review/`.
 - IPC handler groups: `electron/ipc/`.
 - Window creation and app loading: `electron/window/createWindow.ts`.
@@ -709,6 +625,8 @@ Use these checks after meaningful changes:
 
 ```bash
 npm run typecheck
+npm test
+npm run lint:css
 npm run build
 ```
 
@@ -719,6 +637,18 @@ Manual Electron checks still matter:
 - Open several Markdown files repeatedly.
 - Open a document with local or remote image syntax.
 - Trackpad/wheel scroll a long document and confirm a native overlay scrollbar appears.
+- With a Gemini key set in Writing assists: request a completion (⌘↵, ⌘, ⌘.
+  ⌘/) and accept it with Tab; select text, run a ✦ AI action, Accept and
+  Reject it. Without a key, ✦ AI is disabled and opens Writing assists.
+- Edit an open document from another tool: each chunk shows Keep / Restore;
+  Keep all and Restore all work from the toolbar and the tree strip; an
+  outside-created file offers Keep file / Move to Trash and a deletion offers
+  Confirm deletion / Restore file.
+- Add a comment on a selection and confirm `name.comments.md` appears beside
+  the document; "Open notes" creates and opens `name.notes.md`; rename the
+  document and confirm both companions follow it.
+- `iliad status` lists the window and document; `iliad open <file> --line N`
+  shows the file at that line (also with the app closed).
 
 ## How to Start Future Work
 

@@ -1,11 +1,14 @@
 # Outside Changes QA Matrix
 
-Date: 2026-09-01
+Date: 2026-09-01 (updated 2026-09-24 for
+`specs/2026-09-24-iliad-writing-surface.md`)
 Status: living checklist for `specs/2026-09-01-workspace-baseline-review.md`
 
 This is the ordered, exhaustive list of live cases for the workspace baseline,
 outside-change review, conflict mode, and their interplay with the file tree,
-the editor, Iliad's own file actions, and the internal (Codex) agent. Walk it
+the editor, Iliad's own file actions, per-chunk review, and companion files.
+Iliad no longer has an internal agent (ADR-0021); its cases were removed and
+the results log below keeps them only as history. Walk it
 top to bottom in the built app on a disposable workspace. Record the result
 per case in the Status column: `pass`, `fail (note)`, `n/a`, or blank.
 
@@ -20,7 +23,7 @@ Legend for expected file tree state:
 - **amber dot** = edited outside Iliad (`is-markdown has-pending-indicator`)
 - **green create row** = created outside Iliad (`is-pending-create`)
 - **struck delete row** = deleted outside Iliad (ghost row)
-- **count** = "N pending review items" strip with Accept all / Reject all
+- **count** = "N pending review items" strip with Keep all / Restore all
 
 ## A. Outside edits: detection and classification
 
@@ -49,19 +52,19 @@ Legend for expected file tree state:
 
 | ID | Case | Expected | Status |
 | --- | --- | --- | --- |
-| B1 | Keep an outside edit (Accept changes) | no disk write, item cleared, editor shows outside content editable, count -1 | pass |
-| B2 | Restore an outside edit (Reject changes) | baseline content written back, item cleared, editor reloads baseline | pass |
+| B1 | Keep all on an outside edit | no disk write, item cleared, editor shows outside content editable, count -1 | pass |
+| B2 | Restore all on an outside edit | baseline content written back, item cleared, editor reloads baseline | pass |
 | B3 | Keep an outside-created file | item cleared, file stays, row becomes normal | pass |
-| B4 | Reject an outside-created file | file moved to macOS Trash, row gone, empty parent folder removed | pass |
-| B5 | Confirm an outside delete (Accept) | baseline forgets the file, ghost row gone | pass |
-| B6 | Restore an outside-deleted file (Reject) | file recreated with baseline content, row normal | pass |
+| B4 | Move to Trash an outside-created file | file moved to macOS Trash, row gone, empty parent folder removed | pass |
+| B5 | Confirm deletion of an outside delete | baseline forgets the file, ghost row gone | pass |
+| B6 | Restore file on an outside delete | file recreated with baseline content, row normal | pass |
 | B7 | Keep an emptied file | baseline is now empty content | pass |
 | B8 | Restore an emptied file | text comes back | pass |
-| B9 | Accept all with mixed edit/create/delete | all items cleared, disk untouched | pass |
-| B10 | Reject all with mixed items | edits restored, creates trashed, deletes recreated, count 0 | pass |
+| B9 | Keep all (tree strip) with mixed edit/create/delete | all items cleared, disk untouched | pass |
+| B10 | Restore all (tree strip) with mixed items | edits restored, creates trashed, deletes recreated, count 0 | pass |
 | B11 | Act on an item after the file changed again outside | action reports stale, review refreshes with the newer content, nothing written | pass (fixed; the stale path re-verified live under Bx1 and Bx3 on 2026-09-02) |
 | B12 | Act on an item after the outside tool reverted it | item is gone before the click; no error | pass |
-| B13 | Reject all when the Trash is unavailable for one create | others restored, that one reported, count shows the remainder | pass |
+| B13 | Restore all when the Trash is unavailable for one create | others restored, that one reported, count shows the remainder | pass |
 | B14 | Keep then edit again outside | new item diffs against the kept content, not the original | pass |
 | B15 | Restore while Git HEAD changed since the review | first click blocked with a notice and review refreshed; second click succeeds | pass |
 
@@ -114,22 +117,7 @@ Legend for expected file tree state:
 | E9 | Rename a file that has a pending outside item | item follows the new name | pass |
 | E10 | Trash a file that has a pending outside item | item disappears | pass |
 | E11 | Paste an image (asset write) | no item | pass |
-| E12 | Tighten / selection tool accept | no item (goes through autosave) | blocked (no provider connected) |
-
-## F. Internal agent (Codex) interplay
-
-| ID | Case | Expected | Status |
-| --- | --- | --- | --- |
-| F1 | Codex proposal pending on file A, outside edit on A | internal proposal blocked ("outside drift") until the outside item is resolved | pass (2026-09-02; see log: the internal card is hidden while the outside item holds the path, the IPC guard refuses with the pending-review message, applies after Restore) |
-| F2 | Accept an internal proposal file | no outside item for that file afterwards | pass |
-| F3 | Accept one hunk | no outside item, disk updated | pass |
-| F4 | Reject internal proposal | no disk change, no outside item | pass |
-| F5 | Codex run that edits two files, let it finish | proposals appear, disk restored, no outside items | blocked (Codex not connected) |
-| F6 | Cancel a Codex run mid-write | disk restored, no outside items, transcript shows cancel | blocked (Codex not connected) |
-| F7 | Kill the `codex` process mid-run | run fails promptly, disk restored | blocked (Codex not connected) |
-| F8 | Force-quit Iliad mid-run, reopen | files restored, Codex proposal pending, no outside items for them | blocked (Codex not connected) |
-| F9 | Outside edit during a Codex run | known limitation: the edit is reconciled as part of the Codex run, restored, and becomes a Codex proposal (attributed to Codex, still reviewable); it is not lost | blocked (Codex not connected) |
-| F10 | Internal proposal apply on a file with `chmod 444` | proposal shows failed, hunks still pending; retry after `chmod 644` succeeds | pass |
+| E12 | ✦ AI result or autocomplete accept | no item (goes through autosave) | |
 
 ## G. Workspace lifecycle
 
@@ -151,25 +139,17 @@ Legend for expected file tree state:
 | H3 | Workspace on an external volume (Trash across volumes) | reject create still works via system Trash | pass (ExFAT volume; file lands in that volume's Trash) |
 | H4 | Very long file names / unicode names outside | items display correctly | pass |
 
-## X. Added from the Codex review (2026-09-01)
+## X. Added from the review of the matrix (2026-09-01)
 
-Cases proposed by an xhigh Codex review of the matrix against the code. Rows
-marked "fixed" were addressed in code before the live run.
+Cases proposed by a review of the matrix against the code. Rows marked
+"fixed" were addressed in code before the live run.
 
 | ID | Case | Expected | Status |
 | --- | --- | --- | --- |
-| Fx1 | Create or delete a file Codex never touches during a Codex run | known limitation: attributed to the Codex run and restored into a Codex proposal; nothing lost | blocked (Codex not connected) |
-| Fx2 | Outside writer changes a file after Codex changed it, right before restore | path reported unrestored; outside content stays on disk and appears as an outside item | blocked (Codex not connected) |
-| Fx3 | Force-quit during a Codex run, then corrupt the journal | invalid journal is skipped; disk is accepted as baseline (known gap, logged) | blocked (Codex not connected) |
-| Fx4 | Journal recovery fails for one path | journal kept for retry on next attach (fixed) | blocked live (Codex not connected); covered by unit tests |
-| Fx5 | Cancel while thread/turn start is unresolved | app-server reset immediately, restore runs (fixed) | blocked live (Codex not connected); covered by unit tests |
-| Fx6 | Ancestor folder replaced by a symlink while Codex restores | restore refuses; nothing written outside the workspace | blocked (Codex not connected) |
 | Bx1 | Outside edit lands after Restore validated but before the write | Restore reports the file changed again; nothing written (fixed: final recheck before the write) | pass (7 trials, 1-30 ms) |
 | Bx2 | Outside-created file changes after validation but before Trash | same as Bx1 (fixed) | pass (re-verified 2026-09-02: 12 trials at 0-25 ms, C2 never trashed) |
 | Ax1 | Symlink swapped in between safety check and write | write fails with ELOOP, never follows the link (fixed: O_NOFOLLOW) | blocked live (swap cannot be timed from outside); covered by unit test (symlink target is refused as unsafe_path) |
-| Gx1 | Internal apply/hunk in workspace A, switch to B before IPC returns | B's editor untouched (fixed: workspace guard) | pass |
 | Gx2 | External Restore in A, switch to B before it completes | B untouched (fixed) | pass (500 items restored) |
-| Fx7 | Apply a create proposal, navigate and type before it completes | known: created file is activated | pass |
 | Ex1 | Rename or move a folder holding several pending items | items follow the new paths and the renderer updates immediately (fixed: publish on structural records) | pass |
 | Ex2 | Drag a pending-edited file or a folder with pending descendants | drag is disabled for them (product decision; no stale UI) | pass |
 | Dx1 | Two windows autosave the same clean file | one saves; the other enters conflict with its buffer intact | pass |
@@ -187,16 +167,51 @@ marked "fixed" were addressed in code before the live run.
 | Bx3 | Two windows act on the same item at once | exactly one succeeds; the other reports stale | pass (re-verified 2026-09-02: loser shows the refreshed notice in 8 of 8 trials) |
 | Cx1 | Virtual create/delete review selected, then disk reverts | virtual editor, target, selection, and count all clear | pass |
 | Cx2 | History destination deleted outside while pending | history skips it; delete review still reachable from the tree | pass |
-| Fx8 | Internal hunk accept or delete apply while the same path has an outside item | no disk write; proposal failed/retryable; works after Restore, stale after Keep | pass (failed/retryable while pending; applies after Restore; stale after Keep) |
 | Gx3 | Older pull result arrives after a newer push; reload during an action | newest snapshot wins; no resurrected terminal items | pass |
 | Gx4 | One of two windows switches away | the other keeps baseline and review | pass |
 | Hx1 | Watcher retries exhausted, then an outside edit | degraded notice; reattach or reload performs a full scan | blocked (cannot force retry exhaustion) |
 | Hx2 | Delete a watched folder with several baseline files | each file becomes a delete item; Restore rebuilds the hierarchy | pass |
 
+## I. Per-chunk review of outside edits
+
+Future manual checks (Stage B of the writing-surface spec).
+
+| ID | Case | Expected | Status |
+| --- | --- | --- | --- |
+| I1 | Outside edit with three separate chunks, Keep the middle one | no disk write; that chunk leaves the review, the other two stay; count unchanged until the last chunk is decided | |
+| I2 | Restore one chunk | disk equals disk minus that chunk (guarded replacement); other chunks stay pending; held original in the Trash | |
+| I3 | Keep one chunk, Restore another, Keep the last | item clears; disk is the mix the writer chose; baseline equals disk | |
+| I4 | Act on a chunk after the file changed again outside | `stale` notice, review refreshes, nothing written | |
+| I5 | Restore a chunk while the file is held open by a writer that writes after the check | newer bytes never lost (held file kept or a `name (outside copy N).md` appears) | |
+| I6 | After Keep/Restore | focus moves to the next chunk's Keep button; Esc and Tab do nothing on outside chunks | |
+| I7 | Keep a chunk while the buffer is in conflict | disk is never loaded over the dirty buffer; autosave resumes only when disk equals the saved text | |
+| I8 | Whitespace-only chunk next to a text chunk | shown as its own chunk (known; backlog: merge with neighbour) | |
+| I9 | Keep all / Restore all from the file toolbar and from the tree strip | same result as deciding each chunk | |
+| I10 | App language Spanish | chunk and file labels translated; actions work | |
+
+## J. Companion files (notes and comments)
+
+Future manual checks (Stage D of the writing-surface spec).
+
+| ID | Case | Expected | Status |
+| --- | --- | --- | --- |
+| J1 | Outside tool edits or creates `name.notes.md` / `name.comments.md` | no review item, no amber dot, no count change | |
+| J2 | Outside tool deletes a handled comment entry and edits the document | comment disappears from the editor; the document edit is reviewed per chunk | |
+| J3 | Restore that document edit | the removed comment comes back if its quote is found again | |
+| J4 | Add a comment on a selection | `name.comments.md` created beside the document; tree shows "Comments · 1" under the active document | |
+| J5 | Delete the last comment | `name.comments.md` moved to the Trash | |
+| J6 | Writing assists → Open notes | empty `name.notes.md` created and opened; Back returns to the document | |
+| J7 | Rename, move, duplicate, trash a document with both companions | companions follow (duplicate picks a stem free for the group); no outside items | |
+| J8 | Unrelated `name.notes.md` already at the rename/move target | action refused; nothing overwritten | |
+| J9 | Create or rename a document to `x.notes.md` | refused | |
+| J10 | Outside edit to a comment's quote while the document is open | comment re-anchors from the file; ambiguous duplicate becomes detached ("N detached comments") | |
+| J11 | Autosave of comments while an outside tool writes the comments file | three-way merge by id; no comment lost; outside deletion wins unless edited here | |
+
 ## Results log
 
 Fill in as cases are run. Bugs found during the run are listed here with the
-fix commit or file.
+fix commit or file. Entries before 2026-09-24 mention the removed internal
+agent (Codex proposals, Accept/Reject labels); they are kept as history.
 
 - 2026-09-01: block A + B run by a QA agent on the built app (15 pass, 3
   fail). B11: Restore acted on the refreshed item and overwrote a never-shown

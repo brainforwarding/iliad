@@ -39,7 +39,7 @@ Near-monochrome. Used for active file, links, Accept, focus, selection. Chosen f
 | token | value | role |
 |---|---|---|
 | `--brand-gold` | `#e8920a` | paperclip mark, gold moments |
-| `--brand-gold-bright` | `#ffad1f` | brighter fills / agent pulse |
+| `--brand-gold-bright` | `#ffad1f` | brighter fills |
 | `--brand-gold-ink` | `#5a3d00` | text on gold fills |
 
 ### Text-mark families (annotations & diff)
@@ -76,21 +76,21 @@ Every **persistent** mark over readable text (diff, comment, highlight) is a fix
 - **Live text selection is the exception:** a full-height `--selection-wash` (graphite), so it visibly dominates whenever it overlaps an annotation.
 - The fixed `em` band means light and strong tiers occupy the **same space** — the strong never peeks past the light. Don't drive band height off `line-height` (it changes thickness when leading changes).
 
-### Diff (agent edits) — two tiers, sentence-level
-Render the agent's review as **whole sentences** added/removed, with the **words that actually changed** in a stronger shade.
+### Diff (outside changes and ✦ AI results) — two tiers, sentence-level
+Render the review as **whole sentences** added/removed, with the **words that actually changed** in a stronger shade.
 
 - Added sentence → `--diff-ins-soft`; changed words → `--diff-ins-strong`; text in `--diff-ins-ink`.
 - Removed sentence → `--diff-del-soft` + strikethrough `--diff-del-line`; changed words → `--diff-del-strong`; text in `--diff-del-ink`.
 - Both tiers share the band geometry above; **only the alpha differs.**
 - **Compute a word-level (token) intradiff** between old/new — don't wash the whole sentence uniformly. Common prefix/suffix stay soft; only the differing run is strong.
 - **Collapse single-sided edits:** when one side has zero changed tokens (pure insertion/deletion), show **one line** with the change inline — not two near-identical washed sentences.
-- Implementation: `src/editor/aiReview/diff.ts` (today line-level only — add the token intradiff) and `src/editor/aiReview/extension.ts` (CodeMirror marks). Marks come from the diff engine, never hand-authored.
+- Implementation: `src/editor/aiReview/diff.ts` (line/chunk diff), `src/editor/aiReview/intralineDiff.ts` (token intradiff) and `src/editor/aiReview/extension.ts` (CodeMirror marks). Marks come from the diff engine, never hand-authored.
 
 ### Comments
 A blue (`--comment`) bottom-half wash on the commented range; optional left margin marker in `--comment-ink`. One tier. Distinct from diff (green/coral), highlight (gold), and selection (graphite). Lives with the selection-comments overlay (`src/editor/selectionComments/`).
 
 ### Highlight
-The user's `==highlight==` renders as a gold (`--highlight`) bottom-half wash — same band language as diff/comment, distinct hue. It's user content, not agent status. `src/editor/visualMarkdown/inline.ts`.
+The user's `==highlight==` renders as a gold (`--highlight`) bottom-half wash — same band language as diff/comment, distinct hue. It's user content, not review status. `src/editor/visualMarkdown/inline.ts`.
 
 ## Mascot — the clip
 
@@ -116,7 +116,7 @@ System stacks are the brand — **no web fonts** (offline, fast, native feel).
 ## Radii & motion
 
 - Radii: `--radius-surface 8px` (panels/cards), `--radius-control 6px` (buttons/inputs), `--radius-pill 999px`.
-- Motion is ambient and quiet: active-file light sheen ~7–10% over ~13s; agent presence = a slow breathing dot (pulses in gold). Glass (`backdrop-filter`) only on floating surfaces (typography popover, launch/overlay) — never the file rail or editor. **The writing column never animates.**
+- Motion is ambient and quiet: active-file light sheen ~7–10% over ~13s. Glass (`backdrop-filter`) only on floating surfaces (typography popover, launch/overlay) — never the file rail or editor. **The writing column never animates.**
 
 ## Where things live
 

@@ -81,7 +81,6 @@ Before building release artifacts:
 npm version X.Y.Z --no-git-tag-version
 npm run lint:css
 npm run typecheck
-npm run smoke:review
 npm test
 npm run build
 npm audit --omit=dev --audit-level=high
@@ -208,6 +207,16 @@ hdiutil detach "$MOUNT_ROOT" >/dev/null
 ditto -x -k "release/Iliad MD-X.Y.Z-mac-arm64.zip" "$ZIP_ROOT"
 spctl --assess --type execute --verbose=4 "$ZIP_ROOT/Iliad MD.app"
 xcrun stapler validate "$ZIP_ROOT/Iliad MD.app"
+
+# Packaged CLI wrapper and skill: the wrapper must be executable and the CLI
+# script and bundled skill present, or "Install ‘iliad’ Command…" installs a
+# broken command.
+APP="$ZIP_ROOT/Iliad MD.app"
+test -x "$APP/Contents/Resources/bin/iliad" && echo "wrapper ok"
+test -f "$APP/Contents/Resources/bin/iliad.mjs" && ls "$APP/Contents/Resources/bin/lib"
+test -f "$APP/Contents/Resources/skill/iliad/SKILL.md" && echo "skill ok"
+"$APP/Contents/Resources/bin/iliad" --help
+"$APP/Contents/Resources/bin/iliad" skill print | head -5
 
 rm -rf "$MOUNT_ROOT" "$ZIP_ROOT"
 ```
