@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeBufferReplacementStep,
   editorReviewActionLabelsForMode,
   externalActiveFileAutoSelectionDecision,
   externalReviewTargetForActiveFile,
@@ -226,6 +227,14 @@ describe("useOutsideReview helpers", () => {
         canReplaceActiveBuffer: true
       })
     ).toBe(false);
+  });
+
+  it("saves a dirty buffer before Keep file opens another document and never replaces a conflicted one", () => {
+    expect(activeBufferReplacementStep({ hasActiveDocument: false, inConflict: false, clean: false })).toBe("replace");
+    expect(activeBufferReplacementStep({ hasActiveDocument: true, inConflict: false, clean: true })).toBe("replace");
+    expect(activeBufferReplacementStep({ hasActiveDocument: true, inConflict: false, clean: false })).toBe("save_first");
+    expect(activeBufferReplacementStep({ hasActiveDocument: true, inConflict: true, clean: true })).toBe("keep");
+    expect(activeBufferReplacementStep({ hasActiveDocument: true, inConflict: true, clean: false })).toBe("keep");
   });
 
   it("resumes autosave after a review action only when disk equals the saved text", async () => {

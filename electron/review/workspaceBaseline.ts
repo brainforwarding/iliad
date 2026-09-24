@@ -72,6 +72,11 @@ export interface WorkspaceBaselineServiceOptions {
    * published at the path.
    */
   beforeRestorePublish?: (absolutePath: string) => Promise<void> | void;
+  /**
+   * Test seam: runs when restoring an outside deletion, after the last look
+   * and just before the exclusive create at the path.
+   */
+  beforeDeletionRestoreCreate?: (absolutePath: string) => Promise<void> | void;
 }
 
 /** One chunk of an outside edit, exactly as the renderer saw it (spec V3). */
@@ -147,6 +152,7 @@ export class WorkspaceBaselineService {
   private readonly trashItem: ((absolutePath: string) => Promise<void>) | null;
   private readonly onLog: WorkspaceBaselineServiceOptions["onLog"];
   private readonly beforeRestorePublish: WorkspaceBaselineServiceOptions["beforeRestorePublish"];
+  private readonly beforeDeletionRestoreCreate: WorkspaceBaselineServiceOptions["beforeDeletionRestoreCreate"];
   private disposed = false;
 
   constructor(options: WorkspaceBaselineServiceOptions = {}) {
@@ -157,6 +163,7 @@ export class WorkspaceBaselineService {
     this.trashItem = options.trashItem ?? null;
     this.onLog = options.onLog;
     this.beforeRestorePublish = options.beforeRestorePublish;
+    this.beforeDeletionRestoreCreate = options.beforeDeletionRestoreCreate;
   }
 
   async attach(workspaceRoot: string, subscriber: BaselineSubscriber): Promise<ExternalReviewSnapshot> {
@@ -1142,6 +1149,7 @@ export class WorkspaceBaselineService {
         await mkdir(path.dirname(absolutePath), { recursive: true });
 
         try {
+          await this.beforeDeletionRestoreCreate?.(absolutePath);
           // Exclusive create: a file that appeared meanwhile is never replaced.
           await writeNoFollow(
             absolutePath,
@@ -1233,9 +1241,29 @@ export class WorkspaceBaselineService {
     }
 
     await rm(temp, { force: true }).catch(() => undefined);
-    await rm(held, { force: true }).catch(() => undefined);
-    await rmdir(holdingDirectory).catch(() => undefined);
+    await this.retireHeldOriginal(held, holdingDirectory);
     return null;
+  }
+
+  /**
+   * The held original is never deleted: a writer that opened the file before
+   * the hold may still write into its inode after the hash check, and those
+   * bytes must stay recoverable. It goes to the Trash (under its original
+   * basename); if that is unavailable or fails, it stays at its unique hidden
+   * holding path.
+   */
+  private async retireHeldOriginal(held: string, holdingDirectory: string) {
+    if (this.trashItem) {
+      try {
+        await this.trashItem(held);
+        await rmdir(holdingDirectory).catch(() => undefined);
+        return;
+      } catch (error) {
+        this.onLog?.("restore_held_trash_failed", { held, message: errorMessage(error) });
+      }
+    }
+
+    this.onLog?.("restore_held_kept", { held });
   }
 
   /**
@@ -1302,9 +1330,32 @@ export class WorkspaceBaselineService {
       // fall through
     }
 
+    // A newer file took the path: keep the held bytes beside it under a name
+    // nobody uses. Each candidate is published with a no-clobber hard link
+    // (EEXIST moves on to the next name) and the held link is removed only
+    // after one succeeded; if none does, the held file stays where it is.
     const parsed = path.parse(absolutePath);
-    const sibling = path.join(parsed.dir, `${parsed.name} (outside copy ${Date.now()})${parsed.ext}`);
-    await rename(held, sibling).catch(() => undefined);
+
+    for (let attempt = 1; attempt <= 100; attempt += 1) {
+      const suffix = attempt === 1 ? "outside copy" : `outside copy ${attempt}`;
+      const sibling = path.join(parsed.dir, `${parsed.name} (${suffix})${parsed.ext}`);
+
+      try {
+        await link(held, sibling);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+          continue;
+        }
+
+        this.onLog?.("restore_held_kept", { held, message: errorMessage(error) });
+        return;
+      }
+
+      await unlink(held).catch(() => undefined);
+      return;
+    }
+
+    this.onLog?.("restore_held_kept", { held });
   }
 
   private async finishReviewChange(state: WorkspaceBaselineState, relativePaths: string[]) {
