@@ -74,6 +74,16 @@
       "build/**",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "bin",
+        "to": "bin"
+      },
+      {
+        "from": "resources/skill",
+        "to": "skill"
+      }
+    ],
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",

@@ -108,6 +108,22 @@ const api = {
       };
     }
   },
+  // Bridge for the `iliad` CLI (electron/cli): active document and open requests.
+  cli: {
+    setActiveDocument: (documentPath: string | null) => invoke("window:set-active-document", documentPath),
+    takeOpenRequest: () => invoke("cli:take-open-request"),
+    completeOpenRequest: (requestId: string, result: { ok: true } | { ok: false; error: string }) =>
+      invoke("cli:complete-open-request", requestId, result),
+    onOpenRequested: (listener: () => void) => {
+      const handler = () => listener();
+
+      ipcRenderer.on("cli:open-requested", handler);
+
+      return () => {
+        ipcRenderer.removeListener("cli:open-requested", handler);
+      };
+    }
+  },
   openExternalFile: (workspaceRoot: string, filePath: string) =>
     invoke("file:open-external", workspaceRoot, filePath),
   revealInFinder: (workspaceRoot: string, filePath: string) =>

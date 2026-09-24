@@ -1,0 +1,16 @@
+#!/bin/sh
+# `iliad` command for the packaged Iliad MD app. The app menu item
+# "Install 'iliad' Command..." symlinks this file onto PATH. It runs the CLI
+# script with the app's own executable in Node mode, so no system Node is
+# needed and no Dock icon appears. (Checkouts use bin/iliad.mjs directly.)
+self="$0"
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case "$link" in
+    /*) self="$link" ;;
+    *) self="$(dirname "$self")/$link" ;;
+  esac
+done
+bin_dir=$(cd "$(dirname "$self")" && pwd -P)
+contents_dir=$(dirname "$(dirname "$bin_dir")")
+ELECTRON_RUN_AS_NODE=1 exec "$contents_dir/MacOS/Iliad MD" "$bin_dir/iliad.mjs" "$@"

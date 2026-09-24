@@ -1,5 +1,9 @@
-import { app, BrowserWindow, Menu, protocol, session, shell, type MenuItemConstructorOptions } from "electron";
+import { app, BrowserWindow, dialog, Menu, protocol, session, shell, type MenuItemConstructorOptions } from "electron";
 import path from "node:path";
+import { createCliRequestHandler } from "./cli/commands.js";
+import { installCliCommand, loginShellPath } from "./cli/installCommand.js";
+import { registerCliIpc } from "./cli/ipc.js";
+import { startCliServer, type CliServer } from "./cli/server.js";
 import { registerAutocompleteIpc } from "./ipc/autocomplete.js";
 import { registerAssetIpc, registerAssetProtocol } from "./ipc/assets.js";
 import { registerDiagnosticsIpc } from "./ipc/diagnostics.js";
@@ -45,6 +49,14 @@ if (isDev) {
   // Keep dev runs from sharing the single-instance lock with the linked CLI app.
   app.setPath("userData", path.join(app.getPath("appData"), "iliad-dev"));
 }
+
+if (process.env.ILIAD_USER_DATA) {
+  // Separate profile (own single-instance lock and CLI socket); the `iliad`
+  // CLI honors the same variable.
+  app.setPath("userData", path.resolve(process.env.ILIAD_USER_DATA));
+}
+
+let cliServer: CliServer | null = null;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -94,6 +106,13 @@ function installApplicationMenu() {
           }
         },
         { type: "separator" },
+        {
+          label: "Install \u2018iliad\u2019 Command\u2026",
+          click: () => {
+            void installIliadCommandFromMenu();
+          }
+        },
+        { type: "separator" },
         { role: "services" },
         { type: "separator" },
         { role: "hide" },
@@ -132,6 +151,68 @@ function installApplicationMenu() {
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+async function installIliadCommandFromMenu() {
+  const parentWindow = BrowserWindow.getFocusedWindow();
+  const show = (options: Electron.MessageBoxOptions) =>
+    parentWindow ? dialog.showMessageBox(parentWindow, options) : dialog.showMessageBox(options);
+
+  if (!app.isPackaged) {
+    await show({
+      type: "info",
+      message: "Install \u2018iliad\u2019 Command",
+      detail: "This installs the command for the installed app. In a development checkout, run `npm link` in the checkout instead."
+    });
+    return;
+  }
+
+  try {
+    const result = await installCliCommand({
+      wrapperPath: path.join(process.resourcesPath, "bin", "iliad"),
+      pathValue: await loginShellPath()
+    });
+    const pathWarning = result.onPath
+      ? ""
+      : `\n\n${result.directory} is not on your PATH. Add it to your shell profile, for example:\nexport PATH="${result.directory}:$PATH"`;
+
+    await show({
+      type: "info",
+      message: "The \u2018iliad\u2019 command is installed",
+      detail: `Installed at ${result.linkPath}.${pathWarning}\n\nTry \u2018iliad status\u2019 in a terminal, and \u2018iliad skill install\u2019 to add the Iliad skill for Claude Code.`
+    });
+  } catch (error) {
+    await show({
+      type: "error",
+      message: "Could not install the \u2018iliad\u2019 command",
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
+async function startCliSocket(logWarning: (details: Record<string, string>) => void) {
+  const handler = createCliRequestHandler({
+    host: {
+      listWindowStatus: () => windowManager.listWindowStatus(),
+      findWindowForPath: (absolutePath) => windowManager.findWindowForPath(absolutePath),
+      openWorkspaceWindow: (workspace) => {
+        const window = windowManager.openWorkspace(workspace);
+        return { webContentsId: window.webContents.id, workspaceRoot: workspace.path };
+      },
+      focusWindow: (webContentsId) => windowManager.focusWindowById(webContentsId),
+      requestOpenDocument: (webContentsId, request) => windowManager.cliOpenRequests.request(webContentsId, request)
+    }
+  });
+
+  try {
+    cliServer = await startCliServer({
+      socketPath: path.join(app.getPath("userData"), "iliad.sock"),
+      handler
+    });
+  } catch (error) {
+    console.warn("[cli] Could not start the iliad command socket.", error);
+    logWarning({ message: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 async function resolveLaunchWorkspace({ argv, cwd }: LaunchRequest): Promise<LaunchWorkspaceResult> {
@@ -255,6 +336,13 @@ app.whenReady().then(async () => {
   registerWritingCorrectorMemoryIpc({ resolveWorkspaceRootForSession });
   registerAutocompleteIpc({ service: writingAiService, resolveWorkspaceRootForSession });
   registerTightenIpc({ service: writingAiService });
+  registerCliIpc({
+    setActiveDocument: (webContentsId, documentPath) => windowManager.setActiveDocument(webContentsId, documentPath),
+    takeOpenRequest: (webContentsId) => windowManager.takeCliOpenRequest(webContentsId),
+    completeOpenRequest: (webContentsId, requestId, result) =>
+      windowManager.cliOpenRequests.complete(webContentsId, requestId, result)
+  });
+  await startCliSocket((details) => diagnosticsLogger.info({ area: "app", event: "cli_socket_failed", details }));
   registerUpdatesIpc({
     service: new UpdateService({ currentVersion: app.getVersion() }),
     consumePendingCheckRequest: () => {
@@ -283,6 +371,8 @@ app.whenReady().then(async () => {
   app.on("before-quit", () => {
     writingAiService.dispose();
     baselineService.dispose();
+    void cliServer?.close();
+    cliServer = null;
   });
 });
 

@@ -441,6 +441,23 @@ export interface UpdatesApi {
   onCheckRequested: (listener: () => void) => () => void;
 }
 
+export interface CliOpenDocumentRequest {
+  id: string;
+  /** Absolute, canonical path of a Markdown file inside this window's workspace. */
+  path: string;
+  line: number | null;
+}
+
+export type CliOpenResult = { ok: true } | { ok: false; error: string };
+
+/** Renderer side of the `iliad` CLI (see electron/cli). */
+export interface CliApi {
+  setActiveDocument: (documentPath: string | null) => Promise<void>;
+  takeOpenRequest: () => Promise<CliOpenDocumentRequest | null>;
+  completeOpenRequest: (requestId: string, result: CliOpenResult) => Promise<void>;
+  onOpenRequested: (listener: () => void) => () => void;
+}
+
 export interface IliadApi {
   getLaunchWorkspace: () => Promise<WorkspaceInfo | null>;
   openWorkspaceDialog: (language?: "en" | "es") => Promise<WorkspaceInfo | null>;
@@ -470,6 +487,7 @@ export interface IliadApi {
     }) => Promise<void>;
   };
   updates: UpdatesApi;
+  cli?: CliApi;
   openExternalFile: (workspaceRoot: string, filePath: string) => Promise<string>;
   revealInFinder: (workspaceRoot: string, filePath: string) => Promise<void>;
   saveImageAsset: (request: SaveImageAssetRequest) => Promise<SavedImageAsset>;
