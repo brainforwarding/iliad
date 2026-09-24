@@ -33,9 +33,11 @@ describe("preload API surface", () => {
     expect(Object.keys(agent).sort()).toEqual([
       "applyProposalFile",
       "getExternalReview",
+      "keepChunk",
       "onExternalReviewChanged",
       "rejectProposal",
-      "rejectProposalFile"
+      "rejectProposalFile",
+      "restoreChunk"
     ]);
   });
 

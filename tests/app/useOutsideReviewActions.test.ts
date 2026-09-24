@@ -3,8 +3,10 @@ import {
   editorReviewActionLabelsForMode,
   externalActiveFileAutoSelectionDecision,
   externalReviewTargetForActiveFile,
+  reviewActionMayLoadActiveBuffer,
   reviewTargetAfterActiveFileChange
 } from "../../src/app/useOutsideReview";
+import { conflictMayResume } from "../../src/app/useDocumentPersistence";
 import { appStrings } from "../../src/i18n/strings";
 import type { AgentChangeProposal, AgentProposalFileChange } from "../../src/types/iliad";
 
@@ -175,21 +177,59 @@ describe("useOutsideReview helpers", () => {
     ).toEqual(currentTarget);
   });
 
-  it("uses accept/reject language for file-scoped editor review actions", () => {
+  it("uses Keep / Restore language for outside review actions (EN and ES)", () => {
     const toolbar = appStrings.en.editor.reviewToolbar;
 
     expect(editorReviewActionLabelsForMode("edit_file", toolbar)).toEqual({
-      acceptAll: "Accept changes",
-      rejectAll: "Reject changes",
-      rejectRemaining: "Reject changes"
+      acceptAll: "Keep all",
+      rejectAll: "Restore all",
+      acceptChange: "Keep",
+      rejectChange: "Restore"
     });
     expect(editorReviewActionLabelsForMode("create_file", toolbar)).toEqual({
-      create: "Accept changes",
-      discard: "Reject changes"
+      create: "Keep file",
+      discard: "Move to Trash"
     });
     expect(editorReviewActionLabelsForMode("delete_file", toolbar)).toEqual({
-      delete: "Accept changes",
-      discard: "Reject changes"
+      delete: "Confirm deletion",
+      discard: "Restore file"
     });
+    expect(editorReviewActionLabelsForMode("edit_file", appStrings.es.editor.reviewToolbar)).toEqual({
+      acceptAll: "Conservar todo",
+      rejectAll: "Restaurar todo",
+      acceptChange: "Conservar",
+      rejectChange: "Restaurar"
+    });
+    expect("rejectRemaining" in toolbar).toBe(false);
+    // The tighten inline review keeps its own singular Accept / Reject.
+    expect(toolbar.acceptChange).toBe("Accept");
+    expect(toolbar.rejectChange).toBe("Reject");
+    expect(appStrings.es.editor.reviewToolbar.acceptChange).toBe("Aceptar");
+  });
+
+  it("never lets a review action load disk over a conflicted or dirty buffer", () => {
+    const base = { activeRelativePath: "doc.md", targetRelativePath: "doc.md" };
+
+    expect(reviewActionMayLoadActiveBuffer({ ...base, wasInConflict: false, canReplaceActiveBuffer: true })).toBe(true);
+    // Keep (chunk, file, Keep all, last chunk) in conflict mode: the buffer wins.
+    expect(reviewActionMayLoadActiveBuffer({ ...base, wasInConflict: true, canReplaceActiveBuffer: true })).toBe(false);
+    expect(reviewActionMayLoadActiveBuffer({ ...base, wasInConflict: false, canReplaceActiveBuffer: false })).toBe(false);
+    // Only the conflict banner's confirmed Keep may discard the buffer.
+    expect(
+      reviewActionMayLoadActiveBuffer({ ...base, wasInConflict: true, canReplaceActiveBuffer: false, discardBuffer: true })
+    ).toBe(true);
+    expect(
+      reviewActionMayLoadActiveBuffer({
+        activeRelativePath: "other.md",
+        targetRelativePath: "doc.md",
+        wasInConflict: false,
+        canReplaceActiveBuffer: true
+      })
+    ).toBe(false);
+  });
+
+  it("resumes autosave after a review action only when disk equals the saved text", async () => {
+    expect(await conflictMayResume("same\n", "same\n")).toBe(true);
+    expect(await conflictMayResume("kept outside text\n", "writer's saved text\n")).toBe(false);
   });
 });

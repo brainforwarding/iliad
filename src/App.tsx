@@ -264,6 +264,7 @@ export default function App() {
     activeFileInConflict,
     onActiveFileExternalItemCleared: resumeAfterConflict,
     reloadActiveDocument: () => reloadActiveDocumentRef.current(),
+    canReplaceActiveBuffer: () => stateRef.current.documentText === stateRef.current.savedText,
     strings,
     tree,
     workspace
@@ -347,7 +348,11 @@ export default function App() {
           return;
         }
 
-        void applyAgentProposalFile(conflictReviewTarget.proposalId, conflictReviewTarget.fileId).catch(() => undefined);
+        // The writer confirmed discarding the buffer: the only Keep that may
+        // load disk over a conflicted buffer (spec V5).
+        void applyAgentProposalFile(conflictReviewTarget.proposalId, conflictReviewTarget.fileId, {
+          discardBuffer: true
+        }).catch(() => undefined);
       }
     };
   }, [

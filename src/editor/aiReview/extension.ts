@@ -10,11 +10,18 @@ interface ReviewExtensionOptions {
   createLineCount: number;
   onAcceptHunk?: (hunkId: string) => void;
   onRejectHunk?: (hunkId: string) => void;
+  /**
+   * Whether Escape on a chunk's buttons rejects it. True for the tighten
+   * review; false for outside chunks, where a reject writes to disk (spec V7).
+   */
+  escapeRejects?: boolean;
   labels: {
     acceptChange?: string;
     rejectChange?: string;
   };
 }
+
+type ReviewButtonOptions = Pick<ReviewExtensionOptions, "labels" | "escapeRejects">;
 
 export function reviewSourceLineClasses(line: string) {
   const classes = ["cm-ai-review-source-line"];
@@ -49,7 +56,7 @@ class InsertedTextWidget extends WidgetType {
     private readonly active: boolean,
     private readonly onAcceptHunk: ((hunkId: string) => void) | undefined,
     private readonly onRejectHunk: ((hunkId: string) => void) | undefined,
-    private readonly labels: ReviewExtensionOptions["labels"]
+    private readonly buttons: ReviewButtonOptions
   ) {
     super();
     this.text = lines.join("\n");
@@ -62,8 +69,7 @@ class InsertedTextWidget extends WidgetType {
       sameLineRanges(this.changedRangesByLine, other.changedRangesByLine) &&
       this.onAcceptHunk === other.onAcceptHunk &&
       this.onRejectHunk === other.onRejectHunk &&
-      this.labels.acceptChange === other.labels.acceptChange &&
-      this.labels.rejectChange === other.labels.rejectChange &&
+      sameButtonOptions(this.buttons, other.buttons) &&
       this.text === other.text
     );
   }
@@ -94,7 +100,7 @@ class InsertedTextWidget extends WidgetType {
     }
 
     if (this.onAcceptHunk && this.onRejectHunk) {
-      wrapper.append(reviewButtons(this.hunkId, this.onAcceptHunk, this.onRejectHunk, this.labels));
+      wrapper.append(reviewButtons(this.hunkId, this.onAcceptHunk, this.onRejectHunk, this.buttons));
     }
 
     return wrapper;
@@ -162,7 +168,7 @@ class HunkControlsWidget extends WidgetType {
     private readonly active: boolean,
     private readonly onAcceptHunk: ((hunkId: string) => void) | undefined,
     private readonly onRejectHunk: ((hunkId: string) => void) | undefined,
-    private readonly labels: ReviewExtensionOptions["labels"]
+    private readonly buttons: ReviewButtonOptions
   ) {
     super();
   }
@@ -172,7 +178,8 @@ class HunkControlsWidget extends WidgetType {
       this.hunkId === other.hunkId &&
       this.active === other.active &&
       this.onAcceptHunk === other.onAcceptHunk &&
-      this.onRejectHunk === other.onRejectHunk
+      this.onRejectHunk === other.onRejectHunk &&
+      sameButtonOptions(this.buttons, other.buttons)
     );
   }
 
@@ -181,7 +188,7 @@ class HunkControlsWidget extends WidgetType {
     wrapper.className = `cm-ai-review-controls${this.active ? " is-active" : ""}`;
 
     if (this.onAcceptHunk && this.onRejectHunk) {
-      wrapper.append(reviewButtons(this.hunkId, this.onAcceptHunk, this.onRejectHunk, this.labels));
+      wrapper.append(reviewButtons(this.hunkId, this.onAcceptHunk, this.onRejectHunk, this.buttons));
     }
 
     return wrapper;
@@ -192,26 +199,39 @@ class HunkControlsWidget extends WidgetType {
   }
 }
 
-function reviewButtons(
+function sameButtonOptions(left: ReviewButtonOptions, right: ReviewButtonOptions) {
+  return (
+    left.labels.acceptChange === right.labels.acceptChange &&
+    left.labels.rejectChange === right.labels.rejectChange &&
+    (left.escapeRejects ?? true) === (right.escapeRejects ?? true)
+  );
+}
+
+export function reviewButtons(
   hunkId: string,
   onAcceptHunk: (hunkId: string) => void,
   onRejectHunk: (hunkId: string) => void,
-  labels: ReviewExtensionOptions["labels"]
+  { labels, escapeRejects = true }: ReviewButtonOptions
 ) {
   const actions = document.createElement("span");
   actions.className = "cm-ai-review-actions";
-  actions.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") {
-      return;
-    }
+  actions.dataset.hunkId = hunkId;
 
-    event.preventDefault();
-    event.stopPropagation();
-    onRejectHunk(hunkId);
-  });
+  if (escapeRejects) {
+    actions.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      onRejectHunk(hunkId);
+    });
+  }
 
   const accept = document.createElement("button");
   accept.type = "button";
+  accept.dataset.reviewAction = "accept";
   accept.textContent = labels.acceptChange ?? "Accept";
   accept.addEventListener("click", (event) => {
     event.preventDefault();
@@ -221,6 +241,7 @@ function reviewButtons(
 
   const reject = document.createElement("button");
   reject.type = "button";
+  reject.dataset.reviewAction = "reject";
   reject.textContent = labels.rejectChange ?? "Reject";
   reject.addEventListener("click", (event) => {
     event.preventDefault();
@@ -373,7 +394,7 @@ function buildDecorations(state: EditorState, options: ReviewExtensionOptions): 
       }
       ranges.push(
         Decoration.widget({
-          widget: new HunkControlsWidget(hunk.id, active, options.onAcceptHunk, options.onRejectHunk, options.labels),
+          widget: new HunkControlsWidget(hunk.id, active, options.onAcceptHunk, options.onRejectHunk, options),
           side: 1,
           block: true
         }).range(line.to)
@@ -416,7 +437,7 @@ function buildDecorations(state: EditorState, options: ReviewExtensionOptions): 
             active,
             options.onAcceptHunk,
             options.onRejectHunk,
-            options.labels
+            options
           ),
           side: hunk.displayAnchorLine <= 0 ? -1 : 1,
           block: true
@@ -426,7 +447,7 @@ function buildDecorations(state: EditorState, options: ReviewExtensionOptions): 
       const anchor = lineAt(state, hunk.displayOldEndLine).to;
       ranges.push(
         Decoration.widget({
-          widget: new HunkControlsWidget(hunk.id, active, options.onAcceptHunk, options.onRejectHunk, options.labels),
+          widget: new HunkControlsWidget(hunk.id, active, options.onAcceptHunk, options.onRejectHunk, options),
           side: 1,
           block: true
         }).range(anchor)

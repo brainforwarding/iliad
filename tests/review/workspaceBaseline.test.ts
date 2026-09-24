@@ -663,3 +663,215 @@ describe("WorkspaceBaselineService", () => {
 function hashOf(content: string) {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
+
+describe("WorkspaceBaselineService per-chunk review", () => {
+  const BASE = "alpha\nbeta\ngamma\ndelta\nepsilon\n";
+  const DISK = "ALPHA\nbeta\ngamma\nDELTA\nepsilon\n";
+
+  async function reviewedEdit(base = BASE, disk = DISK, options: ConstructorParameters<typeof WorkspaceBaselineService>[0] = {}) {
+    const root = await workspace();
+    await writeFile(path.join(root, "doc.md"), base, "utf8");
+    const baseline = service(options);
+    await baseline.attach(root, subscriber());
+    await writeFile(path.join(root, "doc.md"), disk, "utf8");
+    baseline.noteDiskChange(root, { relativePath: "doc.md", eventType: "change" });
+    await waitFor(() => baseline.currentReview(root).proposal !== null);
+    return { root, baseline };
+  }
+
+  function editFile(baseline: WorkspaceBaselineService, root: string) {
+    const file = baseline.currentReview(root).proposal?.files[0];
+
+    if (!file || file.kind !== "edit_file") {
+      throw new Error("expected an edit item");
+    }
+
+    return file;
+  }
+
+  function chunkRequest(baseline: WorkspaceBaselineService, root: string, index: number) {
+    const file = editFile(baseline, root);
+    return {
+      fileId: file.id,
+      chunkId: file.hunks![index].id,
+      baselineHash: file.baseHash,
+      diskHash: file.reviewedContentHash!
+    };
+  }
+
+  it("keeps one chunk into a partial baseline and leaves the rest pending", async () => {
+    const { root, baseline } = await reviewedEdit();
+    expect(editFile(baseline, root).hunks).toHaveLength(2);
+    const before = await stat(path.join(root, "doc.md"));
+
+    const result = await baseline.keepChunk(root, chunkRequest(baseline, root, 0));
+
+    expect(result.status).toBe("applied");
+    expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe(DISK);
+    expect((await stat(path.join(root, "doc.md"))).mtimeMs).toBe(before.mtimeMs);
+    const file = editFile(baseline, root);
+    expect(file.baseContent).toBe("ALPHA\nbeta\ngamma\ndelta\nepsilon\n");
+    expect(file.hunks).toHaveLength(1);
+    expect(file.hunks![0].newLines).toEqual(["DELTA"]);
+  });
+
+  it("clears the item when the last chunk is kept", async () => {
+    const { root, baseline } = await reviewedEdit();
+    await baseline.keepChunk(root, chunkRequest(baseline, root, 0));
+    const result = await baseline.keepChunk(root, chunkRequest(baseline, root, 0));
+
+    expect(result.status).toBe("applied");
+    expect(baseline.currentReview(root).proposal).toBeNull();
+    // The kept text is now accepted: Iliad can write over it.
+    expect(
+      await baseline.writeMarkdownIfUnchanged(root, {
+        relativePath: "doc.md",
+        content: "mine\n",
+        expected: { kind: "hash", hash: hashOf(DISK) }
+      })
+    ).toMatchObject({ status: "written" });
+  });
+
+  it("restores one chunk by writing disk minus that chunk and leaves the baseline", async () => {
+    const { root, baseline } = await reviewedEdit();
+
+    const result = await baseline.restoreChunk(root, chunkRequest(baseline, root, 1));
+
+    expect(result.status).toBe("rejected");
+    expect(result.content).toBe("ALPHA\nbeta\ngamma\ndelta\nepsilon\n");
+    expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe("ALPHA\nbeta\ngamma\ndelta\nepsilon\n");
+    const file = editFile(baseline, root);
+    expect(file.baseContent).toBe(BASE);
+    expect(file.hunks).toHaveLength(1);
+    expect(file.hunks![0].newLines).toEqual(["ALPHA"]);
+    expect((await readdir(root)).filter((name) => name.startsWith("."))).toEqual([]);
+
+    await baseline.restoreChunk(root, chunkRequest(baseline, root, 0));
+    expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe(BASE);
+    expect(baseline.currentReview(root).proposal).toBeNull();
+  });
+
+  it("returns stale and writes nothing when the hashes do not match the current item", async () => {
+    const { root, baseline } = await reviewedEdit();
+    const request = chunkRequest(baseline, root, 0);
+
+    for (const bad of [
+      { ...request, baselineHash: hashOf("something else") },
+      { ...request, diskHash: hashOf("something else") },
+      { ...request, chunkId: `${request.fileId}-hunk-9` }
+    ]) {
+      expect((await baseline.keepChunk(root, bad)).status).toBe("stale");
+      expect((await baseline.restoreChunk(root, bad)).status).toBe("stale");
+    }
+
+    expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe(DISK);
+    expect(editFile(baseline, root).baseContent).toBe(BASE);
+    expect(editFile(baseline, root).hunks).toHaveLength(2);
+  });
+
+  it("returns stale when the file changed on disk after the review", async () => {
+    const { root, baseline } = await reviewedEdit();
+    const request = chunkRequest(baseline, root, 0);
+    await writeFile(path.join(root, "doc.md"), "newer\n", "utf8");
+
+    expect((await baseline.restoreChunk(root, request)).status).toBe("stale");
+    expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe("newer\n");
+    expect((await baseline.keepChunk(root, request)).status).toBe("stale");
+    expect(editFile(baseline, root).baseContent).toBe(BASE);
+    expect(editFile(baseline, root).replacement).toBe("newer\n");
+  });
+
+  it("never clobbers a file that appears at the path during a chunk restore and keeps the held bytes", async () => {
+    let raced = false;
+    const { root, baseline } = await reviewedEdit(BASE, DISK, {
+      beforeRestorePublish: async (absolutePath) => {
+        if (!raced) {
+          raced = true;
+          await writeFile(absolutePath, "written during restore\n", "utf8");
+        }
+      }
+    });
+
+    const result = await baseline.restoreChunk(root, chunkRequest(baseline, root, 0));
+
+    expect(result.status).toBe("stale");
+    expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe("written during restore\n");
+    const names = await readdir(root);
+    const copy = names.find((name) => name.startsWith("doc (outside copy"));
+    expect(copy).toBeDefined();
+    expect(await readFile(path.join(root, copy!), "utf8")).toBe(DISK);
+    expect(names.filter((name) => name.startsWith("."))).toEqual([]);
+  });
+
+  it("uses the guarded replacement for a whole-file restore too", async () => {
+    let raced = false;
+    const { root, baseline } = await reviewedEdit(BASE, DISK, {
+      beforeRestorePublish: async (absolutePath) => {
+        if (!raced) {
+          raced = true;
+          await writeFile(absolutePath, "racing writer\n", "utf8");
+        }
+      }
+    });
+
+    const result = await baseline.restore(root, externalReviewFileId("doc.md"));
+
+    expect(result.status).toBe("stale");
+    expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe("racing writer\n");
+    expect((await readdir(root)).some((name) => name.startsWith("doc (outside copy"))).toBe(true);
+  });
+
+  it("restores an outside deletion exclusively and never replaces a file that appeared", async () => {
+    const root = await workspace();
+    await writeFile(path.join(root, "gone.md"), "original\n", "utf8");
+    const baseline = service();
+    await baseline.attach(root, subscriber());
+    await rm(path.join(root, "gone.md"));
+    baseline.noteDiskChange(root, { relativePath: "gone.md", eventType: "rename" });
+    await waitFor(() => baseline.currentReview(root).proposal !== null);
+
+    const internals = baseline as unknown as {
+      states: Map<string, unknown>;
+      restoreItem: (state: unknown, item: unknown, content?: string) => Promise<string | null>;
+    };
+    const item = {
+      relativePath: "gone.md",
+      kind: "delete",
+      baselineContent: "original\n",
+      baselineHash: hashOf("original\n"),
+      diskContent: null,
+      diskHash: null
+    };
+    // Simulate a file that lands after the last look but before the create.
+    const state = internals.states.get(path.resolve(root));
+    await writeFile(path.join(root, "gone.md"), "appeared\n", "utf8");
+    const outcome = await internals.restoreItem(state, item);
+    expect(outcome).toMatch(/changed again/);
+    expect(await readFile(path.join(root, "gone.md"), "utf8")).toBe("appeared\n");
+
+    await rm(path.join(root, "gone.md"));
+    expect(await internals.restoreItem(state, item)).toBeNull();
+    expect(await readFile(path.join(root, "gone.md"), "utf8")).toBe("original\n");
+  });
+
+  it("reviews a whitespace split pair as two chunks that can be kept and restored independently", async () => {
+    const base = "one\n\ntwo\n";
+    const disk = "one\nnew text\ntwo\n";
+    const { root, baseline } = await reviewedEdit(base, disk);
+    const hunks = editFile(baseline, root).hunks!;
+    expect(hunks).toHaveLength(2);
+    expect(hunks.map((hunk) => [hunk.oldLines, hunk.newLines])).toEqual([
+      [[], ["new text"]],
+      [[""], []]
+    ]);
+
+    // Restore the blank-line removal: disk keeps the new text and the blank line.
+    await baseline.restoreChunk(root, chunkRequest(baseline, root, 1));
+    expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe("one\nnew text\n\ntwo\n");
+    expect(editFile(baseline, root).hunks).toHaveLength(1);
+
+    // Keep the insertion: nothing left to review.
+    await baseline.keepChunk(root, chunkRequest(baseline, root, 0));
+    expect(baseline.currentReview(root).proposal).toBeNull();
+  });
+});

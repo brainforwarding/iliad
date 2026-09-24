@@ -394,6 +394,26 @@ export interface GeminiKeyState {
   last4: string | null;
 }
 
+export interface ReviewChunkActionRequest {
+  workspaceSessionId: string;
+  proposalId: string;
+  fileId: string;
+  chunkId: string;
+  /** The baseline and disk hashes of the file as the renderer saw it; main rejects mismatches as stale. */
+  baselineHash: string;
+  diskHash: string;
+}
+
+export interface ReviewChunkActionResponse {
+  /** `applied` (kept), `rejected` (restored), or `stale` (nothing done; review refreshed). */
+  status: "applied" | "rejected" | "stale";
+  fileId: string;
+  chunkId: string;
+  relativePath: string | null;
+  content?: string;
+  snapshot: ExternalReviewSnapshot;
+}
+
 /** Outside-change review (channel names keep their historical `agent:` prefix). */
 export interface AgentApi {
   getExternalReview: (request: { workspaceSessionId: string }) => Promise<ExternalReviewSnapshot>;
@@ -409,6 +429,8 @@ export interface AgentApi {
     fileId: string;
   }) => Promise<AgentChangeProposal>;
   rejectProposal: (request: { workspaceSessionId: string; proposalId: string }) => Promise<AgentChangeProposal>;
+  keepChunk: (request: ReviewChunkActionRequest) => Promise<ReviewChunkActionResponse>;
+  restoreChunk: (request: ReviewChunkActionRequest) => Promise<ReviewChunkActionResponse>;
 }
 
 export type UpdateCheckResult =

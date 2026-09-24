@@ -80,8 +80,8 @@ describe("FileTree pending review strip", () => {
 
     expect(html).toContain("file-tree-pending-review");
     expect(html).toContain("2 pending review items");
-    expect(html).toContain(">Accept all<");
-    expect(html).toContain(">Reject all<");
+    expect(html).toContain(">Keep all<");
+    expect(html).toContain(">Restore all<");
     expect(html).toContain("new");
   });
 
@@ -97,16 +97,16 @@ describe("FileTree pending review strip", () => {
 
     expect(html).toContain("file-tree-pending-review is-current-review");
     expect(html).toContain("1 pending review item");
-    expect(html).not.toContain(">Accept all<");
-    expect(html).not.toContain(">Reject all<");
+    expect(html).not.toContain(">Keep all<");
+    expect(html).not.toContain(">Restore all<");
   });
 
   it("keeps strip actions for multiple pending items even when one item is visible", () => {
     const html = renderFileTree({ pendingReviewCount: 2, pendingReviewActive: true });
 
     expect(html).toContain("2 pending review items");
-    expect(html).toContain(">Accept all<");
-    expect(html).toContain(">Reject all<");
+    expect(html).toContain(">Keep all<");
+    expect(html).toContain(">Restore all<");
   });
 
   it("disables both strip actions while a pending review action is busy", () => {

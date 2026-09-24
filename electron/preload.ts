@@ -205,7 +205,9 @@ const api = {
     },
     applyProposalFile: (request: unknown) => invoke("agent:apply-proposal-file", request),
     rejectProposalFile: (request: unknown) => invoke("agent:reject-proposal-file", request),
-    rejectProposal: (request: unknown) => invoke("agent:reject-proposal", request)
+    rejectProposal: (request: unknown) => invoke("agent:reject-proposal", request),
+    keepChunk: (request: unknown) => invoke("agent:keep-chunk", request),
+    restoreChunk: (request: unknown) => invoke("agent:restore-chunk", request)
   }
 };
 

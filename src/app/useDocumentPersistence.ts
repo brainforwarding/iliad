@@ -26,6 +26,11 @@ export class DocumentConflictError extends Error {
 
 const autosaveDelayMs = 900;
 
+/** A conflicted buffer may resume autosave only when disk hashes to its `savedText`. */
+export async function conflictMayResume(diskText: string, savedText: string) {
+  return (await hashDocumentText(diskText)) === (await hashDocumentText(savedText));
+}
+
 function formatSaveTime(date: Date) {
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
@@ -172,20 +177,45 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
 
   /**
    * Called after the outside change for the active file was resolved without
-   * touching the buffer (restore, or the outside tool reverted the file). Disk
-   * matches `savedText` again, so the writer's edits can save normally.
+   * touching the buffer (restore, keep, or the outside tool reverted the
+   * file). Autosave resumes only if disk again equals `savedText` — the
+   * identity the next compare-and-swap write will assert; otherwise the
+   * buffer stays in conflict (spec V5).
    */
-  const resumeAfterConflict = useCallback(() => {
+  const resumeAfterConflict = useCallback(async () => {
     if (saveStatusRef.current !== "conflict") {
       return;
     }
 
     const current = stateRef.current;
-    const dirty = current.documentText !== current.savedText;
+
+    if (!current.workspace || !current.activeFile || current.activeFile.kind !== "markdown") {
+      return;
+    }
+
+    let diskText: string;
+
+    try {
+      diskText = await window.iliad.readMarkdown(current.workspace.path, current.activeFile.path);
+    } catch {
+      return;
+    }
+
+    const latest = stateRef.current;
+
+    if (saveStatusRef.current !== "conflict" || latest.activeFile?.path !== current.activeFile.path) {
+      return;
+    }
+
+    if (!(await conflictMayResume(diskText, latest.savedText))) {
+      return;
+    }
+
+    const dirty = latest.documentText !== latest.savedText;
     setSaveStatus(dirty ? "unsaved" : "saved");
 
     if (dirty) {
-      scheduleAutosave(current.documentText);
+      scheduleAutosave(latest.documentText);
     }
   }, [scheduleAutosave, setSaveStatus]);
 

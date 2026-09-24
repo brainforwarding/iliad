@@ -56,14 +56,15 @@ folder", with no recents list, so recovery needs the native dialog. Decide
 whether the watcher should retry the root with the existing backoff and
 whether the unavailable screen should list recents.
 
-### Residual race on restoring an outside edit
+### Whitespace-only chunks are reviewed on their own
 
-Restoring an outside *edit* still checks disk and then writes (a
-check-then-write window of a few milliseconds). Restoring an outside
-*create* was hardened with an atomic rename into a hidden holding folder
-(QA case Bx2); the edit path was left as is because Bx1 never lost content
-in 7 trials at 1-30 ms and a rename-based write would change the file's
-inode and permissions. Revisit if a live report ever shows a lost write.
+From the per-chunk review (spec `specs/2026-09-24-iliad-writing-surface.md`,
+V8). A change that swaps blank lines for text is split into an insertion and
+a whitespace-only removal, each with its own Keep / Restore. Merge a
+whitespace-only chunk into its neighbour when that proves noisy in use.
+(The former "residual race on restoring an outside edit" item is closed:
+every restore now uses the guarded replacement; the restored file gets a new
+inode but keeps its permission bits.)
 
 ### Winning single Reject sometimes shows no notice
 

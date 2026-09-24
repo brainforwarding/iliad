@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { markdownLineCount, reviewBlockedLineRanges } from "../editor/aiReview/blockedRanges";
 import { aiReviewExtension } from "../editor/aiReview/extension";
 import { reviewHunksForDisplay, type DisplayReviewHunk } from "../editor/aiReview/diff";
+import { acceptReviewShortcutApplies, nextChunkFocusIndex } from "../editor/aiReview/keyboard";
 import type { EditorReviewState } from "../editor/aiReview/types";
 import { CodeMirrorHost } from "../editor/CodeMirrorHost";
 import { imageDropPasteExtension } from "../editor/imageDropPaste";
@@ -158,7 +159,6 @@ interface EditorPaneProps {
       next: string;
       acceptAll: string;
       rejectAll: string;
-      rejectRemaining: string;
       create: string;
       delete: string;
       discard: string;
@@ -388,10 +388,57 @@ export function EditorPane({
     editorView.focus();
   }, [editorView, file?.path, tightenReview]);
   const handleAcceptReviewShortcut = useCallback(() => {
-    if (!tightenReview) return false;
+    if (!acceptReviewShortcutApplies({ tightenReviewActive: Boolean(tightenReview), outsideReviewActive: Boolean(review) })) {
+      return false;
+    }
+
     handleAcceptTightenReview();
     return true;
-  }, [handleAcceptTightenReview, tightenReview]);
+  }, [handleAcceptTightenReview, review, tightenReview]);
+  // After Keep/Restore on an outside chunk, focus moves to the Keep button of
+  // the chunk that now sits where the acted one was (spec V7).
+  const chunkFocusIndexRef = useRef<number | null>(null);
+  const outsideChunkHandlers = useMemo(() => {
+    if (!review || review.mode !== "edit_file" || review.hideHunkActions || review.actionBusy) {
+      return null;
+    }
+
+    const remember = (hunkId: string) => {
+      const index = editReviewDisplay?.hunks.findIndex((hunk) => hunk.id === hunkId) ?? -1;
+      chunkFocusIndexRef.current = Math.max(0, index);
+    };
+
+    return {
+      onKeep: (hunkId: string) => {
+        remember(hunkId);
+        review.onAcceptHunk(hunkId);
+      },
+      onRestore: (hunkId: string) => {
+        remember(hunkId);
+        review.onRejectHunk(hunkId);
+      }
+    };
+  }, [editReviewDisplay, review]);
+
+  useEffect(() => {
+    const actedIndex = chunkFocusIndexRef.current;
+
+    if (actedIndex === null || !editorView || review?.actionBusy) {
+      return;
+    }
+
+    chunkFocusIndexRef.current = null;
+    const frame = requestAnimationFrame(() => {
+      const buttons = editorView.dom.querySelectorAll<HTMLButtonElement>('[data-review-action="accept"]');
+      const index = nextChunkFocusIndex(actedIndex, buttons.length);
+
+      if (index !== null) {
+        buttons[index]?.focus();
+      }
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [editReviewDisplay, editorView, review?.actionBusy]);
 
   const activeSelectionCallbackRef = useRef(onActiveSelectionChange);
   const lastReportedSelectionRef = useRef<{ from: number; to: number } | null>(null);
@@ -900,8 +947,10 @@ export function EditorPane({
             hunks: editReviewDisplay.hunks,
             activeHunkId: null,
             createLineCount: 0,
-            onAcceptHunk: review.hideHunkActions || review.actionBusy ? undefined : review.onAcceptHunk,
-            onRejectHunk: review.hideHunkActions || review.actionBusy ? undefined : review.onRejectHunk,
+            onAcceptHunk: outsideChunkHandlers?.onKeep,
+            onRejectHunk: outsideChunkHandlers?.onRestore,
+            // Outside chunks: Escape never restores (a restore writes to disk).
+            escapeRejects: false,
             labels: {
               acceptChange: review.labels.acceptChange,
               rejectChange: review.labels.rejectChange
@@ -952,6 +1001,7 @@ export function EditorPane({
     [
       autocompleteExtensions,
       editReviewDisplay,
+      outsideChunkHandlers,
       blockedLineRanges,
       activeWritingIssue,
       editorTheme,
@@ -1057,9 +1107,7 @@ export function EditorPane({
                   {review.labels.acceptAll}
                 </button>
                 <button type="button" disabled={review.actionBusy} onClick={review.onRejectFile}>
-                  {(review.file.hunks ?? []).some((hunk) => hunk.status === "accepted")
-                    ? review.labels.rejectRemaining
-                    : review.labels.rejectAll}
+                  {review.labels.rejectAll}
                 </button>
               </div>
             </>

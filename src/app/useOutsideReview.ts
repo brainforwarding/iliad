@@ -36,6 +36,11 @@ interface UseOutsideReviewOptions {
   onActiveFileExternalItemCleared?: () => void;
   /** Reloads the active document from disk (used when its outside item vanishes under a clean buffer). */
   reloadActiveDocument?: () => Promise<void>;
+  /**
+   * True when the active buffer may be replaced with disk text: not in
+   * conflict and no unsaved edits (spec V5). Defaults to "not in conflict".
+   */
+  canReplaceActiveBuffer?: () => boolean;
   strings: AppStrings;
   tree: FileTreeNode[];
   workspace: WorkspaceInfo | null;
@@ -177,6 +182,11 @@ function activeFileClearReason(activeRelativePath: string | undefined | null, fi
   return "unknown";
 }
 
+/**
+ * Outside-review labels (spec V6): an edit is kept or restored per chunk
+ * (Keep / Restore) or per file (Keep all / Restore all); a created file is
+ * kept or moved to the Trash; a deletion is confirmed or the file restored.
+ */
 export function editorReviewActionLabelsForMode(
   mode: EditorReviewState["mode"],
   reviewToolbar: AppStrings["editor"]["reviewToolbar"]
@@ -185,21 +195,51 @@ export function editorReviewActionLabelsForMode(
     return {
       acceptAll: reviewToolbar.acceptAll,
       rejectAll: reviewToolbar.rejectAll,
-      rejectRemaining: reviewToolbar.rejectRemaining
+      acceptChange: reviewToolbar.keepChange,
+      rejectChange: reviewToolbar.restoreChange
     };
   }
 
   if (mode === "create_file") {
     return {
-      create: reviewToolbar.acceptAll,
-      discard: reviewToolbar.rejectAll
+      create: reviewToolbar.keepFile,
+      discard: reviewToolbar.moveToTrash
     };
   }
 
   return {
-    delete: reviewToolbar.acceptAll,
-    discard: reviewToolbar.rejectAll
+    delete: reviewToolbar.confirmDeletion,
+    discard: reviewToolbar.restoreFile
   };
+}
+
+/**
+ * Whether a review action may load disk text into the active buffer: only for
+ * the reviewed document, and never over a conflicted or dirty buffer unless
+ * the writer explicitly chose to discard it (the conflict banner's Keep).
+ */
+export function reviewActionMayLoadActiveBuffer({
+  activeRelativePath,
+  targetRelativePath,
+  wasInConflict,
+  canReplaceActiveBuffer,
+  discardBuffer = false
+}: {
+  activeRelativePath: string | null | undefined;
+  targetRelativePath: string;
+  wasInConflict: boolean;
+  canReplaceActiveBuffer: boolean;
+  discardBuffer?: boolean;
+}) {
+  if (!activeRelativePath || !sameRelativePath(activeRelativePath, targetRelativePath)) {
+    return false;
+  }
+
+  if (discardBuffer) {
+    return true;
+  }
+
+  return !wasInConflict && canReplaceActiveBuffer;
 }
 
 /**
@@ -222,6 +262,7 @@ export function useOutsideReview({
   activeFileInConflict = false,
   onActiveFileExternalItemCleared,
   reloadActiveDocument,
+  canReplaceActiveBuffer,
   strings,
   tree,
   workspace
@@ -242,6 +283,12 @@ export function useOutsideReview({
   agentProposalsRef.current = agentProposals;
   agentReviewTargetRef.current = agentReviewTarget;
   activeFileInConflictRef.current = activeFileInConflict;
+  const canReplaceActiveBufferRef = useRef(canReplaceActiveBuffer);
+  canReplaceActiveBufferRef.current = canReplaceActiveBuffer;
+  const bufferReplaceable = useCallback(
+    () => !activeFileInConflictRef.current && (canReplaceActiveBufferRef.current?.() ?? true),
+    []
+  );
 
   useEffect(() => {
     workspacePathRef.current = workspace?.path ?? null;
@@ -351,11 +398,15 @@ export function useOutsideReview({
   }, []);
 
   const applyAgentProposalFile = useCallback(
-    async (proposalId: string, fileId: string) => {
+    async (proposalId: string, fileId: string, options: { discardBuffer?: boolean } = {}) => {
       return runReviewAction(`apply-file:${proposalId}:${fileId}`, async () => {
         if (!workspace) {
           return;
         }
+
+        // Read before any await: the refresh below may clear the conflict.
+        const wasInConflict = activeFileInConflictRef.current;
+        const replaceable = bufferReplaceable();
 
         try {
           const result = await window.iliad.agent.applyProposalFile({
@@ -376,9 +427,20 @@ export function useOutsideReview({
           // before the await: navigating mid-apply must not clobber another buffer.
           const activeRelativePath = activeFileRelativePathRef.current;
 
-          // Load before refreshing the outside review, so a conflict buffer is
-          // already replaced when the item's disappearance is processed.
-          if (file && activeRelativePath && sameRelativePath(activeRelativePath, file.relativePath)) {
+          // Load before refreshing the outside review, so a conflict buffer the
+          // writer chose to discard is already replaced when the item's
+          // disappearance is processed. Keep never loads over a conflicted or
+          // dirty buffer otherwise (spec V5).
+          if (
+            file &&
+            reviewActionMayLoadActiveBuffer({
+              activeRelativePath,
+              targetRelativePath: file.relativePath,
+              wasInConflict,
+              canReplaceActiveBuffer: replaceable,
+              discardBuffer: options.discardBuffer
+            })
+          ) {
             loadDocument(result.content);
           }
         }
@@ -432,6 +494,7 @@ export function useOutsideReview({
     },
     [
       activeFile?.path,
+      bufferReplaceable,
       loadDocument,
       recordNormalNavigation,
       refreshExternalReview,
@@ -457,6 +520,7 @@ export function useOutsideReview({
         }
 
         const wasInConflict = activeFileInConflictRef.current;
+        const replaceable = bufferReplaceable();
 
         try {
           const proposal = await window.iliad.agent.rejectProposal({
@@ -484,7 +548,7 @@ export function useOutsideReview({
             (file) => activeRelativePath && sameRelativePath(activeRelativePath, file.relativePath)
           );
 
-          if (touchedActive && activePath && !wasInConflict) {
+          if (touchedActive && activePath && !wasInConflict && replaceable) {
             try {
               loadDocument(await window.iliad.readMarkdown(workspace.path, activePath));
             } catch {
@@ -502,6 +566,7 @@ export function useOutsideReview({
       });
     },
     [
+      bufferReplaceable,
       loadDocument,
       refreshExternalReview,
       refreshTree,
@@ -528,6 +593,7 @@ export function useOutsideReview({
         // Read before any await: the refresh below clears the conflict state,
         // and the reload decision must reflect the state when the writer acted.
         const wasInConflict = activeFileInConflictRef.current;
+        const replaceable = bufferReplaceable();
 
         try {
           const proposal = await window.iliad.agent.rejectProposalFile({
@@ -563,7 +629,8 @@ export function useOutsideReview({
           activeRelativePath &&
           activePath &&
           sameRelativePath(activeRelativePath, previousFile.relativePath) &&
-          !wasInConflict
+          !wasInConflict &&
+          replaceable
         ) {
           try {
             const text = await window.iliad.readMarkdown(workspace.path, activePath);
@@ -586,6 +653,7 @@ export function useOutsideReview({
     },
     [
       agentProposals,
+      bufferReplaceable,
       loadDocument,
       refreshExternalReview,
       refreshTree,
@@ -598,6 +666,103 @@ export function useOutsideReview({
       strings.review.outsideChangeStale,
       workspace
     ]
+  );
+
+  /**
+   * Keep or Restore one chunk of an outside edit. Carries the hashes the
+   * writer saw; main answers `stale` (nothing done) when the file moved on.
+   * Afterwards the review is refreshed and the active document reloaded from
+   * disk, unless its buffer is in conflict or dirty (spec V5). No flushSave:
+   * the review compares against disk, not the buffer.
+   */
+  const runChunkAction = useCallback(
+    async (action: "keep" | "restore", proposalId: string, fileId: string, chunkId: string) => {
+      return runReviewAction(`${action}-chunk:${proposalId}:${fileId}:${chunkId}`, async () => {
+        if (!workspace) {
+          return;
+        }
+
+        const proposal = agentProposalsRef.current.find((candidate) => candidate.id === proposalId);
+        const file = proposal?.files.find((candidate) => candidate.id === fileId);
+
+        if (!file || file.kind !== "edit_file") {
+          setNotice(strings.review.outsideChangeStale);
+          return "stale" as const;
+        }
+
+        const wasInConflict = activeFileInConflictRef.current;
+        const replaceable = bufferReplaceable();
+
+        try {
+          const request = {
+            workspaceSessionId: workspace.sessionId ?? "",
+            proposalId,
+            fileId,
+            chunkId,
+            baselineHash: file.baseHash,
+            diskHash: file.reviewedContentHash ?? ""
+          };
+          const result =
+            action === "keep"
+              ? await window.iliad.agent.keepChunk(request)
+              : await window.iliad.agent.restoreChunk(request);
+
+          if (workspacePathRef.current !== workspace.path) {
+            return;
+          }
+
+          await refreshExternalReview();
+
+          if (result.status === "stale") {
+            setNotice(strings.review.outsideChangeStale);
+            return "stale" as const;
+          }
+
+          const activePath = activeFilePathRef.current;
+
+          if (
+            activePath &&
+            reviewActionMayLoadActiveBuffer({
+              activeRelativePath: activeFileRelativePathRef.current,
+              targetRelativePath: file.relativePath,
+              wasInConflict: wasInConflict || activeFileInConflictRef.current,
+              canReplaceActiveBuffer: replaceable
+            })
+          ) {
+            try {
+              loadDocument(await window.iliad.readMarkdown(workspace.path, activePath));
+            } catch {
+              // The file moved on again; the refreshed review shows it.
+            }
+          }
+
+          return result.status;
+        } catch (chunkError) {
+          setError(chunkError instanceof Error ? chunkError.message : strings.review.errorFallback);
+          throw chunkError;
+        }
+      });
+    },
+    [
+      bufferReplaceable,
+      loadDocument,
+      refreshExternalReview,
+      runReviewAction,
+      setError,
+      setNotice,
+      strings.review.errorFallback,
+      strings.review.outsideChangeStale,
+      workspace
+    ]
+  );
+
+  const keepOutsideChunk = useCallback(
+    (proposalId: string, fileId: string, chunkId: string) => runChunkAction("keep", proposalId, fileId, chunkId),
+    [runChunkAction]
+  );
+  const restoreOutsideChunk = useCallback(
+    (proposalId: string, fileId: string, chunkId: string) => runChunkAction("restore", proposalId, fileId, chunkId),
+    [runChunkAction]
   );
 
   const selectAgentReviewTarget = useCallback(
@@ -1027,15 +1192,19 @@ export function useOutsideReview({
         currentContent: activeReview.file.baseContent,
         activeHunkId: null,
         readOnly: true,
-        // Outside edits are kept or restored per file (per-chunk review is Stage B).
-        hideHunkActions: true,
         actionBusy: Boolean(reviewActionKey),
         labels: {
           ...strings.editor.reviewToolbar,
           ...editorReviewActionLabelsForMode("edit_file", strings.editor.reviewToolbar)
         },
-        onAcceptHunk: () => undefined,
-        onRejectHunk: () => undefined,
+        onAcceptHunk: (hunkId: string) => {
+          onReviewNavigation?.();
+          void keepOutsideChunk(activeReview.proposal.id, activeReview.file.id, hunkId).catch(() => undefined);
+        },
+        onRejectHunk: (hunkId: string) => {
+          onReviewNavigation?.();
+          void restoreOutsideChunk(activeReview.proposal.id, activeReview.file.id, hunkId).catch(() => undefined);
+        },
         onAcceptFile: () => {
           onReviewNavigation?.();
           void applyAgentProposalFile(activeReview.proposal.id, activeReview.file.id).catch(() => undefined);
@@ -1089,8 +1258,10 @@ export function useOutsideReview({
   }, [
     activeReview,
     applyAgentProposalFile,
+    keepOutsideChunk,
     onReviewNavigation,
     rejectAgentProposalFile,
+    restoreOutsideChunk,
     reviewActionKey,
     strings.editor.reviewToolbar
   ]);
@@ -1102,11 +1273,13 @@ export function useOutsideReview({
     applyExternalReviewUpdate,
     clearReviewForNormalNavigation,
     editorReview,
+    keepOutsideChunk,
     refreshExternalReview,
     reviewActionBusy: Boolean(reviewActionKey),
     pendingTreeChanges,
     rejectAgentProposal,
     rejectAgentProposalFile,
+    restoreOutsideChunk,
     selectAgentReviewTarget,
     setAgentProposals,
     setAgentReviewTarget,

@@ -5,7 +5,8 @@ import { workspaceFingerprint } from "../review/externalReviewProjection.js";
 import type { ExternalReviewActionResult, WorkspaceBaselineService } from "../review/workspaceBaseline.js";
 import type {
   AgentChangeProposal,
-  ApplyAgentProposalFileResponse
+  ApplyAgentProposalFileResponse,
+  ReviewChunkActionResponse
 } from "../review/types.js";
 import { isTrustedIpcSender, type TrustedIpcEvent } from "./trust.js";
 
@@ -20,7 +21,7 @@ export type WorkspaceSessionResolver = (
 
 export type ReviewBaselineService = Pick<
   WorkspaceBaselineService,
-  "currentReview" | "keep" | "restore" | "restoreAll" | "isExternalProposalId"
+  "currentReview" | "keep" | "restore" | "restoreAll" | "keepChunk" | "restoreChunk" | "isExternalProposalId"
 >;
 
 export interface ReviewIpcDeps {
@@ -45,6 +46,8 @@ export function registerReviewIpc(deps: ReviewIpcDeps) {
   ipcMain.handle("agent:apply-proposal-file", (event, request: unknown) => handleKeepFileIpc(event, request, deps));
   ipcMain.handle("agent:reject-proposal-file", (event, request: unknown) => handleRestoreFileIpc(event, request, deps));
   ipcMain.handle("agent:reject-proposal", (event, request: unknown) => handleRestoreAllIpc(event, request, deps));
+  ipcMain.handle("agent:keep-chunk", (event, request: unknown) => handleKeepChunkIpc(event, request, deps));
+  ipcMain.handle("agent:restore-chunk", (event, request: unknown) => handleRestoreChunkIpc(event, request, deps));
 }
 
 export async function handleGetExternalReviewIpc(event: TrustedIpcEvent, request: unknown, deps: ReviewIpcDeps) {
@@ -105,6 +108,50 @@ export async function handleRestoreAllIpc(
 
     return result.proposal;
   });
+}
+
+/** Keep one chunk of an outside edit: the baseline takes that chunk (no disk write). */
+export async function handleKeepChunkIpc(
+  event: TrustedIpcEvent,
+  request: unknown,
+  deps: ReviewIpcDeps
+): Promise<ReviewChunkActionResponse> {
+  const workspaceRoot = await trustedWorkspaceRoot(event, request, deps, "The review action came from an untrusted window.");
+  const chunk = chunkRequest(request);
+  requireCurrentProposal(deps, workspaceRoot, chunk.proposalId);
+
+  return logged(deps, "review.keep_chunk", workspaceRoot, { fileId: chunk.fileId }, async () =>
+    chunkResponse(await deps.baselineService.keepChunk(workspaceRoot, chunk), chunk)
+  );
+}
+
+/** Restore one chunk of an outside edit: disk loses only that chunk. */
+export async function handleRestoreChunkIpc(
+  event: TrustedIpcEvent,
+  request: unknown,
+  deps: ReviewIpcDeps
+): Promise<ReviewChunkActionResponse> {
+  const workspaceRoot = await trustedWorkspaceRoot(event, request, deps, "The review action came from an untrusted window.");
+  const chunk = chunkRequest(request);
+  requireCurrentProposal(deps, workspaceRoot, chunk.proposalId);
+
+  return logged(deps, "review.restore_chunk", workspaceRoot, { fileId: chunk.fileId }, async () =>
+    chunkResponse(await deps.baselineService.restoreChunk(workspaceRoot, chunk), chunk)
+  );
+}
+
+function chunkResponse(
+  result: ExternalReviewActionResult,
+  request: { fileId: string; chunkId: string }
+): ReviewChunkActionResponse {
+  return {
+    status: result.status,
+    fileId: request.fileId,
+    chunkId: request.chunkId,
+    relativePath: result.relativePath,
+    ...(result.content !== undefined ? { content: result.content } : {}),
+    snapshot: result.snapshot
+  };
 }
 
 export function keepResponse(result: ExternalReviewActionResult, fileId: string): ApplyAgentProposalFileResponse {
@@ -179,6 +226,19 @@ function fileRequest(request: unknown): ReviewFileRequest {
   }
 
   return { workspaceSessionId, proposalId, fileId };
+}
+
+function chunkRequest(request: unknown) {
+  const { proposalId, fileId } = fileRequest(request);
+  const chunkId = stringField(request, "chunkId");
+  const baselineHash = stringField(request, "baselineHash");
+  const diskHash = stringField(request, "diskHash");
+
+  if (!chunkId || !baselineHash || !diskHash) {
+    throw new Error("The review action is missing its target.");
+  }
+
+  return { proposalId, fileId, chunkId, baselineHash, diskHash };
 }
 
 function proposalRequest(request: unknown): ReviewProposalRequest {

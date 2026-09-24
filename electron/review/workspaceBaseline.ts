@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { link, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir, unlink } from "node:fs/promises";
 import path from "node:path";
+import { buildLineReviewHunks, reconstructContent } from "./reviewDiff.js";
 import { captureGitAdvisorySnapshot, checkGitAdvisorySnapshot, type GitAdvisorySnapshot } from "./gitAdvisory.js";
 import { hashMarkdown } from "./hash.js";
 import { ensureInsideWorkspace, isIgnoredWorkspaceName, markdownExtensions } from "../fs/pathSafety.js";
@@ -65,6 +66,20 @@ export interface WorkspaceBaselineServiceOptions {
   confirmMs?: number;
   releaseGraceMs?: number;
   onLog?: (event: string, details: Record<string, string | number | boolean | null>) => void;
+  /**
+   * Test seam: runs inside a guarded restore after the current file was moved
+   * to its holding path and verified, just before the restored text is
+   * published at the path.
+   */
+  beforeRestorePublish?: (absolutePath: string) => Promise<void> | void;
+}
+
+/** One chunk of an outside edit, exactly as the renderer saw it (spec V3). */
+export interface ExternalReviewChunkRequest {
+  fileId: string;
+  chunkId: string;
+  baselineHash: string;
+  diskHash: string;
 }
 
 export const externalReviewChangedChannel = "agent:external-review-changed";
@@ -131,6 +146,7 @@ export class WorkspaceBaselineService {
   private readonly releaseGraceMs: number;
   private readonly trashItem: ((absolutePath: string) => Promise<void>) | null;
   private readonly onLog: WorkspaceBaselineServiceOptions["onLog"];
+  private readonly beforeRestorePublish: WorkspaceBaselineServiceOptions["beforeRestorePublish"];
   private disposed = false;
 
   constructor(options: WorkspaceBaselineServiceOptions = {}) {
@@ -140,6 +156,7 @@ export class WorkspaceBaselineService {
     this.releaseGraceMs = options.releaseGraceMs ?? 5000;
     this.trashItem = options.trashItem ?? null;
     this.onLog = options.onLog;
+    this.beforeRestorePublish = options.beforeRestorePublish;
   }
 
   async attach(workspaceRoot: string, subscriber: BaselineSubscriber): Promise<ExternalReviewSnapshot> {
@@ -628,6 +645,93 @@ export class WorkspaceBaselineService {
     });
   }
 
+  /**
+   * Keep one chunk of an outside edit: the baseline takes that chunk (no disk
+   * write). The item disappears once the baseline equals disk.
+   */
+  async keepChunk(workspaceRoot: string, request: ExternalReviewChunkRequest): Promise<ExternalReviewActionResult> {
+    const state = this.requireState(workspaceRoot);
+
+    return this.enqueueWrite(state, async () => {
+      const before = this.currentReview(state.workspaceRoot);
+      const located = await this.locateReviewChunk(state, request);
+
+      if (!located) {
+        return this.staleResult(state, before, request.fileId);
+      }
+
+      const { item, chunk } = located;
+      const content = reconstructContent(item.baselineContent ?? "", [{ ...chunk, status: "accepted" }]);
+      state.baseline.set(item.relativePath, { content, hash: hashMarkdown(content) });
+      await this.finishReviewChange(state, [item.relativePath]);
+
+      return {
+        status: "applied",
+        proposal: before.proposal ?? emptyProposal(state.workspaceRoot),
+        relativePath: item.relativePath,
+        kind: item.kind,
+        content: item.diskContent ?? "",
+        unrestored: [],
+        snapshot: this.currentReview(state.workspaceRoot)
+      };
+    });
+  }
+
+  /**
+   * Restore one chunk of an outside edit: disk becomes the outside version
+   * without that chunk, through the guarded replacement. Baseline unchanged.
+   */
+  async restoreChunk(workspaceRoot: string, request: ExternalReviewChunkRequest): Promise<ExternalReviewActionResult> {
+    const state = this.requireState(workspaceRoot);
+
+    return this.enqueueWrite(state, async () => {
+      const before = this.currentReview(state.workspaceRoot);
+      const located = await this.locateReviewChunk(state, request);
+
+      if (!located) {
+        return this.staleResult(state, before, request.fileId);
+      }
+
+      const { item, hunks, chunk } = located;
+      const baselineContent = item.baselineContent ?? "";
+      const allAccepted = hunks.map((hunk) => ({ ...hunk, status: "accepted" as const }));
+
+      if (reconstructContent(baselineContent, allAccepted) !== (item.diskContent ?? "")) {
+        throw new Error("The outside change could not be split into chunks safely.");
+      }
+
+      const content = reconstructContent(
+        baselineContent,
+        hunks.map((hunk) => ({ ...hunk, status: hunk.id === chunk.id ? ("rejected" as const) : ("accepted" as const) }))
+      );
+
+      await this.ensureDestructiveWriteAllowed(state);
+      const failure = await this.restoreItem(state, item, content);
+
+      if (failure === CHANGED_AGAIN_MESSAGE) {
+        state.pendingPaths = null;
+        await this.refresh(state);
+        return this.staleResult(state, before, request.fileId);
+      }
+
+      if (failure) {
+        throw new Error(failure);
+      }
+
+      await this.finishReviewChange(state, [item.relativePath]);
+
+      return {
+        status: "rejected",
+        proposal: before.proposal ?? emptyProposal(state.workspaceRoot),
+        relativePath: item.relativePath,
+        kind: item.kind,
+        content,
+        unrestored: [],
+        snapshot: this.currentReview(state.workspaceRoot)
+      };
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // internals
 
@@ -959,6 +1063,33 @@ export class WorkspaceBaselineService {
     return null;
   }
 
+  /**
+   * A chunk action is valid only when the item still carries exactly the
+   * baseline and disk the renderer saw (chunk ids are positional, spec V3).
+   */
+  private async locateReviewChunk(state: WorkspaceBaselineState, request: ExternalReviewChunkRequest) {
+    const located = await this.locateReviewItem(state, request.fileId);
+
+    if (!located) {
+      return null;
+    }
+
+    const { item } = located;
+
+    if (item.kind === "edit" && item.baselineHash === request.baselineHash && item.diskHash === request.diskHash) {
+      const hunks = buildLineReviewHunks(item.baselineContent ?? "", item.diskContent ?? "", request.fileId);
+      const chunk = hunks.find((candidate) => candidate.id === request.chunkId);
+
+      if (chunk) {
+        return { item, hunks, chunk };
+      }
+    }
+
+    state.pendingPaths = null;
+    await this.refresh(state);
+    return null;
+  }
+
   private staleResult(
     state: WorkspaceBaselineState,
     before: ExternalReviewSnapshot,
@@ -974,7 +1105,13 @@ export class WorkspaceBaselineService {
     };
   }
 
-  private async restoreItem(state: WorkspaceBaselineState, item: ExternalReviewItem): Promise<string | null> {
+  /**
+   * Returns disk to `content` (default: the baseline) for one reviewed item.
+   * Never writes over bytes nobody reviewed: edits go through the guarded
+   * replacement, a deleted file is recreated exclusively, and a created file
+   * is moved to the Trash from a holding path.
+   */
+  private async restoreItem(state: WorkspaceBaselineState, item: ExternalReviewItem, content?: string): Promise<string | null> {
     const absolutePath = path.join(state.workspaceRoot, item.relativePath);
     const safety = await checkPathSafety(state.workspaceRoot, absolutePath);
 
@@ -1001,14 +1138,104 @@ export class WorkspaceBaselineService {
         return await this.trashReviewedFile(state, item, absolutePath);
       }
 
-      await mkdir(path.dirname(absolutePath), { recursive: true });
-      await writeNoFollow(absolutePath, item.baselineContent ?? "", fsConstants.O_WRONLY | fsConstants.O_CREAT);
-      return null;
+      if (item.kind === "delete") {
+        await mkdir(path.dirname(absolutePath), { recursive: true });
+
+        try {
+          // Exclusive create: a file that appeared meanwhile is never replaced.
+          await writeNoFollow(
+            absolutePath,
+            content ?? item.baselineContent ?? "",
+            fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL
+          );
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+            return CHANGED_AGAIN_MESSAGE;
+          }
+
+          throw error;
+        }
+
+        return null;
+      }
+
+      return await this.replaceReviewedFile(absolutePath, item.diskHash ?? "", content ?? item.baselineContent ?? "");
     } catch (error) {
       return errorMessage(error);
     } finally {
       markWorkspaceMutation(state.workspaceRoot, [absolutePath]);
     }
+  }
+
+  /**
+   * Guarded replacement (spec V4). The current file is renamed (atomically)
+   * to a hidden holding path so no writer can change it underneath; its bytes
+   * must hash to the reviewed disk hash. The new text is written to a temp
+   * file in the same folder and published with a hard link, which fails if
+   * anything appeared at the path meanwhile. Every failure keeps the newer
+   * file untouched and the held bytes recoverable, and reports "changed again".
+   */
+  private async replaceReviewedFile(absolutePath: string, expectedHash: string, content: string): Promise<string | null> {
+    const directory = path.dirname(absolutePath);
+    const token = randomUUID();
+    const holdingDirectory = path.join(directory, `.iliad-restore-${token}`);
+    const held = path.join(holdingDirectory, path.basename(absolutePath));
+    const temp = path.join(directory, `.iliad-restore-${token}.tmp`);
+    await mkdir(holdingDirectory);
+
+    try {
+      await rename(absolutePath, held);
+    } catch (error) {
+      await rmdir(holdingDirectory).catch(() => undefined);
+
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return CHANGED_AGAIN_MESSAGE;
+      }
+
+      throw error;
+    }
+
+    let heldContent: string | null = null;
+    let heldMode = 0o644;
+
+    try {
+      const stats = await lstat(held);
+
+      if (stats.isFile() && !stats.isSymbolicLink()) {
+        heldMode = stats.mode & 0o777;
+        heldContent = await readFile(held, "utf8");
+      }
+    } catch {
+      heldContent = null;
+    }
+
+    if (heldContent === null || hashMarkdown(heldContent) !== expectedHash) {
+      await this.returnHeldFile(held, absolutePath);
+      await rmdir(holdingDirectory).catch(() => undefined);
+      return CHANGED_AGAIN_MESSAGE;
+    }
+
+    try {
+      await writeNoFollow(temp, content, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, heldMode);
+      await this.beforeRestorePublish?.(absolutePath);
+      // No-clobber publish: `link` fails with EEXIST if a file took the path.
+      await link(temp, absolutePath);
+    } catch (error) {
+      await rm(temp, { force: true }).catch(() => undefined);
+      await this.returnHeldFile(held, absolutePath);
+      await rmdir(holdingDirectory).catch(() => undefined);
+
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        return CHANGED_AGAIN_MESSAGE;
+      }
+
+      throw error;
+    }
+
+    await rm(temp, { force: true }).catch(() => undefined);
+    await rm(held, { force: true }).catch(() => undefined);
+    await rmdir(holdingDirectory).catch(() => undefined);
+    return null;
   }
 
   /**
@@ -1280,9 +1507,9 @@ function movePrefix<T>(map: Map<string, T>, from: string, to: string, rekey?: (v
  * between the safety check and the write fails (ELOOP) instead of being
  * followed outside the workspace.
  */
-async function writeNoFollow(absolutePath: string, content: string, flags: number) {
+async function writeNoFollow(absolutePath: string, content: string, flags: number, mode = 0o644) {
   const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
-  const handle = await open(absolutePath, flags | noFollow, 0o644);
+  const handle = await open(absolutePath, flags | noFollow, mode);
 
   try {
     await handle.truncate(0);

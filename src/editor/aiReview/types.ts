@@ -19,7 +19,6 @@ export type EditorReviewState =
         next: string;
         acceptAll: string;
         rejectAll: string;
-        rejectRemaining: string;
         stale: string;
         acceptChange: string;
         rejectChange: string;

@@ -175,3 +175,28 @@ export interface RejectAgentProposalRequest {
   workspaceSessionId: string;
   proposalId: string;
 }
+
+export interface ReviewChunkActionRequest {
+  workspaceSessionId: string;
+  proposalId: string;
+  fileId: string;
+  chunkId: string;
+  /** The baseline and disk hashes of the file as the renderer saw it. */
+  baselineHash: string;
+  diskHash: string;
+}
+
+export interface ReviewChunkActionResponse {
+  /** `applied` (kept), `rejected` (restored), or `stale` (nothing done; review refreshed). */
+  status: "applied" | "rejected" | "stale";
+  fileId: string;
+  chunkId: string;
+  relativePath: string | null;
+  /** Disk content after the action. */
+  content?: string;
+  snapshot: {
+    workspaceRoot: string;
+    revision: number;
+    proposal: AgentChangeProposal | null;
+  };
+}

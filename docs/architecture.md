@@ -365,8 +365,7 @@ Rules that must hold:
 - The baseline is session-scoped: captured from disk when a window attaches to
   the workspace, dropped shortly after the last window detaches.
 - Every Iliad-owned Markdown write updates the baseline inside the same
-  serialized operation that performs the write. Editor saves, proposal
-  application, and outside-review restores go through
+  serialized operation that performs the write. Editor saves go through
   `writeMarkdownIfUnchanged`, a compare-and-swap that checks path identity and
   expected content immediately before writing. Structural file actions run
   inside `runIliadMutation`, which defers reconciliation while in flight and
@@ -376,9 +375,26 @@ Rules that must hold:
   known files refresh only those paths; renames, unknown filenames, and
   watcher restarts trigger a full scan. Create and delete items need a second
   observation before they are published.
-- Outside content stays on disk while the review is pending. Keep advances the
-  baseline; Restore writes the baseline back, or moves an outside-created file
-  to the system Trash.
+- Outside content stays on disk while the review is pending. Outside edits of
+  existing files are reviewed per chunk: Keep folds that chunk into the
+  baseline (no disk write; the item disappears once baseline equals disk);
+  Restore writes disk minus that chunk and leaves the baseline alone. Chunk
+  ids are positional (`${fileId}-hunk-${n}`), so every chunk action carries
+  the baseline and disk hashes the renderer saw and main answers `stale`
+  (`agent:keep-chunk` / `agent:restore-chunk`) when they no longer match.
+  Keep all / Restore all act on the whole file. Creates and deletes stay
+  file-level: Keep file / Move to Trash, Confirm deletion / Restore file.
+- Every Restore uses a guarded replacement, never a truncating write: the
+  current file is renamed to a hidden holding path and its bytes verified
+  against the reviewed hash, the new text is written to a temp file in the
+  same folder and published with a hard link (fails if anything appeared at
+  the path), then the held file is removed. Any mismatch or collision leaves
+  the newer file untouched, keeps the held bytes beside it, and reports
+  `stale`. Restoring a deleted file creates it exclusively (`O_EXCL`).
+- Keep never loads disk over a conflicted or dirty editor buffer (only the
+  conflict banner's confirmed Keep discards it), Esc and Tab never act on
+  outside chunks, and a conflicted buffer resumes autosave only when disk
+  equals its saved text again.
 - The renderer subscribes (`agent:external-review-changed`) and pulls once
   (`agent:get-external-review`); both carry a revision and older snapshots are
   ignored. The renderer never drives the review lifecycle.
