@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -386,12 +386,15 @@ describe("WorkspaceBaselineService", () => {
     await baseline.restore(root, externalReviewFileId("gone.md"));
     expect(await readFile(path.join(root, "gone.md"), "utf8")).toBe("keep me\n");
 
+    // The replaced original of the edit is never deleted: it goes to the Trash.
+    expect(trashed.map((entry) => path.basename(entry))).toEqual(["edit.md"]);
+
     await baseline.restore(root, externalReviewFileId("drafts/new.md"));
     // The file is held in a hidden sibling folder before it goes to the
     // Trash, under its own basename.
-    expect(trashed).toHaveLength(1);
-    expect(path.basename(trashed[0])).toBe("new.md");
-    expect(path.basename(path.dirname(trashed[0]))).toMatch(/^\.iliad-restore-/);
+    expect(trashed).toHaveLength(2);
+    expect(path.basename(trashed[1])).toBe("new.md");
+    expect(path.basename(path.dirname(trashed[1]))).toMatch(/^\.iliad-restore-/);
     await expect(stat(path.join(root, "drafts"))).rejects.toThrow();
     expect(baseline.currentReview(root).proposal).toBeNull();
   });
@@ -668,15 +671,32 @@ describe("WorkspaceBaselineService per-chunk review", () => {
   const BASE = "alpha\nbeta\ngamma\ndelta\nepsilon\n";
   const DISK = "ALPHA\nbeta\ngamma\nDELTA\nepsilon\n";
 
+  /** A Trash outside the workspace that keeps every moved file (and its inode). */
+  async function fakeTrash() {
+    const dir = await workspace();
+    const trashed: string[] = [];
+    return {
+      trashed,
+      trashItem: async (absolutePath: string) => {
+        const slot = path.join(dir, String(trashed.length));
+        await mkdir(slot);
+        const destination = path.join(slot, path.basename(absolutePath));
+        await rename(absolutePath, destination);
+        trashed.push(destination);
+      }
+    };
+  }
+
   async function reviewedEdit(base = BASE, disk = DISK, options: ConstructorParameters<typeof WorkspaceBaselineService>[0] = {}) {
     const root = await workspace();
     await writeFile(path.join(root, "doc.md"), base, "utf8");
-    const baseline = service(options);
+    const trash = await fakeTrash();
+    const baseline = service({ trashItem: trash.trashItem, ...options });
     await baseline.attach(root, subscriber());
     await writeFile(path.join(root, "doc.md"), disk, "utf8");
     baseline.noteDiskChange(root, { relativePath: "doc.md", eventType: "change" });
     await waitFor(() => baseline.currentReview(root).proposal !== null);
-    return { root, baseline };
+    return { root, baseline, trash };
   }
 
   function editFile(baseline: WorkspaceBaselineService, root: string) {
@@ -803,6 +823,68 @@ describe("WorkspaceBaselineService per-chunk review", () => {
     expect(names.filter((name) => name.startsWith("."))).toEqual([]);
   });
 
+  it("moves the held original to the Trash so a writer's late bytes through an open handle survive", async () => {
+    let handle: Awaited<ReturnType<typeof open>> | null = null;
+    const { root, baseline, trash } = await reviewedEdit(BASE, DISK, {
+      beforeRestorePublish: async () => {
+        // The writer opened the file before the hold and writes after the
+        // hash check: its bytes land in the held inode.
+        await handle!.write("late line\n");
+      }
+    });
+    handle = await open(path.join(root, "doc.md"), "a");
+
+    try {
+      const result = await baseline.restoreChunk(root, chunkRequest(baseline, root, 1));
+      expect(result.status).toBe("rejected");
+      await handle.write("even later\n");
+    } finally {
+      await handle.close();
+    }
+
+    expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe("ALPHA\nbeta\ngamma\ndelta\nepsilon\n");
+    expect(trash.trashed).toHaveLength(1);
+    expect(path.basename(trash.trashed[0])).toBe("doc.md");
+    expect(await readFile(trash.trashed[0], "utf8")).toBe(`${DISK}late line\neven later\n`);
+    expect((await readdir(root)).filter((name) => name.startsWith("."))).toEqual([]);
+  });
+
+  it("keeps the held original at its hidden holding path when the Trash fails", async () => {
+    const { root, baseline } = await reviewedEdit(BASE, DISK, {
+      trashItem: async () => {
+        throw new Error("Trash unavailable");
+      }
+    });
+
+    const result = await baseline.restoreChunk(root, chunkRequest(baseline, root, 1));
+
+    expect(result.status).toBe("rejected");
+    const holding = (await readdir(root)).filter((name) => name.startsWith(".iliad-restore-"));
+    expect(holding).toHaveLength(1);
+    expect(await readFile(path.join(root, holding[0], "doc.md"), "utf8")).toBe(DISK);
+  });
+
+  it("never replaces an existing outside copy when keeping held bytes beside a newer file", async () => {
+    let raced = false;
+    const { root, baseline } = await reviewedEdit(BASE, DISK, {
+      beforeRestorePublish: async (absolutePath) => {
+        if (!raced) {
+          raced = true;
+          await writeFile(path.join(root, "doc (outside copy).md"), "older copy\n", "utf8");
+          await writeFile(absolutePath, "written during restore\n", "utf8");
+        }
+      }
+    });
+
+    const result = await baseline.restoreChunk(root, chunkRequest(baseline, root, 0));
+
+    expect(result.status).toBe("stale");
+    expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe("written during restore\n");
+    expect(await readFile(path.join(root, "doc (outside copy).md"), "utf8")).toBe("older copy\n");
+    expect(await readFile(path.join(root, "doc (outside copy 2).md"), "utf8")).toBe(DISK);
+    expect((await readdir(root)).filter((name) => name.startsWith("."))).toEqual([]);
+  });
+
   it("uses the guarded replacement for a whole-file restore too", async () => {
     let raced = false;
     const { root, baseline } = await reviewedEdit(BASE, DISK, {
@@ -824,11 +906,24 @@ describe("WorkspaceBaselineService per-chunk review", () => {
   it("restores an outside deletion exclusively and never replaces a file that appeared", async () => {
     const root = await workspace();
     await writeFile(path.join(root, "gone.md"), "original\n", "utf8");
-    const baseline = service();
+    let raceOnce = true;
+    const baseline = service({
+      beforeDeletionRestoreCreate: async (absolutePath) => {
+        // A file lands after the last look but before the exclusive create.
+        if (raceOnce) {
+          raceOnce = false;
+          await writeFile(absolutePath, "appeared\n", "utf8");
+        }
+      }
+    });
     await baseline.attach(root, subscriber());
     await rm(path.join(root, "gone.md"));
     baseline.noteDiskChange(root, { relativePath: "gone.md", eventType: "rename" });
     await waitFor(() => baseline.currentReview(root).proposal !== null);
+
+    const result = await baseline.restore(root, externalReviewFileId("gone.md"));
+    expect(result.status).toBe("stale");
+    expect(await readFile(path.join(root, "gone.md"), "utf8")).toBe("appeared\n");
 
     const internals = baseline as unknown as {
       states: Map<string, unknown>;
@@ -842,13 +937,7 @@ describe("WorkspaceBaselineService per-chunk review", () => {
       diskContent: null,
       diskHash: null
     };
-    // Simulate a file that lands after the last look but before the create.
     const state = internals.states.get(path.resolve(root));
-    await writeFile(path.join(root, "gone.md"), "appeared\n", "utf8");
-    const outcome = await internals.restoreItem(state, item);
-    expect(outcome).toMatch(/changed again/);
-    expect(await readFile(path.join(root, "gone.md"), "utf8")).toBe("appeared\n");
-
     await rm(path.join(root, "gone.md"));
     expect(await internals.restoreItem(state, item)).toBeNull();
     expect(await readFile(path.join(root, "gone.md"), "utf8")).toBe("original\n");

@@ -347,9 +347,12 @@ Per-chunk review (Stage B)
   `stale`; on match write the new content to a temp file in the same folder and
   publish it with a no-clobber operation (hard link temp → path, which fails
   with EEXIST if anything appeared at the path; then remove the temp), then
-  delete the held file. Any no-clobber failure (including putting the held file
+  move the held original to the Trash (never delete it: a writer with an
+  already-open descriptor may still write into that inode; if trashing fails
+  it stays at its unique hidden holding path). Any no-clobber failure (including putting the held file
   back on mismatch) leaves the newer file untouched, keeps the held bytes via
-  the existing held-file recovery pattern (`returnHeldFile`), and returns
+  the existing held-file recovery pattern (`returnHeldFile`: a unique
+  `name (outside copy N).md` published by no-clobber hard link), and returns
   `stale`. Restoring an outside deletion creates the file exclusively
   (`O_EXCL`). Replaces the read-then-truncate write (`writeNoFollow`) for
   restores.

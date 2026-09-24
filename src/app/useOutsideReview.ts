@@ -34,8 +34,19 @@ interface UseOutsideReviewOptions {
   activeFileInConflict?: boolean;
   /** Fires when the active file's outside-change item disappears while the buffer is in conflict. */
   onActiveFileExternalItemCleared?: () => void;
-  /** Reloads the active document from disk (used when its outside item vanishes under a clean buffer). */
-  reloadActiveDocument?: () => Promise<void>;
+  /**
+   * Reloads the active document from disk (used when its outside item
+   * vanishes under a clean buffer). `mayReplace` is re-checked immediately
+   * before the read text is loaded; when it answers false the buffer and its
+   * save state are left alone.
+   */
+  reloadActiveDocument?: (options?: { mayReplace?: () => boolean }) => Promise<void>;
+  /**
+   * Saves the active document's pending edits (autosave flush). Used before a
+   * review action replaces the active buffer; it must reject when the save
+   * fails or conflicts.
+   */
+  flushActiveDocument?: () => Promise<void>;
   /**
    * True when the active buffer may be replaced with disk text: not in
    * conflict and no unsaved edits (spec V5). Defaults to "not in conflict".
@@ -245,6 +256,31 @@ export function reviewActionMayLoadActiveBuffer({
 }
 
 /**
+ * What must happen before a review action may replace or clear the active
+ * buffer (spec V5): nothing when there is no document or its buffer is clean;
+ * save it first when it only has unsaved edits; never when it is in conflict.
+ */
+export function activeBufferReplacementStep({
+  hasActiveDocument,
+  inConflict,
+  clean
+}: {
+  hasActiveDocument: boolean;
+  inConflict: boolean;
+  clean: boolean;
+}): "replace" | "save_first" | "keep" {
+  if (!hasActiveDocument) {
+    return "replace";
+  }
+
+  if (inConflict) {
+    return "keep";
+  }
+
+  return clean ? "replace" : "save_first";
+}
+
+/**
  * Outside-change review in the renderer: the review snapshot pushed or pulled
  * from main, the active review target, and the keep / restore actions. Review
  * actions never flush the editor first; the review compares against disk.
@@ -266,6 +302,7 @@ export function useOutsideReview({
   reloadActiveDocument,
   canReplaceActiveBuffer,
   onOutsideEditRestored,
+  flushActiveDocument,
   strings,
   tree,
   workspace
@@ -294,6 +331,38 @@ export function useOutsideReview({
     () => !activeFileInConflictRef.current && (canReplaceActiveBufferRef.current?.() ?? true),
     []
   );
+  const flushActiveDocumentRef = useRef(flushActiveDocument);
+  flushActiveDocumentRef.current = flushActiveDocument;
+  /**
+   * Makes the active buffer safe to replace or clear (spec V5): a clean buffer
+   * is; dirty edits are saved first (a clean save); a conflicted buffer, a
+   * failed save, or text typed during the save means the buffer must stay.
+   */
+  const prepareActiveBufferForReplacement = useCallback(async () => {
+    const step = activeBufferReplacementStep({
+      hasActiveDocument: Boolean(activeFilePathRef.current),
+      inConflict: activeFileInConflictRef.current,
+      clean: bufferReplaceable()
+    });
+
+    if (step !== "save_first") {
+      return step === "replace";
+    }
+
+    const flush = flushActiveDocumentRef.current;
+
+    if (!flush) {
+      return false;
+    }
+
+    try {
+      await flush();
+    } catch {
+      return false;
+    }
+
+    return bufferReplaceable();
+  }, [bufferReplaceable]);
 
   useEffect(() => {
     workspacePathRef.current = workspace?.path ?? null;
@@ -426,7 +495,7 @@ export function useOutsideReview({
           return;
         }
 
-        if (result.kind === "edit_file" && result.content) {
+        if (result.kind === "edit_file" && result.content !== undefined) {
           const file = result.proposal.files.find((candidate) => candidate.id === result.fileId);
           // Compare against the file that is active now, not the one captured
           // before the await: navigating mid-apply must not clobber another buffer.
@@ -452,18 +521,24 @@ export function useOutsideReview({
 
         await refreshExternalReview();
 
-        if (result.kind === "create_file" && result.file && result.content) {
-          const previousPath = activeFile?.path ?? null;
+        if (result.kind === "create_file" && result.file && result.content !== undefined) {
           const nextTree = await refreshTree(workspace.path);
           const nextFile = findNode(nextTree, result.file.path) ?? result.file;
 
-          if (previousPath) {
-            recordNormalNavigation(previousPath, nextFile.path);
-          }
+          // Opening the kept file replaces the active buffer: only once that
+          // buffer is saved (spec V5). A conflicted or unsaveable buffer stays
+          // put; the file is kept on disk and in the tree either way.
+          if (workspacePathRef.current === workspace.path && (await prepareActiveBufferForReplacement())) {
+            const previousPath = activeFilePathRef.current;
 
-          setActiveFile(nextFile);
-          setSelectedTreePath(nextFile.path);
-          loadDocument(result.content);
+            if (previousPath) {
+              recordNormalNavigation(previousPath, nextFile.path);
+            }
+
+            setActiveFile(nextFile);
+            setSelectedTreePath(nextFile.path);
+            loadDocument(result.content);
+          }
         }
 
         if (result.kind === "delete_file") {
@@ -472,9 +547,20 @@ export function useOutsideReview({
 
           if (file?.kind === "delete_file" && activeRelativePath && sameRelativePath(activeRelativePath, file.relativePath)) {
             await refreshTree(workspace.path);
-            setActiveFile(null);
-            setSelectedTreePath(null);
-            loadDocument("");
+
+            // Clearing the deleted document's buffer must not erase unsaved
+            // or conflicted text: those stay in the editor (the save state
+            // reports them) until the writer resolves them.
+            if (
+              workspacePathRef.current === workspace.path &&
+              !wasInConflict &&
+              sameRelativePath(activeFileRelativePathRef.current ?? "", file.relativePath) &&
+              bufferReplaceable()
+            ) {
+              setActiveFile(null);
+              setSelectedTreePath(null);
+              loadDocument("");
+            }
           }
         }
 
@@ -498,9 +584,9 @@ export function useOutsideReview({
       });
     },
     [
-      activeFile?.path,
       bufferReplaceable,
       loadDocument,
+      prepareActiveBufferForReplacement,
       recordNormalNavigation,
       refreshExternalReview,
       refreshTree,
@@ -1030,11 +1116,13 @@ export function useOutsideReview({
         if (activeFileInConflictRef.current) {
           // The writer's buffer is the truth; disk matches its saved identity again.
           onActiveFileExternalItemCleared?.();
-        } else if (!activeReviewActionRef.current) {
+        } else if (!activeReviewActionRef.current && bufferReplaceable()) {
           // The read-only review vanished under a clean buffer that may hold
           // the outside content (opened while the item was pending): reload
-          // so the editor never shows text that is not on disk.
-          void reloadActiveDocument?.();
+          // so the editor never shows text that is not on disk. The reload
+          // re-checks the buffer right before loading, so edits typed while
+          // the read was in flight are never replaced.
+          void reloadActiveDocument?.({ mayReplace: bufferReplaceable });
         }
       }
 
@@ -1067,7 +1155,7 @@ export function useOutsideReview({
         void selectAgentReviewTarget(target);
       }
     },
-    [onActiveFileExternalItemCleared, refreshTree, reloadActiveDocument, selectAgentReviewTarget]
+    [bufferReplaceable, onActiveFileExternalItemCleared, refreshTree, reloadActiveDocument, selectAgentReviewTarget]
   );
 
   useEffect(() => {

@@ -278,7 +278,9 @@ export default function App() {
     messages: strings.documentMessages
   });
 
-  const reloadActiveDocumentRef = useRef<() => Promise<void>>(async () => undefined);
+  const reloadActiveDocumentRef = useRef<(options?: { mayReplace?: () => boolean }) => Promise<void>>(
+    async () => undefined
+  );
   const {
     activeReview,
     agentProposals,
@@ -306,9 +308,10 @@ export default function App() {
     requestReviewReveal,
     activeFileInConflict,
     onActiveFileExternalItemCleared: resumeAfterConflict,
-    reloadActiveDocument: () => reloadActiveDocumentRef.current(),
+    reloadActiveDocument: (options) => reloadActiveDocumentRef.current(options),
     canReplaceActiveBuffer: () => stateRef.current.documentText === stateRef.current.savedText,
     onOutsideEditRestored: noteOutsideEditRestored,
+    flushActiveDocument: flushSave,
     strings,
     tree,
     workspace
@@ -340,17 +343,49 @@ export default function App() {
 
     return externalReviewTargetForActiveFile(agentProposals, workspace.path, activeFile.relativePath);
   }, [activeFile, activeFileInConflict, agentProposals, workspace]);
-  const reloadActiveDocumentFromDisk = useCallback(async () => {
-    if (!workspace || !activeFile || activeFile.kind !== "markdown") {
-      return;
-    }
+  const reloadActiveDocumentFromDisk = useCallback(
+    async ({ mayReplace }: { mayReplace?: () => boolean } = {}) => {
+      if (!workspace || !activeFile || activeFile.kind !== "markdown") {
+        return;
+      }
 
-    try {
-      loadDocument(await window.iliad.readMarkdown(workspace.path, activeFile.path));
-    } catch (readError) {
-      setError(readError instanceof Error ? readError.message : strings.fileMessages.openFileFallback);
-    }
-  }, [activeFile, loadDocument, strings.fileMessages.openFileFallback, workspace]);
+      // The buffer identity the read was started for: the same document and
+      // the same saved text. Anything else by the time the read returns (another
+      // document opened, or edits typed while it was in flight) keeps the
+      // buffer and its save state untouched.
+      const before = stateRef.current;
+      const expectedSavedText = before.savedText;
+
+      if (mayReplace && !mayReplace()) {
+        return;
+      }
+
+      let text: string;
+
+      try {
+        text = await window.iliad.readMarkdown(workspace.path, activeFile.path);
+      } catch (readError) {
+        setError(readError instanceof Error ? readError.message : strings.fileMessages.openFileFallback);
+        return;
+      }
+
+      const latest = stateRef.current;
+
+      if (latest.workspace?.path !== workspace.path || latest.activeFile?.path !== activeFile.path) {
+        return;
+      }
+
+      if (
+        mayReplace &&
+        (!mayReplace() || latest.savedText !== expectedSavedText || latest.documentText !== latest.savedText)
+      ) {
+        return;
+      }
+
+      loadDocument(text);
+    },
+    [activeFile, loadDocument, stateRef, strings.fileMessages.openFileFallback, workspace]
+  );
   useEffect(() => {
     reloadActiveDocumentRef.current = reloadActiveDocumentFromDisk;
   }, [reloadActiveDocumentFromDisk]);
