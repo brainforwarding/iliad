@@ -4,6 +4,7 @@ import {
   editorReviewActionLabelsForMode,
   externalActiveFileAutoSelectionDecision,
   externalReviewTargetForActiveFile,
+  loadActiveBufferFromDiskIfSafe,
   reviewActionMayLoadActiveBuffer,
   reviewTargetAfterActiveFileChange
 } from "../../src/app/useOutsideReview";
@@ -227,6 +228,92 @@ describe("useOutsideReview helpers", () => {
         canReplaceActiveBuffer: true
       })
     ).toBe(false);
+  });
+
+  it("keeps a typed edit that arrives while a chunk keep/restore read is in flight", async () => {
+    // Simulated live buffer: clean when the chunk action starts.
+    const buffer = { documentText: "Old\n", savedText: "Old\n", inConflict: false };
+    const loads: string[] = [];
+    let resolveRead: (text: string) => void = () => undefined;
+    const pending = loadActiveBufferFromDiskIfSafe({
+      read: () => new Promise<string>((resolve) => (resolveRead = resolve)),
+      mayLoadNow: () =>
+        reviewActionMayLoadActiveBuffer({
+          activeRelativePath: "doc.md",
+          targetRelativePath: "doc.md",
+          wasInConflict: buffer.inConflict,
+          canReplaceActiveBuffer: buffer.documentText === buffer.savedText
+        }),
+      load: (text) => {
+        loads.push(text);
+        buffer.documentText = text;
+        buffer.savedText = text;
+      }
+    });
+
+    // The writer types while the IPC / read is pending.
+    buffer.documentText = "Old\nTyped mid-action\n";
+    resolveRead("New from disk\n");
+
+    expect(await pending).toBe("kept");
+    expect(loads).toEqual([]);
+    expect(buffer).toEqual({ documentText: "Old\nTyped mid-action\n", savedText: "Old\n", inConflict: false });
+  });
+
+  it("keeps a typed edit that arrives while a file restore read is in flight, and loads a still-clean buffer", async () => {
+    const buffer = { documentText: "Mine\n", savedText: "Mine\n" };
+    let active = "doc.md";
+    const mayLoadNow = () =>
+      reviewActionMayLoadActiveBuffer({
+        activeRelativePath: active,
+        targetRelativePath: "doc.md",
+        wasInConflict: false,
+        canReplaceActiveBuffer: buffer.documentText === buffer.savedText
+      });
+    const loads: string[] = [];
+    const load = (text: string) => loads.push(text);
+
+    let resolveRead: (text: string) => void = () => undefined;
+    const typed = loadActiveBufferFromDiskIfSafe({
+      read: () => new Promise<string>((resolve) => (resolveRead = resolve)),
+      mayLoadNow,
+      load
+    });
+    buffer.documentText = "Mine\nmore\n";
+    resolveRead("Restored\n");
+    expect(await typed).toBe("kept");
+    expect(loads).toEqual([]);
+
+    // Navigating to another document mid-read also keeps that buffer.
+    buffer.documentText = buffer.savedText;
+    const navigated = loadActiveBufferFromDiskIfSafe({
+      read: async () => {
+        active = "other.md";
+        return "Restored\n";
+      },
+      mayLoadNow,
+      load
+    });
+    expect(await navigated).toBe("kept");
+    expect(loads).toEqual([]);
+
+    active = "doc.md";
+    expect(await loadActiveBufferFromDiskIfSafe({ read: async () => "Restored\n", mayLoadNow, load })).toBe("loaded");
+    expect(loads).toEqual(["Restored\n"]);
+  });
+
+  it("never clears or replaces the buffer when the restore read fails", async () => {
+    const loads: string[] = [];
+    const result = await loadActiveBufferFromDiskIfSafe({
+      read: async () => {
+        throw new Error("ENOENT");
+      },
+      mayLoadNow: () => true,
+      load: (text) => loads.push(text)
+    });
+
+    expect(result).toBe("failed");
+    expect(loads).toEqual([]);
   });
 
   it("saves a dirty buffer before Keep file opens another document and never replaces a conflicted one", () => {

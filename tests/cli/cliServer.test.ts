@@ -9,6 +9,7 @@ import { createCliRequestHandler, type CliWindowHost } from "../../electron/cli/
 import { CliOpenRequestQueue, normalizeCliOpenResult } from "../../electron/cli/openRequests";
 import { encodeCliResponse, parseCliRequest } from "../../electron/cli/protocol";
 import { startCliServer, type CliServer } from "../../electron/cli/server";
+import { runCli } from "../../bin/lib/cli.mjs";
 
 describe("CLI protocol codec", () => {
   it("round-trips requests between the CLI and main", () => {
@@ -178,6 +179,40 @@ describe("CLI socket server", () => {
     }
 
     expect(host.openWorkspaceWindow).not.toHaveBeenCalled();
+    expect(host.requestOpenDocument).not.toHaveBeenCalled();
+  });
+
+  it("rejects a warm `iliad open` through a hidden symlink directory to a visible target", async () => {
+    // book/.alias -> book/chapters: the canonical path is visible, the
+    // spelling the writer used is not.
+    await symlink(path.join(dir, "book", "chapters"), path.join(dir, "book", ".alias"));
+    // Outside any open workspace too: .hidden-link -> loose.
+    await symlink(path.join(dir, "loose"), path.join(dir, ".hidden-link"));
+    await start();
+    const err: string[] = [];
+    const deps = { cwd: dir, home: dir, socketPath, stdout: () => undefined, stderr: (t: string) => err.push(t) };
+
+    expect(await runCli(["open", "book/.alias/03.md"], deps)).toBe(1);
+    expect(await runCli(["open", ".hidden-link/b.md"], deps)).toBe(1);
+    expect(err).toHaveLength(2);
+    expect(err.every((line) => /hidden or ignored/.test(line))).toBe(true);
+    expect(host.openWorkspaceWindow).not.toHaveBeenCalled();
+    expect(host.requestOpenDocument).not.toHaveBeenCalled();
+
+    // The visible spelling of the same file still opens.
+    expect(await runCli(["open", "book/chapters/03.md"], deps)).toBe(0);
+    expect(host.requestOpenDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a request whose canonical spelling is hidden or not absolute", async () => {
+    await start();
+    const file = path.join(dir, "book", "chapters", "03.md");
+    expect(
+      await sendRequest(socketPath, { cmd: "open", path: file, canonicalPath: path.join(dir, "book", ".hidden", "x.md") })
+    ).toMatchObject({ ok: false, error: expect.stringMatching(/hidden or ignored/) });
+    expect(await sendRequest(socketPath, { cmd: "open", path: file, canonicalPath: "book/x.md" })).toMatchObject({
+      ok: false
+    });
     expect(host.requestOpenDocument).not.toHaveBeenCalled();
   });
 

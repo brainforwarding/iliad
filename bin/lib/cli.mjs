@@ -185,7 +185,15 @@ async function runOpen(route, context) {
     return exitCodes.error;
   }
 
-  const request = { cmd: "open", path: filePath, ...(route.line ? { line: route.line } : {}) };
+  // Send both spellings: the requested one (resolved against cwd, symlinks
+  // kept) so main can refuse a hidden symlink spelling of a visible target,
+  // and the canonical one it opens.
+  const request = {
+    cmd: "open",
+    path: requestedPath,
+    canonicalPath: filePath,
+    ...(route.line ? { line: route.line } : {})
+  };
   let response;
 
   try {

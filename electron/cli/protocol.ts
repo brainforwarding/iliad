@@ -14,7 +14,12 @@ export interface CliWindowStatus {
 
 export type CliRequest =
   | { cmd: "status" }
-  | { cmd: "open"; path: string; line: number | null };
+  /**
+   * `path` is the path as the writer spelled it (absolute, symlinks kept);
+   * `canonicalPath` is the CLI's realpath of it. Main checks hidden/ignored
+   * names on every spelling.
+   */
+  | { cmd: "open"; path: string; canonicalPath?: string; line: number | null };
 
 export type CliResponse =
   | { ok: true; windows?: CliWindowStatus[] }
@@ -58,7 +63,21 @@ export function parseCliRequest(line: string): ParsedCliRequest {
       return { ok: false, error: "line must be a whole number of 1 or more." };
     }
 
-    return { ok: true, request: { cmd: "open", path: parsed.path, line: typeof line === "number" ? line : null } };
+    const canonicalPath = parsed.canonicalPath;
+
+    if (canonicalPath !== undefined && (typeof canonicalPath !== "string" || !canonicalPath.trim())) {
+      return { ok: false, error: "canonicalPath must be a file path." };
+    }
+
+    return {
+      ok: true,
+      request: {
+        cmd: "open",
+        path: parsed.path,
+        ...(typeof canonicalPath === "string" ? { canonicalPath } : {}),
+        line: typeof line === "number" ? line : null
+      }
+    };
   }
 
   return { ok: false, error: `Unknown command: ${typeof parsed.cmd === "string" ? parsed.cmd : "(none)"}` };

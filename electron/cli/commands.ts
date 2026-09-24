@@ -34,7 +34,7 @@ async function openDocument(
   request: Extract<CliRequest, { cmd: "open" }>,
   canonicalizeWorkspace: (directory: string) => Promise<WorkspaceInfo>
 ): Promise<CliResponse> {
-  if (!path.isAbsolute(request.path)) {
+  if (!path.isAbsolute(request.path) || (request.canonicalPath !== undefined && !path.isAbsolute(request.canonicalPath))) {
     return { ok: false, error: "open needs an absolute file path." };
   }
 
@@ -55,21 +55,28 @@ async function openDocument(
   }
 
   const hiddenError: CliResponse = { ok: false, error: `Iliad does not show hidden or ignored files: ${request.path}` };
-  const requestedPath = path.resolve(request.path);
+  // Every spelling the writer or the CLI used: the requested path (symlinks
+  // kept) and the CLI's canonical path, besides main's own realpath.
+  const spellings = [path.resolve(request.path)];
+
+  if (request.canonicalPath !== undefined) {
+    spellings.push(path.resolve(request.canonicalPath));
+  }
+
   let target = host.findWindowForPath(filePath);
 
   if (target) {
     // Inside an open workspace, only the part below its root must be visible
-    // (for both the canonical and the requested spelling of the path).
+    // (for the canonical path and every requested spelling of it).
     const root = target.workspaceRoot;
 
     if (
       hasIgnoredSegment(path.relative(root, filePath)) ||
-      (isPathInside(root, requestedPath) && hasIgnoredSegment(path.relative(root, requestedPath)))
+      spellings.some((spelling) => isPathInside(root, spelling) && hasIgnoredSegment(path.relative(root, spelling)))
     ) {
       return hiddenError;
     }
-  } else if (hasIgnoredSegment(requestedPath) || hasIgnoredSegment(filePath)) {
+  } else if (spellings.some(hasIgnoredSegment) || hasIgnoredSegment(filePath)) {
     // A new window would open the file's own folder: never a hidden or
     // ignored one, whichever spelling of the path shows it.
     return hiddenError;

@@ -281,6 +281,42 @@ export function activeBufferReplacementStep({
 }
 
 /**
+ * Reads disk text for the active buffer and loads it only if the buffer may
+ * still be replaced right now. `mayLoadNow` runs in the same synchronous tick
+ * as `load`, after the read resolved, so edits typed (or a navigation or a
+ * conflict) that arrived while the read was in flight keep the buffer and its
+ * save state untouched. A failed read never clears the buffer.
+ */
+export async function loadActiveBufferFromDiskIfSafe({
+  read,
+  mayLoadNow,
+  load
+}: {
+  read: () => Promise<string>;
+  mayLoadNow: () => boolean;
+  load: (content: string) => void;
+}): Promise<"loaded" | "kept" | "failed"> {
+  if (!mayLoadNow()) {
+    return "kept";
+  }
+
+  let text: string;
+
+  try {
+    text = await read();
+  } catch {
+    return "failed";
+  }
+
+  if (!mayLoadNow()) {
+    return "kept";
+  }
+
+  load(text);
+  return "loaded";
+}
+
+/**
  * Outside-change review in the renderer: the review snapshot pushed or pulled
  * from main, the active review target, and the keep / restore actions. Review
  * actions never flush the editor first; the review compares against disk.
@@ -363,6 +399,23 @@ export function useOutsideReview({
 
     return bufferReplaceable();
   }, [bufferReplaceable]);
+  /**
+   * Live re-check, made in the same synchronous tick as a load: the same
+   * workspace and active document the action started on, that document is
+   * the reviewed one, and its buffer is clean and not in conflict right now.
+   */
+  const activeBufferMayBeReplacedNow = useCallback(
+    (workspacePath: string, activePath: string, targetRelativePath: string) =>
+      workspacePathRef.current === workspacePath &&
+      activeFilePathRef.current === activePath &&
+      reviewActionMayLoadActiveBuffer({
+        activeRelativePath: activeFileRelativePathRef.current,
+        targetRelativePath,
+        wasInConflict: activeFileInConflictRef.current,
+        canReplaceActiveBuffer: bufferReplaceable()
+      }),
+    [bufferReplaceable]
+  );
 
   useEffect(() => {
     workspacePathRef.current = workspace?.path ?? null;
@@ -505,13 +558,20 @@ export function useOutsideReview({
           // writer chose to discard is already replaced when the item's
           // disappearance is processed. Keep never loads over a conflicted or
           // dirty buffer otherwise (spec V5).
+          // Re-check the live buffer now (after the await): edits typed while
+          // the keep was in flight must not be replaced. Only the conflict
+          // banner's confirmed Keep (discardBuffer) skips the buffer checks.
+          const liveReplaceable = options.discardBuffer
+            ? true
+            : replaceable && !activeFileInConflictRef.current && bufferReplaceable();
+
           if (
             file &&
             reviewActionMayLoadActiveBuffer({
               activeRelativePath,
               targetRelativePath: file.relativePath,
               wasInConflict,
-              canReplaceActiveBuffer: replaceable,
+              canReplaceActiveBuffer: liveReplaceable,
               discardBuffer: options.discardBuffer
             })
           ) {
@@ -642,14 +702,13 @@ export function useOutsideReview({
             (file) => activeRelativePath && sameRelativePath(activeRelativePath, file.relativePath)
           );
 
-          if (touchedActive && activePath && !wasInConflict && replaceable) {
-            try {
-              loadDocument(await window.iliad.readMarkdown(workspace.path, activePath));
-            } catch {
-              setActiveFile(null);
-              setSelectedTreePath(null);
-              loadDocument("");
-            }
+          if (touchedActive && activePath && activeRelativePath && !wasInConflict && replaceable) {
+            // Re-checked right before loading; a failed read leaves the buffer.
+            await loadActiveBufferFromDiskIfSafe({
+              read: () => window.iliad.readMarkdown(workspace.path, activePath),
+              mayLoadNow: () => activeBufferMayBeReplacedNow(workspace.path, activePath, activeRelativePath),
+              load: loadDocument
+            });
           }
 
           setAgentReviewTarget((current) => (current?.proposalId === proposalId ? null : current));
@@ -660,6 +719,7 @@ export function useOutsideReview({
       });
     },
     [
+      activeBufferMayBeReplacedNow,
       bufferReplaceable,
       loadDocument,
       refreshExternalReview,
@@ -730,14 +790,12 @@ export function useOutsideReview({
           !wasInConflict &&
           replaceable
         ) {
-          try {
-            const text = await window.iliad.readMarkdown(workspace.path, activePath);
-            loadDocument(text);
-          } catch {
-            setActiveFile(null);
-            setSelectedTreePath(null);
-            loadDocument("");
-          }
+          // Re-checked right before loading; a failed read leaves the buffer.
+          await loadActiveBufferFromDiskIfSafe({
+            read: () => window.iliad.readMarkdown(workspace.path, activePath),
+            mayLoadNow: () => activeBufferMayBeReplacedNow(workspace.path, activePath, previousFile.relativePath),
+            load: loadDocument
+          });
         }
 
         setAgentReviewTarget((current) =>
@@ -750,6 +808,7 @@ export function useOutsideReview({
       });
     },
     [
+      activeBufferMayBeReplacedNow,
       agentProposals,
       bufferReplaceable,
       loadDocument,
@@ -831,11 +890,14 @@ export function useOutsideReview({
               canReplaceActiveBuffer: replaceable
             })
           ) {
-            try {
-              loadDocument(await window.iliad.readMarkdown(workspace.path, activePath));
-            } catch {
-              // The file moved on again; the refreshed review shows it.
-            }
+            // Re-checked right before loading: edits typed while the chunk
+            // action or the read was in flight keep the buffer. A failed read
+            // (the file moved on again) leaves it too; the review shows it.
+            await loadActiveBufferFromDiskIfSafe({
+              read: () => window.iliad.readMarkdown(workspace.path, activePath),
+              mayLoadNow: () => activeBufferMayBeReplacedNow(workspace.path, activePath, file.relativePath),
+              load: loadDocument
+            });
           }
 
           return result.status;
@@ -846,6 +908,7 @@ export function useOutsideReview({
       });
     },
     [
+      activeBufferMayBeReplacedNow,
       bufferReplaceable,
       loadDocument,
       refreshExternalReview,

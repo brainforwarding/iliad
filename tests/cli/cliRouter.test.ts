@@ -112,11 +112,14 @@ describe("runCli", () => {
     expect(JSON.parse(out[0])).toEqual({ windows });
   });
 
-  it("open: sends the canonical path and line, silent on success", async () => {
+  it("open: sends the requested and canonical paths and line, silent on success", async () => {
     await writeFile(path.join(dir, "a.md"), "# A\n");
     const send = vi.fn().mockResolvedValue({ ok: true });
     expect(await runCli(["open", "a.md", "--line", "3"], { ...io(), send })).toBe(0);
-    expect(send).toHaveBeenCalledWith({ cmd: "open", path: path.join(dir, "a.md"), line: 3 }, expect.any(Number));
+    expect(send).toHaveBeenCalledWith(
+      { cmd: "open", path: path.join(dir, "a.md"), canonicalPath: path.join(dir, "a.md"), line: 3 },
+      expect.any(Number)
+    );
     expect(out).toEqual([]);
     expect(err).toEqual([]);
   });
@@ -194,6 +197,19 @@ describe("runCli", () => {
       await runCli(["open", "visible/draft.md"], { ...io(), send: vi.fn().mockRejectedValue(new NotRunningError()), launch })
     ).toBe(1);
     expect(launch).not.toHaveBeenCalled();
+  });
+
+  it("open: a warm open keeps the requested (symlink) spelling next to the canonical path", async () => {
+    await mkdir(path.join(dir, "visible"));
+    await writeFile(path.join(dir, "visible", "a.md"), "# A\n");
+    await symlink(path.join(dir, "visible"), path.join(dir, ".alias"));
+    const send = vi.fn().mockResolvedValue({ ok: true });
+
+    expect(await runCli(["open", ".alias/a.md"], { ...io(), send })).toBe(0);
+    expect(send).toHaveBeenCalledWith(
+      { cmd: "open", path: path.join(dir, ".alias", "a.md"), canonicalPath: path.join(dir, "visible", "a.md") },
+      expect.any(Number)
+    );
   });
 
   it("launch: passes folder arguments through", async () => {
