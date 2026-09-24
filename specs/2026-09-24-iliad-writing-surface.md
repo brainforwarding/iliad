@@ -597,11 +597,17 @@ Next steps (in order):
    Note: the owner's `/opt/homebrew/bin/iliad` is an `npm link` to this
    checkout; after installing, decide whether the menu install should replace
    it (the installer only replaces links it recognizes as Iliad's).
-4. Site: an agent was preparing `/Users/sebastian/dev/iliad-site` for 0.3.0
-   (commit "Update site for Iliad MD 0.3.0" on its master, not pushed, not
-   deployed; that repo has unrelated uncommitted changes in `my-docs/` — leave
-   them). Review, then `./deploy.sh` after the GitHub release exists, and
-   verify https://iliad.md live.
+4. Site: prepared in `/Users/sebastian/dev/iliad-site` as commit `dba4590`
+   "Update site for Iliad MD 0.3.0" on its master (not pushed, not deployed;
+   unrelated uncommitted `my-docs/` and `.DS_Store` changes there — leave
+   them). It updates home (EN/ES), FAQ, about, llms*.txt, sitemap, docs
+   (new release-notes-v0.3.0.md, working-with-claude-code.md; rewritten review,
+   comments/notes/✦ AI, autocomplete pages) and links to `releases/tag/v0.3.0`.
+   Link check passed locally. Open items: "Image to add" placeholders for 0.3.0
+   screenshots and an outdated `assets/og.png`. The site agent reported the
+   Figma file had no "Website" page, while the Figma agent reported creating
+   it — check the file before relying on it. After the GitHub release exists:
+   review, `./deploy.sh`, verify https://iliad.md live.
 5. Final report to the owner (see principles: what was built, deviations,
    validation, deployment, limitations).
 
