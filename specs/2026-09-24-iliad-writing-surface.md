@@ -544,9 +544,83 @@ integrated by the main agent, committed on the branch with tests green.
 - [x] B per-chunk (7e16291) — app-verified: Keep one chunk + Restore other → disk correct
 - [x] E CLI + skill (branch worktree-agent-acd2d817aa39f4f0d, f58dade; merges
   cleanly with B — verified in qa-integration: status/open/errors against the app)
-- [ ] D companion files
-- [ ] F docs + ADR
-- [ ] G release 0.3.0 + install + site
+- [x] D companion files (1572229 + fixes 5038522) — app-verified: comment → file,
+  agent deletes handled entry + rewrites passage → one chunk, Comments · N
+  updates; Restore brings the deleted comment back (V17)
+- [x] F docs + ADR (e70b26b ADR-0021 + product-vision; 67eaa1a architecture,
+  README, CLAUDE.md, release.md, QA matrix, backlog)
+- [ ] G release 0.3.0 + install + site — IN PROGRESS, paused by the owner
+
+## Handoff (2026-09-24, paused before building the release)
+
+Where things are:
+
+- All code and docs are on `master` locally (fast-forwarded from
+  `iliad-writing-surface`, HEAD `c8481cb` + the version bump commit below).
+  **Nothing is pushed.** `origin` = https://github.com/brainforwarding/iliad.git
+  (public repo, same history; `master` there is at 9626cc8, so pushing
+  `master` is a fast-forward — the squashed "public" procedure in
+  docs/release.md does not apply to this checkout).
+- Version bumped to 0.3.0 (package.json + package-lock.json), committed as
+  "Bump version to 0.3.0".
+- Release gates already passed on this tree: `npm run lint:css`,
+  `npm run typecheck`, `npm test` (68 files / 509 tests), `npm run build`,
+  `npm audit --omit=dev --audit-level=high` (0 vulnerabilities). Under heavy
+  machine load a few timing tests can time out; rerun.
+- Every Codex (gpt-6-sol high) review finding is fixed except one deliberately
+  rejected (see Review log).
+- Access verified: `gh` logged in as brainforwarding; Developer ID
+  "ED4.ONE SpA (K542ZFQH6B)" in keychain; `xcrun notarytool … --keychain-profile
+  iliad-notary` works; AWS CLI can reach s3://iliad-md-site (site deploy).
+
+Next steps (in order):
+
+1. Build/sign/notarize per docs/release.md "Artifact Build Flow":
+   move any old `release/` folder aside first (the shell safety hook blocks
+   `rm -rf`; `mv release <scratch>/release-old` works); make sure
+   `dist-electron/` has no stale compiled files from removed code (it was
+   cleaned on 2026-09-24; `npm run build` recompiles). `npm run dist:mac:signed`,
+   then manual notarize/staple of the .app if the APPLE_* env vars are unset,
+   rebuild dmg/zip from the stapled .app, notarize+staple the DMG, make the
+   hyphenated copies, `npm run release:refresh-update-metadata`,
+   `npm run release:verify-update-metadata`, validate app inside DMG and ZIP,
+   and check the packaged CLI (`Contents/Resources/bin/iliad` executable,
+   `iliad --help`, `skill print`) — see docs/release.md.
+2. Push: `git push origin master`, then `gh release create v0.3.0` with the
+   exact hyphenated artifacts + latest-mac.yml (docs/release.md "GitHub
+   Release"), notes from iliad-site `public/docs/release-notes-v0.3.0.md`.
+3. Install locally: replace `/Applications/Iliad MD.app` with the notarized app
+   (move the old one to the Trash first), launch it, verify: no chat panel;
+   Gemini key row; autocomplete ⌘, ⌘. ⌘/; ✦ AI menu; outside edit → chunk
+   Keep/Restore; comment → `.comments.md`; `iliad status`/`open` with the
+   installed app; menu "Install ‘iliad’ Command…"; `iliad skill install`.
+   Note: the owner's `/opt/homebrew/bin/iliad` is an `npm link` to this
+   checkout; after installing, decide whether the menu install should replace
+   it (the installer only replaces links it recognizes as Iliad's).
+4. Site: an agent was preparing `/Users/sebastian/dev/iliad-site` for 0.3.0
+   (commit "Update site for Iliad MD 0.3.0" on its master, not pushed, not
+   deployed; that repo has unrelated uncommitted changes in `my-docs/` — leave
+   them). Review, then `./deploy.sh` after the GitHub release exists, and
+   verify https://iliad.md live.
+5. Final report to the owner (see principles: what was built, deviations,
+   validation, deployment, limitations).
+
+Loose ends to clean up:
+
+- A dev instance of the app is running for QA on port 5173 with
+  `--remote-debugging-port=9333` on the scratch folder
+  `/private/tmp/claude-501/-Users-sebastian-dev-iliad/2be4a037-035e-464d-be43-56b37c076a79/scratchpad/qa-workspace`
+  (driver: `scratchpad/cdp.mjs`). Stop it before building.
+- Git worktrees left from agents: `.claude/worktrees/agent-*` (branches
+  `worktree-agent-*`, all merged) and `scratchpad/qa-tree` (branch
+  `qa-integration`). Remove with `git worktree remove` and delete the branches.
+- `iliad-writing-surface` branch is merged into master and can be deleted.
+- Figma (file i2BTwgceho8SqRYGZKjLhB): page "Iliad 0.3" matches spec v2;
+  page "Website" is the reference for the site. The file name could not be
+  changed via API.
+- Deviation to mention in the final report: companion files are excluded from
+  outside review (the owner was first told comment deletions would show in
+  review).
 
 ## Appendix: removal map
 
