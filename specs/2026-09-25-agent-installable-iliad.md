@@ -1,7 +1,7 @@
 # Agent-Installable Iliad: `iliad install`, a Stable DMG URL, and a Homebrew Cask
 
 Date: 2026-09-25
-Status: v1 — draft for Codex review
+Status: v2 — Codex xhigh review folded in; implemented on the branch
 Branch: `agent-installable-iliad` (from `master` at `438af42`, Iliad MD 0.3.2)
 Target release: the next patch release after 0.3.2
 
@@ -58,8 +58,10 @@ terminal and cannot click menus. Today:
   `skill print` into `AGENTS.md`), so a one-shot would either guess the agent
   or grow flags. Two explicit commands are simpler for an agent to follow and
   to verify. `install` prints the next step instead.
-- Windows/Linux installers. The install command keeps working on Linux as a
-  plain folder link, but the target list is the macOS one.
+- Windows/Linux. `iliad install` is macOS-only: it requires the
+  `.app/Contents/Resources/bin` layout and the wrapper runs
+  `Contents/MacOS/Iliad MD`. Other platforms get a clear `not-app-bundle`
+  refusal.
 - Detecting or fixing the user's shell profile. When the chosen folder is not
   on `PATH` we say so and print the `export` line; we never edit dotfiles.
 - A downloadable install script (`curl | sh`). `install.md` is read by an agent
@@ -162,10 +164,28 @@ JSON: `{ "ok": true, "removed": ["…"], "skipped": [{ "linkPath": "…", "reaso
 | `--dir` missing/not writable/slot taken | `Cannot install into <dir>: <reason>.` |
 
 **Refusing disk images.** An agent may mount the DMG and run the CLI straight
-from `/Volumes/Iliad MD/Iliad MD.app`. A link there breaks when the image is
-ejected. Refuse when the app path contains `/AppTranslocation/`, or is under
-`/Volumes/` and the bundle is not writable (a mounted DMG is read-only; apps on
-a writable external disk still work).
+from `/Volumes/Iliad MD/Iliad MD.app` (or any mount point, e.g. `/tmp/…`). A
+link there breaks when the image is ejected. After `realpath`-ing the script
+folder, refuse when a path segment is `AppTranslocation`, or when a write
+probe on the bundle fails with `EROFS` (read-only filesystem: a mounted DMG,
+wherever it is mounted). A bundle the user merely cannot write (`EACCES`,
+installed by another admin) and apps on writable external disks still work.
+(Review: replaced the v1 `/Volumes/` prefix rule.)
+
+**Ownership rule.** A slot counts as ours only when it is a symlink whose
+target is this wrapper or matches `/<name containing "Iliad">.app/Contents/Resources/bin/iliad`
+(an old, renamed or deleted Iliad bundle); v1's "any `*.app/…/bin/iliad`" was
+too broad. Empty slots are filled with a plain `symlink()` (fails with `EEXIST`
+if anything appeared meanwhile — then the slot counts as taken); an old Iliad
+link is re-read right before an atomic temp-link + `rename`. The remaining
+window (a foreign program replacing an old Iliad link in the microseconds
+between re-read and rename) is accepted for a single-user desktop tool.
+
+**JSON contract.** With `--json`, every outcome of `install`/`uninstall` is one
+JSON object on stdout, including usage errors:
+`{ "ok": false, "code": "<code>", "error": "<message>" }`, where `code` is one
+of `usage` (exit 2), `not-app-bundle`, `disk-image`, `no-folder`,
+`folder-unusable`, `slot-taken`, `error` (exit 1).
 
 **Old app versions.** 0.3.0–0.3.2 do not know `install`; they route it as
 `iliad <folder>` and launch the app on a folder named `install`. `install.md`
@@ -179,7 +199,7 @@ The logic moves from `electron/cli/installCommand.ts` to
 `bin/lib/install.mjs` (plain ESM, no dependencies, like the rest of `bin/lib`).
 It exports `installCliCommand`, `uninstallCliCommand`, `isIliadWrapperTarget`,
 `directoryIsOnPath`, `firstOnPath`, `commandInstallDirectories`,
-`wrapperFromScriptDirectory` (bundle detection + disk-image refusal).
+`bundleWrapperPath` (bundle detection + disk-image refusal), `InstallError`.
 
 Sharing across the boundary: `electron/` compiles with `rootDir: "."`, so it
 cannot statically import `bin/lib/*.mjs`. But the menu item only works in the
@@ -219,10 +239,11 @@ the naming rule in `release.md` becomes: upload the files referenced by
 `latest-mac.yml`, `latest-mac.yml`, and the stable `Iliad-MD-arm64.dmg` —
 nothing else (still no space-named source artifacts).
 
-`scripts/verifyUpdateMetadata.mjs` adds one check: `release/Iliad-MD-arm64.dmg`
-exists, has the same size and SHA512 as the `.dmg` listed in
-`latest-mac.yml` (so a stale or pre-staple copy fails), and is *not* itself
-listed in `latest-mac.yml`. The refresh script does
+`scripts/verifyUpdateMetadata.mjs` adds checks: `latest-mac.yml` lists exactly
+`Iliad-MD-X.Y.Z-mac-arm64.dmg` and does *not* list the stable name;
+`release/Iliad-MD-arm64.dmg` exists and has the size and SHA512 recorded for
+that versioned entry (which the existing loop already matched against the
+file on disk), so a stale or pre-staple copy fails. The refresh script does
 not change (the stable copy is not updater metadata). A test runs the verifier
 against a temp `release/` folder.
 
@@ -244,9 +265,11 @@ the app by hand. electron-updater is not a dependency; `latest-mac.yml` and
 - **(a) The extra asset must never confuse the updater.** `selectMacDmgAsset`
   takes the first `.dmg` whose name contains the arch, so with two DMGs the
   choice depends on GitHub's asset order. Both are byte-identical, so either
-  works, but the choice becomes deterministic: prefer the DMG whose name
-  contains the release version (`Iliad-MD-X.Y.Z-mac-arm64.dmg`), then fall
-  back to the current rules. Tested with both asset orders. Any future
+  works, but the choice becomes deterministic: first the exact file name
+  `Iliad-MD-X.Y.Z-mac-<arch>.dmg`, then any DMG for this arch, then an
+  arch-neutral DMG (never another arch). Tested with both asset orders, a
+  versioned DMG for another arch, and an unrelated asset containing the
+  version. Any future
   electron-updater only reads files listed in `latest-mac.yml`, which never
   lists the stable copy (the verifier also fails if it does).
 - **(b) CLI links survive app updates.** The link points at
@@ -254,33 +277,57 @@ the app by hand. electron-updater is not a dependency; `latest-mac.yml` and
   version: replacing the bundle in place (drag from a new DMG, `brew upgrade`,
   a future Squirrel/ShipIt swap) keeps it valid, and the wrapper resolves the
   bundle's executable at run time. Moving the app elsewhere leaves a dangling
-  Iliad link; `iliad install` from the moved bundle replaces it (links to any
-  `*.app/Contents/Resources/bin/iliad` count as ours), and `uninstall` removes
+  Iliad link; `iliad install` from the moved bundle replaces it (links to an
+  `*Iliad*.app/Contents/Resources/bin/iliad` count as ours), and `uninstall` removes
   it. The installed skill is a copy and does not follow updates; the release
   notes / README tell users to re-run `iliad skill install` after updating
   (cheap and idempotent). Automatic skill refresh is out of scope.
-- **Homebrew and the notify-only updater.** See `auto_updates` below.
+- **Homebrew and the notify-only updater.** See `auto_updates` below. Brew
+  users keep seeing the in-app notice ("Iliad MD X.Y.Z is available." with
+  Download / View Release) for now. Following it is not harmless in
+  Homebrew's eyes: dragging a DMG over a cask-managed app leaves brew's
+  recorded version stale (`brew outdated` and `brew upgrade` then act on a
+  version that is no longer installed; the app itself keeps working). Known
+  and accepted until the tap has users. A brew-aware hint ("Run `brew upgrade --cask iliad-md`",
+  detected by `<prefix>/Caskroom/iliad-md`) needs main + IPC type + UI + i18n
+  changes and is deferred to `docs/backlog.md` until the tap is published and
+  has users.
 
 ### 3c. When Iliad is already installed (agent flow)
 
 `install.md` must not make an agent reinstall a working app. The decision the
 spec fixes (and the website text follows):
 
-1. If `/Applications/Iliad MD.app` (or `~/Applications/…`) exists, read its
-   version (`defaults read "<app>/Contents/Info" CFBundleShortVersionString`).
+1. If `brew` exists and `brew list --cask iliad-md` succeeds, Homebrew owns
+   the install (whatever its `--appdir`); use `brew info --cask iliad-md` for
+   the version and the app path. Otherwise look for `/Applications/Iliad MD.app`
+   then `~/Applications/Iliad MD.app` and read its version
+   (`defaults read "<app>/Contents/Info" CFBundleShortVersionString`).
 2. If it is at least the first release with `iliad install`: do **not**
-   download anything; run `<app>/Contents/Resources/bin/iliad install`
-   (idempotent) and `iliad skill install`. Done.
-3. If it is older: do not replace it silently. If `brew list --cask iliad-md`
-   succeeds, run `brew upgrade --cask iliad-md`. Otherwise tell the user to
-   update from Iliad's update notice (Iliad menu → update, which downloads the
-   DMG) or, with their OK and with Iliad quit (`iliad status` exits 3), replace
-   the bundle from the stable DMG. Never replace a running app.
-4. If Iliad is not installed: brew if the user uses Homebrew (`brew` on PATH)
-   → `brew install --cask brainforwarding/tap/iliad-md` (links the CLI; skip
-   `iliad install`); otherwise stable DMG → `hdiutil attach -nobrowse` →
-   `ditto` the app into `/Applications` → `hdiutil detach` → `iliad install`.
-   Then `iliad skill install` (Claude Code) or `iliad skill print` (others).
+   download anything; run `"<app>/Contents/Resources/bin/iliad" install --json`
+   (idempotent; brew installs report `unchanged`) and then the skill step
+   below. Done.
+3. If it is older: do not replace it silently, and never while it runs. Ask
+   the user first. Brew: `brew upgrade --cask iliad-md` (Homebrew may quit
+   the app, so ask before). Otherwise: the user updates from Iliad's update
+   notice, or, with their OK and with Iliad quit (`iliad status` exits 3, or
+   no `Iliad MD` process), the agent replaces the bundle from the stable DMG
+   as in step 4.
+4. If Iliad is not installed: with `brew` on PATH, offer
+   `brew install --cask brainforwarding/tap/iliad-md` (links the CLI; skip
+   `iliad install`). Otherwise download the stable DMG with `curl -fL`,
+   `hdiutil attach -nobrowse -readonly -mountpoint <tmp dir>`, `ditto` the app
+   into `/Applications` (or `~/Applications` if `/Applications` is not
+   writable), `hdiutil detach` (also on failure), then
+   `"<app>/Contents/Resources/bin/iliad" install --json`. Never `sudo`, and
+   never strip quarantine (`xattr -d`) without explicit user approval (a
+   `curl` download is not quarantined; the app is notarized).
+5. Skill: run it through an absolute path, not a bare `iliad` (the agent's
+   non-interactive shell may not have the link folder on PATH yet): the
+   `linkPath` from the JSON, or the bundle wrapper path —
+   `"<linkPath>" skill install` (Claude Code) or `"<linkPath>" skill print`
+   (paste into `AGENTS.md` for other agents). If `onPath` is false, tell the
+   user which `export PATH=…` line to add.
 
 ### 4. Homebrew cask
 
@@ -315,7 +362,7 @@ cask "iliad-md" do
   end
 
   depends_on arch: :arm64
-  depends_on macos: ">= :monterey"
+  depends_on macos: :monterey
 
   app "Iliad MD.app"
   binary "#{appdir}/Iliad MD.app/Contents/Resources/bin/iliad"
@@ -323,7 +370,6 @@ cask "iliad-md" do
   zap trash: [
     "~/Library/Application Support/Iliad MD",
     "~/Library/Caches/md.iliad.app",
-    "~/Library/Caches/md.iliad.app.ShipIt",
     "~/Library/HTTPStorages/md.iliad.app",
     "~/Library/Logs/Iliad MD",
     "~/Library/Preferences/md.iliad.app.plist",
@@ -343,13 +389,23 @@ update itself: the in-app check only opens the DMG download (see 3b).
 Homebrew's rule is that `auto_updates true` is for apps that replace
 themselves; with it, `brew upgrade` would skip Iliad (unless `--greedy`) and
 brew users would only ever update by hand. Without it, `brew upgrade` updates
-Iliad, and a user who instead follows the in-app notice and drags a new app
-over the brew-installed one just leaves brew's recorded version behind (the
-next `brew upgrade` reinstalls the same or newer version; harmless). Revisit
+Iliad. A user who instead follows the in-app notice and drags a new app over
+the brew-installed one leaves brew's recorded version stale (see 3b; a
+brew-aware notice is in the backlog). Homebrew's Cask Cookbook also says
+`auto_updates` does not apply to an app that merely opens a download page.
+Revisit
 if the app ever adopts electron-updater/Squirrel — then add
 `auto_updates true` in the same change. Monterey is
-Electron 42's `LSMinimumSystemVersion` (12.0). `zap` leaves
-`~/.claude/skills/iliad` alone: agent configuration belongs to the user.
+Electron 42's `LSMinimumSystemVersion` (12.0); `depends_on macos: :monterey`
+is the symbol form `brew style` requires (v1's `">= :monterey"` string was
+flagged). `zap` leaves `~/.claude/skills/iliad` alone: agent configuration
+belongs to the user. No `ShipIt` cache: nothing uses Squirrel. The `zap` list
+should be confirmed against a real launched profile during tap QA.
+
+Checked locally in a throwaway local tap (removed afterwards): `brew style`
+reports no offenses and `brew audit --cask --online --strict` passes against
+the real v0.3.2 DMG (download + sha256 match); `brew info` shows
+`Required: arm64 architecture, macOS >= 12` and the `Binary` artifact.
 
 **Release process.** New script `scripts/updateHomebrewCask.mjs`
 (`npm run release:update-homebrew-cask`): reads the version from
@@ -384,26 +440,33 @@ fails if the DMG is missing or the cask lines are not found.
   - idempotent: second run returns `unchanged` and does not touch the link.
   - `--dir`: exact folder, missing folder and taken slot fail.
   - `shadowedBy` reports an earlier `iliad` on PATH; null when ours is first.
-  - bundle detection: checkout layout refused; `/Volumes/…` read-only bundle
-    and `/AppTranslocation/` refused.
+  - ownership: another app's `bin/iliad` link is foreign; a renamed Iliad
+    bundle's is ours.
+  - bundle detection: checkout layout refused; App Translocation and an
+    `EROFS` bundle (DMG mounted under `/tmp`) refused; an `EACCES` bundle
+    accepted; a symlinked script folder resolved first.
   - uninstall removes only Iliad links, skips Homebrew-owned ones.
-  - the Electron loader imports the repo's `bin/lib/install.mjs`.
-- `tests/cli/cliRouter.test.ts`: routing of `install`, `install --dir x
-  --json`, bad options, `uninstall`; `runCli` human and JSON output and exit
-  codes with injected folders.
-- End-to-end (in vitest): build a fake `X.app/Contents/{MacOS,Resources/bin}`
-  in a temp folder with the repo's `bin/` copied in and `Contents/MacOS/X`
-  pointing at the current Node binary; run the real `bin/iliad` wrapper with
-  `install --dir <tmp> --json` and a temp `HOME`; assert the link and JSON; run
-  it through the created link (`<tmp>/iliad --help`) to prove the wrapper
-  resolves its symlink.
-- `tests/release/verifyUpdateMetadata.test.ts`: the verifier passes with a
-  matching stable DMG and fails when it is missing, differs, or is listed in
-  `latest-mac.yml`.
-- `tests/electron/updateService.test.ts`: with both the versioned and the
-  stable DMG in either order, `selectMacDmgAsset` returns the versioned one.
-- `tests/release/updateHomebrewCask.test.ts`: the script rewrites version and
-  sha256 in a temp copy.
+  - the Electron loader imports the repo's `bin/lib/install.mjs` and applies
+    the same refusals.
+  - `runCli`: routing of `install`/`uninstall` options, human and JSON output,
+    JSON for usage errors (`code: "usage"`, exit 2) and refusals (stable
+    `code`, exit 1), with injected folders.
+  - end to end: a fake `Iliad MD.app/Contents/{MacOS/Iliad MD,Resources/bin}`
+    in a temp folder, the repo's `bin/` copied in and `MacOS/Iliad MD`
+    pointing at the current Node binary; run the real `bin/iliad` wrapper with
+    `install --dir <tmp> --json` and a temp `HOME`; then `--help`,
+    `skill install` and `install` again through the created link.
+- `tests/release/releaseScripts.test.ts`: the verifier passes with a matching
+  stable DMG and fails when it is missing, stale, or listed in
+  `latest-mac.yml`; the cask script rewrites only `version`/`sha256` and fails
+  without the DMG; the cask keeps `binary` and has no `auto_updates`.
+- `tests/electron/updateService.test.ts`: exact versioned name wins in either
+  asset order; a versioned DMG for another arch never hides this arch's
+  stable copy; an unrelated asset containing the version does not win.
+
+Not unit-tested: the `EEXIST` race on an empty slot and the re-read before
+rename (they need filesystem fault injection; covered by review and the
+single-call structure).
 
 Never write into the real `/opt/homebrew/bin`, `/usr/local/bin` or
 `~/.local/bin` in tests: every test injects folders and `HOME`.
@@ -414,10 +477,12 @@ Never write into the real `/opt/homebrew/bin`, `/usr/local/bin` or
    `"/Applications/Iliad MD.app/Contents/Resources/bin/iliad" install`, then
    `iliad --help`, again `install` (says Already installed), `install --json`,
    `uninstall`, and the menu item still shows its dialog with the same result.
-2. Mount the DMG and run the CLI from `/Volumes/…`: refused.
-3. In a Claude Code session with no `iliad` on PATH: paste the install.md steps
-   and watch it complete without GUI clicks (other than first-launch
-   Gatekeeper, which does not apply to a curl-downloaded, notarized app).
+2. Mount the DMG (at `/Volumes/…` and at a `-mountpoint /tmp/…`) and run the
+   CLI from it: refused with `disk-image`.
+3. In a Claude Code session with no `iliad` on PATH, and on a clean macOS user:
+   paste the install.md steps and watch it complete without GUI clicks; check
+   first launch (curl downloads are not quarantined; a browser download is,
+   and Gatekeeper then shows its notarized-app prompt once).
 4. Release dry run: verifier fails without `release/Iliad-MD-arm64.dmg`, passes
    with it.
 5. Tap: in a scratch tap, `brew install --cask ./packaging/homebrew/iliad-md.rb`
@@ -444,4 +509,47 @@ Never write into the real `/opt/homebrew/bin`, `/usr/local/bin` or
 
 ## Review
 
-(pending Codex xhigh review)
+Codex (xhigh, read-only), 2026-09-25, on v1 of this spec plus the
+work-in-progress branch: **NO-GO** with 1 P0, 8 P1, 1 P2. Folded in as v2:
+
+1. P0 existing entries could be clobbered (inspect-then-rename race; the
+   `*.app/Contents/Resources/bin/iliad` regex claimed any app's link; cut
+   `uninstall`). **Accepted in part.** Empty slots are now filled with a plain
+   `symlink()` (`EEXIST` = taken, never replaced); an old Iliad link is re-read
+   right before the atomic rename; ownership requires `Iliad` in the bundle
+   name. **Rejected:** never replacing old/dangling Iliad links (a moved or
+   deleted app would leave users with a broken command and no fix but manual
+   `rm`; the shipped menu already replaces them), a durable ownership record
+   (extra state for no practical gain), and cutting `uninstall` (it is an
+   explicit user command that removes only Iliad-owned links and leaves
+   Homebrew's; cheap and useful for QA).
+2. P1 disk-image refusal only covered `/Volumes` and did not resolve the
+   script path. **Accepted:** `realpath` first; refuse on `EROFS` from a write
+   probe (any mount point) or an `AppTranslocation` segment. Mount-metadata
+   parsing (`hdiutil info`) rejected as heavier than the `EROFS` signal.
+3. P1 "works on Linux" was false. **Accepted:** macOS-only, stated.
+4. P1 `--json` lost on usage errors. **Accepted:** one JSON object for every
+   outcome, with stable `code` values; exit codes 0/1/2 documented. `install`
+   and `--dir` kept; no `setup` (agreed).
+5. P1 updater selection could miss the stable arm64 DMG when only an x64
+   versioned DMG exists, and matched unrelated names. **Accepted:** exact
+   `Iliad-MD-X.Y.Z-mac-<arch>.dmg`, then this arch, then arch-neutral; tests.
+6. P1 verifier did not tie the stable copy to `latest-mac.yml`. **Accepted:**
+   the versioned DMG must be listed; the stable copy is compared with that
+   entry. **Rejected:** parameterizing the script's root (tests run a copy of
+   the script in a temp repo layout instead; no production change needed).
+7. P1 already-installed flow unsafe in agent shells. **Accepted:** Homebrew
+   checked first (any `--appdir`), ask before `brew upgrade`, `hdiutil attach
+   -readonly -mountpoint` with cleanup, `~/Applications` fallback, no `sudo`
+   or quarantine stripping without approval, skill commands via the absolute
+   `linkPath`.
+8. P1 cask macOS DSL and "harmless" brew drift. **Accepted:** `:monterey`
+   (confirmed by `brew style`), `auto_updates` stays omitted (Codex agrees,
+   citing the Cask Cookbook), wording fixed, `ShipIt` zap path dropped. The
+   brew-aware in-app notice stays deferred (backlog) until the tap has users.
+9. P2 test fixture naming / packaged-app smoke. **Accepted:** the end-to-end
+   test uses `Iliad MD.app/Contents/MacOS/Iliad MD`; `docs/release.md` adds a
+   packaged `install --dir` smoke check.
+10. P1 test migration incomplete (`cliMain.test.ts` imported removed
+    exports). **Stale:** Codex read the tree mid-edit; the move to
+    `tests/cli/cliInstall.test.ts` was already done and the suite passes.
