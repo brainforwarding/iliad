@@ -137,7 +137,8 @@ Another `iliad` comes first on your PATH: /opt/homebrew/bin/iliad
 ```
 
 `action` is `installed` or `unchanged`. On failure:
-`{ "ok": false, "error": "<message>" }` on stdout, exit 1.
+`{ "ok": false, "code": "<code>", "error": "<message>" }` on stdout (codes
+under "JSON contract" below).
 
 `uninstall` removes every `iliad` link in the three default folders that
 points to an Iliad wrapper, and nothing else. It leaves a link alone when the
@@ -456,7 +457,7 @@ fails if the DMG is missing or the cask lines are not found.
     pointing at the current Node binary; run the real `bin/iliad` wrapper with
     `install --dir <tmp> --json` and a temp `HOME`; then `--help`,
     `skill install` and `install` again through the created link.
-- `tests/release/releaseScripts.test.ts`: the verifier passes with a matching
+- `tests/scripts/releaseScripts.test.ts`: the verifier passes with a matching
   stable DMG and fails when it is missing, stale, or listed in
   `latest-mac.yml`; the cask script rewrites only `version`/`sha256` and fails
   without the DMG; the cask keeps `binary` and has no `auto_updates`.
