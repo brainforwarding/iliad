@@ -339,8 +339,7 @@ Spec: [2026-06-11 workspace rules AGENTS.md](../specs/2026-06-11-workspace-rules
 Status: accepted.
 
 On the OpenAI path, targeted edits travel as Aider-style exact-match
-SEARCH/REPLACE blocks (`<<<<<<< SEARCH` / `=======` / `>>>>>>> REPLACE`,
-line-anchored, case-insensitive markers, no label, no fences) applied
+SEARCH/REPLACE blocks (`line-anchored, case-insensitive markers, no label, no fences) applied
 sequentially to the request's active-file snapshot. Each block must resolve to
 exactly one viable (search, replace) split whose SEARCH matches the working
 text exactly once — zero or ambiguous matches, malformed structure, or setext
@@ -446,6 +445,7 @@ moves from `agent-vision.md` to `product-vision.md`.
 
 Spec: [2026-09-24 Iliad writing surface](../specs/2026-09-24-iliad-writing-surface.md).
 
+<<<<<<< HEAD
 ## ADR-0022: No Writing Notes, No Automatic Suggestions
 
 Status: accepted (2026-09-25). Amends ADR-0021 (notes companion).
@@ -470,3 +470,36 @@ attention for suggestions the writer did not ask for. Fewer settings keep
 Writing assists to one calm row style.
 
 Spec: [2026-09-25 writing assists one row](../specs/2026-09-25-writing-assists-one-row.md).
+
+## ADR-0023: Built-In AI Is Free Through Iliad's Proxy, Or Direct With Your Own Groq Key
+
+Status: proposed (2026-09-25, draft; becomes accepted when the spec ships).
+Amends ADR-0021 ("one Gemini key").
+
+Built-in writing AI (inline completion and the ✦ AI selection menu) moves from
+Gemini to Groq (`openai/gpt-oss-120b`, low reasoning, streaming) and needs no
+setup:
+
+- **Free by default.** With no key, requests go through the Iliad AI proxy, a
+  Cloudflare Worker that holds Iliad's Groq key, pins the model, prompts and
+  output limits, and enforces a per-install daily quota (anonymous install
+  token, no account), a per-network quota, and a global daily spend cap. The
+  proxy keeps only counters and costs, never document text, and does not log
+  request bodies. Groq Zero Data Retention is on for Iliad's account.
+- **Your own key.** A writer can save a Groq key (encrypted with the OS
+  keychain via `safeStorage`); requests then go directly from the Mac to Groq,
+  with no Iliad server and no Iliad limit. No silent fallback between the two.
+- The app never shows usage counts; it only says when free AI is out for the
+  day and offers "Use your own key".
+
+Why: a key-first setup kept most writers from ever using the built-in AI; a
+small, capped free tier makes it work on first launch, and bring-your-own-key
+keeps a direct path for people who want no limits or no Iliad server.
+
+Consequence: in free mode the text near the cursor or the selection passes
+through Iliad's server; the app says so in Writing assists and on the website's
+privacy page. `product-vision.md` replaces "One Gemini key powers it" with this
+rule. Gemini keys saved by earlier versions are deleted. Login and a paid plan
+can be added later on the same token and quota model.
+
+Spec: [2026-09-25 Groq AI free tier](../specs/2026-09-25-groq-ai-free-tier.md).
