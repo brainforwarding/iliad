@@ -305,7 +305,16 @@ export function looksLikePreambleEcho(rewrite: string, originalText: string): bo
   }
 
   const cleaned = rewrite.trim();
-  return cleaned !== original && cleaned.length > original.length && cleaned.includes(original);
+  const at = cleaned.indexOf(original);
+
+  if (cleaned === original || at < 0) {
+    return false;
+  }
+
+  // Wrapping the passage in Markdown formatting (italics, bold, a quote) is a
+  // real edit; only added words count as echoed preamble or commentary.
+  const added = cleaned.slice(0, at) + cleaned.slice(at + original.length);
+  return /[\p{L}\p{N}]/u.test(added);
 }
 
 export function looksLikeTightenContextEcho(rewrite: string, originalText: string, selection: TightenSelectionRange): boolean {

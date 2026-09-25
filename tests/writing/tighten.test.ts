@@ -219,6 +219,16 @@ describe("looksLikePreambleEcho", () => {
   it("ignores short originals (containment is likely coincidental)", () => {
     expect(looksLikePreambleEcho("very good indeed", "very good")).toBe(false);
   });
+
+  it("accepts the passage wrapped in Markdown formatting (\"en cursiva\")", () => {
+    const poem =
+      "donde estoy con el perro\nme vine una semana a una conferencia del colegio de Puerto Varas\n" +
+      "conocí a la Antonia y vino Dante\ntodo Circles en el sur estos días\ny yo me la paso pensando en ti";
+    expect(looksLikePreambleEcho(`*${poem}*`, poem)).toBe(false);
+    expect(looksLikePreambleEcho(`**${poem}**`, poem)).toBe(false);
+    expect(looksLikePreambleEcho(`> ${poem}`, poem)).toBe(false);
+    expect(looksLikePreambleEcho(`Aquí está en cursiva: *${poem}*`, poem)).toBe(true);
+  });
 });
 
 describe("isTightenUnchanged", () => {
