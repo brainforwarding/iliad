@@ -485,12 +485,15 @@ setup:
   output limits, and enforces a per-install daily quota (anonymous install
   token, no account), a per-network quota, and a global daily spend cap. The
   proxy keeps only counters and costs, never document text, and does not log
-  request bodies. Groq Zero Data Retention is on for Iliad's account.
+  request bodies. Groq Zero Data Retention on Iliad's account is a release
+  gate for the free route.
 - **Your own key.** A writer can save a Groq key (encrypted with the OS
   keychain via `safeStorage`); requests then go directly from the Mac to Groq,
   with no Iliad server and no Iliad limit. No silent fallback between the two.
-- The app never shows usage counts; it only says when free AI is out for the
-  day and offers "Use your own key".
+- The app never shows usage counts; on an explicit request it only says when
+  free AI is out for the day (quotas reset at 00:00 UTC; the notice shows the
+  local reset time) and offers "Use your own Groq key…". A saved key that
+  cannot be read blocks AI until re-entered rather than falling back to free.
 
 Why: a key-first setup kept most writers from ever using the built-in AI; a
 small, capped free tier makes it work on first launch, and bring-your-own-key

@@ -1,11 +1,12 @@
 # Groq AI: Free by Default, Your Own Key Optional
 
 Date: 2026-09-25
-Status: v1 draft — for Codex xhigh review (not implemented)
+Status: v2 — adversarial review folded in (see Review; Codex xhigh could not
+run: 401); owner UI decisions and measurements folded in. Not implemented.
 Branch: `groq-ai-free-tier` (from `master` at `2cd1901`, Iliad MD 0.3.2)
 ADR: ADR-0022 (draft, `docs/decisions.md`)
 Design: Figma `i2BTwgceho8SqRYGZKjLhB`, page "AI: free + your Groq key
-(2026-09-25)" (in progress; final UI details fold in from there)
+(2026-09-25)" (node `42:2`); it is the source of truth for layout.
 
 ## Reviewer brief
 
@@ -48,9 +49,15 @@ who want no limits or no Iliad server in the path.
 - **BYOK**: the writer can paste their own Groq key; requests then go directly
   Mac → Groq, bypassing the proxy and its limits.
 - No login now.
-- UI shows no usage counters or remaining quota. It only says when the writer is
-  out (their limit or the global cap), with a calm inline notice and "Use your
-  own key".
+- UI shows no usage counters or remaining quota, ever. It only says when the
+  writer is out, with one calm inline notice for both the per-user and the
+  global limit, showing the local reset time, plus "Use your own Groq key…".
+  The notice appears only on explicit requests.
+- Quotas reset at 00:00 UTC; the Worker returns `resetAt` (ISO 8601) with
+  every quota refusal.
+- An own key is validated against Groq before it is saved. No silent fallback
+  when an own key fails.
+- Spanish UI uses "clave" (never "llave").
 - Privacy: free mode sends text through Iliad's server, so this needs an ADR
   updating `docs/product-vision.md`, a short privacy note (app and website), and
   honest copy.
@@ -114,6 +121,25 @@ who want no limits or no Iliad server in the path.
   `*Like` Cloudflare type shims, injected-storage unit tests without Wrangler,
   `crypto.ts` (Web Crypto HMAC/SHA-256, base64url, constant-time compare), and
   the benchmark's eight EN/ES cases.
+- Autocomplete streams only when `onPartial` is set
+  (`geminiAutocomplete.ts`); the autocomplete IPC always sets it, so every
+  completion streams today. ✦ AI is a single non-streamed request.
+
+### Measurements (owner's Mac, Chile, 2026-09-25)
+
+Streaming, short "next sentence" prompt, 5 runs each, direct to Groq:
+
+| Model | First content token (median, range) | Done |
+| --- | --- | --- |
+| `openai/gpt-oss-120b`, `reasoning_effort: "low"` | 609 ms (426–669) | 672 ms |
+| `openai/gpt-oss-20b`, low | 1,047 ms (325–1,534) | — |
+
+gpt-oss-120b low produced ~40 chars of reasoning, delivered in
+`delta.reasoning`, separate from `delta.content`; it must never be shown. The
+account's `/models` lists only gpt-oss-120b/20b and previews (no Llama). This
+confirms the pinned model. A dev key is in the repo root `.env.local`
+(git-ignored, `GROQ_API_KEY`) for benchmarks and live tests; it is never
+printed, logged or committed.
 
 ## Design
 
@@ -124,14 +150,18 @@ renderer ──IPC──▶ main: WritingAiService ──▶ GroqClient ──�
                                                           └─▶ Groq                     (own key)
 ```
 
-- Route selection in main, per request: own key saved (or `GROQ_API_KEY` in
-  dev) → `own-key`; else → `free`. No silent fallback between routes: an own-key
-  failure (invalid key, Groq 429) is shown as such, never retried through the
-  free proxy, and a free-route "out" never uses a key the writer did not give.
+- Route selection in main, per request, from a three-state key store:
+  `none` → `free`; `ok` (or `GROQ_API_KEY` in dev) → `own-key`; `unreadable`
+  (a saved key that cannot be decrypted: re-signed build, Keychain denied,
+  corrupt file) → **blocked**, with "Re-enter your Groq key" until the writer
+  re-enters or removes it. An unreadable key is never treated as "no key",
+  because that would silently send an own-key writer's text through Iliad's
+  server. No silent fallback between routes: an own-key failure (invalid key,
+  Groq 429) is shown as such, never retried through the free proxy, and a
+  free-route "out" never uses a key the writer did not give.
 - Dev overrides: `GROQ_API_KEY` (own-key route), `ILIAD_AI_PROXY_URL` (free
-  route base URL, for `wrangler dev` or the fake server). Packaged builds ignore
-  `ILIAD_AI_PROXY_URL` unless `ILIAD_DEV=1`, so a stray env var cannot reroute
-  writers' text.
+  route base URL, for `wrangler dev` or the fake server). Both are read only
+  when `!app.isPackaged`, so no env var can reroute a packaged app's text.
 - The proxy base URL is a constant in `electron/writing/groq/config.ts`:
   `https://ai.iliad.md` (custom domain on the Worker; see Open questions).
 
@@ -139,15 +169,21 @@ renderer ──IPC──▶ main: WritingAiService ──▶ GroqClient ──�
 
 New `electron/writing/groq/`:
 
-- `prompts.ts` — **pure** (no Node/Electron imports): builds
-  `{ messages, maxCompletionTokens }` from a typed `WritingAiTask`
-  (autocomplete or selection) using the existing instruction/input builders,
-  moved here from `autocomplete.ts` / `tighten.ts` (those files keep cleaning,
-  validation and limits and re-export the builders). Also exports the pinned
-  model params and the request limits. The Worker imports this file directly,
-  so prompts, limits and token budgets have one source (section 4). A test
-  fails if anything under `electron/writing/groq/prompts.ts`'s import graph
-  imports `node:*`, `electron`, or DOM-only APIs.
+- `prompts/` — **pure** (no Node/Electron/DOM imports), versioned:
+  `prompts/v1.ts` builds `{ messages, maxCompletionTokens, maxOutputChars }`
+  from a typed `WritingAiTaskV1` (autocomplete or selection) using the existing
+  instruction/input builders, moved here from `autocomplete.ts` / `tighten.ts`
+  together with the selection markers and `normalizeTightenSelectionRange`
+  (so the pure module never imports back from `tighten.ts`; those files keep
+  cleaning and validation and re-export what they need). `prompts/limits.ts`
+  holds request limits and pinned params; `prompts/index.ts` maps `v →
+  builder`. The app always uses the newest `v`; the Worker imports the same
+  files and serves every `v` it still lists, so prompts, limits and budgets
+  have one source (section 4). A **frozen version** is never edited: a prompt
+  change adds `v2.ts`. Golden snapshot tests keyed by `v` fail if an existing
+  version's output changes. A purity test walks the import graph of
+  `prompts/` and fails on `node:*`, `electron`, or DOM APIs (the Worker's
+  tsconfig has Node types, so typechecking alone would not catch it).
 - `sse.ts` — one OpenAI-compatible chat-completions SSE reader used for both
   routes: incremental UTF-8 decode, `\n\n` / `\r\n\r\n` frames, `data: [DONE]`,
   frame size cap (128 KB) and output cap (8,000 chars), reads **only**
@@ -157,7 +193,7 @@ New `electron/writing/groq/`:
   signal between reads and cancels the reader in `finally`.
 - `client.ts` — `streamGroqText({ route, task, signal, onDelta })`:
   - own key: `POST https://api.groq.com/openai/v1/chat/completions` with
-    `Authorization: Bearer <key>` and the body from `prompts.ts` plus the pinned
+    `Authorization: Bearer <key>` and the body from `prompts/` plus the pinned
     params (below).
   - free: `POST <proxy>/v1/generate` with `Authorization: Bearer <install
     token>`, `X-Iliad-Client: iliad-md/<version>`, and the **structured task**
@@ -179,10 +215,20 @@ Pinned params (both routes; the Worker sets them itself on the free route):
 ```
 
 No tools, no `response_format`, no `stop`, default temperature (tuned only if
-the benchmark shows a reason). `max_completion_tokens` is treated as including
-reasoning tokens (verify in Phase 0; budgets below leave headroom either way):
-inline 512, sentence 768, paragraph 1024, idea 2048; selection transform
-`min(6144, selectionTransformMaxOutputTokens(text, mode) + 1024)`.
+the benchmark shows a reason). `include_reasoning: false` is set, but the
+reader ignores `delta.reasoning` regardless (measured: Groq sends reasoning
+there when it is included). Budgets: inline 512, sentence 768, paragraph
+1024, idea 2048; selection transform
+`min(4096, selectionTransformMaxOutputTokens(selectedText, mode) + 1024)`,
+computed from the **selected** text (`tightenSelectedText`), as
+`writingAiService.ts` does today, not the whole context.
+
+**Phase 0 gate:** `max_completion_tokens` must be shown to bound reasoning +
+content (request a tiny budget with a reasoning-heavy prompt and check
+`usage.completion_tokens ≤ budget` and `finish_reason: "length"`). Groq's docs
+do not state it. If it does not bound reasoning, the spend cap below cannot be
+a hard bound, and the design must change (e.g. the Worker aborts upstream on a
+reasoning-char budget) before Phase 2.
 
 `WritingAiService` keeps its public surface (`autocompleteIdea`,
 `tightenSelection`, `writingAssistStatus`) so the IPC handlers and their
@@ -194,9 +240,11 @@ single-flight/timeouts are unchanged:
   `finish_reason === "stop"`; `length` / `content_filter` / missing →
   `""` (no suggestion), exactly like today's non-`STOP` handling.
 - Selection: aggregates the stream; `stop` → text; `length` →
-  `output_truncated`; `content_filter` → `content_blocked`; anything else →
+  `output_truncated`; `content_filter` (not documented by Groq, handled
+  anyway) → `content_blocked`; anything else or missing →
   `malformed_provider_response`. The IPC handler's cleaning and echo checks are
-  unchanged.
+  unchanged. `TIGHTEN_TIMEOUT_MS` (15 s) becomes 30 s so a full 4,000-char
+  edit is not cut off by the app before the Worker's own limits apply.
 - Reasoning leak guard (defense in depth, on top of reading `content` only): a
   suggestion or rewrite whose text contains harmony/control markers
   (`<|channel|>`, `<|message|>`, `<|start|>`, `<|end|>`, `<think>`) is
@@ -217,8 +265,14 @@ single-flight/timeouts are unchanged:
   daily counters.
 - Issuance: `POST /v1/install` (body `{ "client": "iliad-md", "version" }`)
   returns `{ "token" }`. Rate limited per network key (section 4, default 5 new
-  tokens/day per IPv4 or IPv6 /64). This bounds token farming; farming is also
-  capped by the per-IP request quota and, ultimately, the global cap.
+  tokens/day per IPv4 or IPv6 /64) **and** per IPv6 /48 (default 20/day),
+  since one IPv6 allocation holds thousands of /64s. This bounds token
+  farming; farming is also capped by the per-IP request quota and, ultimately,
+  the global cap.
+- Revocation: tokens are stateless, so abuse response is a config denylist
+  `DENY_SUBJECTS` (comma-separated `sub`s) checked on every request, plus
+  rotating a `kid` out of `TOKEN_SIGNING_KEYS` (invalidates every token signed
+  with it; clients re-issue once).
 - App storage: `userData/ai/install.json` `{ token, issuedAt }`, mode 0600.
   Not Keychain: it is a quota handle, not a credential that protects anything
   of the writer's. No UI for it. A missing, corrupt, or 401-rejected token is
@@ -252,8 +306,10 @@ headers — desktop only; browsers get no `Access-Control-Allow-Origin`):
 | `GET /v1/admin/stats?day=` | Aggregates only, `Authorization: Bearer ADMIN_TOKEN`. |
 
 Everything else 404. Methods other than listed → 405. `Content-Type` must be
-`application/json`; body ≤ 32 KB (checked on `Content-Length` and while
-reading).
+`application/json`; body ≤ 64 KB (checked on `Content-Length` and while
+reading). The field limits allow ~14.8k UTF-16 chars, up to ~45 KB of UTF-8
+for CJK text, so 64 KB never rejects a valid request; the field limits are the
+real bound.
 
 **What the app may send** (`POST /v1/generate`) — a structured task, never
 chat messages, system prompts, model names or parameters:
@@ -274,57 +330,85 @@ The Worker validates every field against the same limits main enforces today
 240, guidance ≤ 1,800, avoid ≤ 3 × 2,400; selection text ≤ 4,000, instruction ≤
 1,000, `0 ≤ from < to ≤ text.length`; automatic ⇒ `kind = "inline"`), rejects
 unknown fields and unknown `v` (`bad_request` / `client_outdated`), then builds
-the messages with the shared `prompts.ts` and sets model and params itself.
+the messages with the shared `prompts/vN.ts` and sets model and params itself.
 Consequences:
 
 - The proxy is not a general Groq gateway: system prompts are Iliad's, output
   length is pinned per task, and there is no messages/tools/model field to
   abuse. The residual "free LLM" surface is the ✦ AI typed instruction (≤ 1,000
-  chars over ≤ 4,000 chars of text) and prompt injection inside document text;
-  both are bounded by the same quotas and output caps, and have no side effects
-  (no tools, no secrets in context, results only shown to the requester).
-- Prompt changes ship in lockstep: the Worker must understand the `v` an app
-  sends. Rule: **deploy the Worker before releasing an app with a new `v`**;
-  the Worker keeps the previous `v`'s builder until the older app is below a
-  threshold (in practice: two releases).
+  chars over ≤ 4,000 chars of text), long `guidance`/`avoid` fields on `idea`,
+  and prompt injection inside document text. They are bounded by quotas, token
+  budgets, and a **Worker-side forwarded-output cap** per task
+  (`maxOutputChars` from `prompts/`: the `AUTOCOMPLETE_MAX_*_OUTPUT_CHARS`
+  values; for selections `max(400, 3 × selectedText.length)`, ≤ 12,000): the
+  Worker aborts upstream and ends the stream with `finish_reason: "length"`
+  once exceeded, which also saves cost. No side effects (no tools, no secrets
+  in context, results only shown to the requester).
+- Prompt versions: the Worker serves every `v` listed in
+  `SUPPORTED_PROMPT_VERSIONS` from the frozen `prompts/vN.ts` files, so a newer
+  Worker never changes an older app's prompts. Rule: **deploy the Worker before
+  releasing an app with a new `v`**; drop a `v` only after the app that sends
+  it is below `MIN_CLIENT_VERSION` (unknown `v` → 426 `client_outdated`).
 
 **Pipeline for `/v1/generate`:**
 
 1. Kill switch: `FREE_TIER_ENABLED != "true"` → 503 `free_tier_disabled`.
    Client version below `MIN_CLIENT_VERSION` → 426 `client_outdated`.
-2. Verify token → 401 `invalid_token`.
+2. Verify token, then `DENY_SUBJECTS` → 401 `invalid_token`.
 3. Validate and build the upstream request (400 `bad_request`, 413
    `too_large`).
-4. Estimate cost: `inputTokens ≈ ceil(inputChars / 3) + 64` (conservative for
-   EN/ES), `outputTokens = max_completion_tokens`; `reserveMicroUsd =
-   in × INPUT_PRICE + out × OUTPUT_PRICE`.
+4. Reserve an **upper bound**, not an estimate: `inputTokens = UTF-8 byte
+   length of all messages + 64 per message` (byte-level BPE cannot produce more
+   tokens than bytes, so this bounds any script, emoji or random text),
+   `outputTokens = max_completion_tokens` (bounds reasoning + content, per the
+   Phase 0 gate); `reserveMicroUsd = in × INPUT_PRICE + out × OUTPUT_PRICE`,
+   rounded up.
 5. **Reserve** in the day's quota Durable Object (atomic, below) →
    429 `quota_exhausted` (`scope: "install" | "network"`) or 429 `global_cap`,
-   both with `resetAt` = next 00:00 UTC.
+   both with `resetAt` = next 00:00 UTC as ISO 8601. Immediately register
+   `ctx.waitUntil(settled)` where `settled` is a promise resolved by step 8, so
+   the Worker stays alive to settle even if the client disconnects.
 6. `fetch` Groq with the Worker secret `GROQ_API_KEY`, `signal` =
-   `AbortSignal.any([request.signal, timeout])`. Upstream errors before the
-   stream starts: 401/403 → 502 `upstream_error` (and an admin-stats counter;
-   the writer is never told "invalid key" for Iliad's key); 429 → 503
-   `upstream_busy` with `Retry-After` passthrough (capped 60 s); 5xx/other →
-   502 `upstream_error`; no first byte in 10 s → 504 `upstream_timeout`.
+   `AbortSignal.any([request.signal, timeout, outputCapController.signal])`.
+   Upstream errors **before the first byte** release the reservation and
+   **refund the request count** (nothing was billed): 401/403 → 502
+   `upstream_error` (plus an admin-stats counter; the writer is never told
+   "invalid key" for Iliad's key); 429 → 503 `upstream_busy` with `Retry-After`
+   passthrough (capped 60 s); 5xx/other → 502 `upstream_error`; no first byte
+   in 10 s → 504 `upstream_timeout` (settled at the full reservation: Groq may
+   have started generating).
 7. Stream: a `TransformStream` re-emits OpenAI-compatible chunks containing
-   only `choices[0].delta.content` and `finish_reason` (reasoning and every
-   other field dropped), captures the final `usage` chunk (or
-   `x_groq.usage`, whichever Groq sends; both handled) and does **not** forward
-   it. Idle > 15 s between upstream chunks or total > 45 s → in-band
+   only `choices[0].delta.content` and `finish_reason` (`delta.reasoning`,
+   `reasoning_content` and every other field dropped), captures usage from the
+   final chunk (`x_groq.usage` per Groq's API reference, or top-level `usage`;
+   both handled) and does **not** forward it. Forwarded content above the
+   task's `maxOutputChars` → abort upstream, emit `finish_reason: "length"`,
+   close. Idle > 15 s between upstream chunks or total > 45 s → in-band
    `data: {"error":{"code":"upstream_timeout"}}` then close. Upstream stream
-   errors → in-band `upstream_error`.
-8. **Settle** via `ctx.waitUntil`: actual cost from usage if present; if the
-   client aborted or usage is missing, `in_estimate + ceil(forwardedChars / 3)`
-   output tokens (reasoning tokens unknown → add the per-kind reasoning
-   allowance, 256). Settle never lowers the request count; it only replaces the
-   reservation amount with the actual/estimated amount.
+   errors → in-band `upstream_error`. Every parse and stream step is wrapped:
+   errors are mapped to codes and the original error (whose message can quote
+   text, e.g. V8's `JSON.parse` errors) is never rethrown or logged.
+8. **Settle** (from the transform's `flush`/`cancel` and the abort paths):
+   with usage → actual cost, releasing the rest of the reservation; **without
+   usage** (client abort, upstream cut, timeout) → the **full reservation**,
+   because gpt-oss reasons before it writes content and aborted reasoning is
+   still billed. Settle never lowers the request count except the
+   before-first-byte refund in step 6.
 
 Client abort propagates: the app aborting its fetch disconnects the Worker
-request; with the `enable_request_signal` compatibility flag `request.signal`
-aborts the upstream Groq fetch, so an abandoned suggestion stops costing output
-tokens. (Test in miniflare; if the flag is unavailable, fall back to detecting
-a failed `writer.write` on the client side of the transform.)
+request; `request.signal` then aborts the upstream Groq fetch, so an abandoned
+suggestion stops costing tokens. This needs the opt-in `enable_request_signal`
+compatibility flag (no default date), which `wrangler.toml.example` sets and
+the integration test asserts. Aborts are charged the full reservation, so a
+dropped signal costs budget but never breaks the cap.
+
+**Why the cap is a hard bound:** every admitted request holds its worst-case
+cost (input ≤ bytes, output ≤ `max_completion_tokens`) in `reserved` before
+Groq is called, `spent + reserved ≤ cap` is checked atomically, and a request
+only ever gives back reservation when Groq's own usage says it cost less. The
+remaining assumptions are the Phase 0 gate (`max_completion_tokens` bounds
+reasoning) and correct prices in config; the Groq org spend limit is the
+independent backstop for both.
 
 **Counters: Durable Objects, not KV.**
 
@@ -337,13 +421,19 @@ a failed `writer.write` on the client side of the transform.)
 - Topology: one DO per UTC day, named `quota:YYYY-MM-DD` (SQLite-backed).
   Day rollover is structural: the Worker picks the name from the request's
   arrival time (UTC); a request that straddles midnight settles into the DO that
-  reserved it (the reservation carries its day). Each DO sets an alarm for
-  day + 2 and deletes all its storage then, so counters live ≤ 48 h.
+  reserved it (the reservation carries its day). A DO has one alarm, so it is
+  always set to `min(next sweep, day + 2)`: the sweep (every 5 min while
+  reservations exist) settles unsettled reservations older than 2 min at their
+  full amount; at day + 2 the DO deletes all its storage, so counters live
+  ≤ 48 h.
 - Tables: `subjects(subject PK, count)`, `networks(netkey PK, count, installs)`,
-  `global(k PK, count, reserved_micro, spent_micro)`,
-  `reservations(id PK, subject, netkey, micro, created)` (rows removed on
-  settle; unsettled rows older than 5 min are settled at their reservation by
-  the alarm), `errors(code PK, count)`.
+  `networks48(netkey PK, installs)`, `global(k PK, count, reserved_micro,
+  spent_micro)`, `reservations(id PK, subject, netkey, micro, created)` (rows
+  removed on settle), `errors(code PK, count)`.
+- Latency: the day DO lives in one location; each request adds a round trip to
+  it (twice: reserve, settle; settle is off the response path). Create it with
+  a location hint near the Groq region and measure the added latency in
+  Phase 2 against the 609 ms baseline.
 - Reserve (single `transactionSync`): read limits from the request (config is
   passed in from Worker env, so a limit change applies on the next request);
   reject if `subjects.count ≥ INSTALL_DAILY_REQUESTS`, `networks.count ≥
@@ -373,6 +463,9 @@ quota, and the limit is config.
 | `INSTALL_DAILY_REQUESTS` | `50` | Per `sub`, per UTC day. |
 | `IP_DAILY_REQUESTS` | `150` | Per network key. |
 | `IP_DAILY_NEW_INSTALLS` | `5` | Token issuance per network key. |
+| `IP48_DAILY_NEW_INSTALLS` | `20` | Token issuance per IPv6 /48. |
+| `DENY_SUBJECTS` | `""` | Comma-separated revoked `sub`s. |
+| `SUPPORTED_PROMPT_VERSIONS` | `"1"` | `v`s the Worker serves. |
 | `GLOBAL_DAILY_USD` | `5` | Spend cap. |
 | `INPUT_USD_PER_MTOK` / `OUTPUT_USD_PER_MTOK` | `0.15` / `0.60` | Cost estimate. |
 | `MIN_CLIENT_VERSION` | `0.4.0` | Below → `client_outdated`. |
@@ -388,23 +481,32 @@ closed (503 `free_tier_disabled`) rather than open.
   Groq error bodies; errors log only `{ code, status }`. A test greps `src/`
   for `console.` and allows only the structured logger, whose type accepts no
   strings other than enum codes.
-- Workers observability: invocation logs contain method, URL path, status,
-  and the connecting IP; keep them off (`[observability] enabled = false`) at
-  launch, or on with head sampling if needed for debugging, documented in the
-  privacy note. No Logpush, no Tail Workers.
+- Uncaught exceptions are logged by the platform with their message; V8
+  parse errors quote input. Hence step 7's rule: every stage catches, maps to
+  a code, and never rethrows the original error. A test throws inside each
+  stage (body parse, validation, upstream SSE parse, transform) with a unique
+  marker string in the input and asserts the marker appears in no recorded
+  log, error, or response.
+- Workers observability is **on by default for new Workers**: invocation logs
+  contain method, path, status and the connecting IP. `wrangler.toml.example`
+  sets `[observability] enabled = false` explicitly; the deployment checklist
+  re-checks it after any dashboard edit. No Logpush, no Tail Workers.
 - Durable Object storage holds only: subjects, hashed network keys, counts,
   microdollars, reservation ids, error-code counts.
-- Groq side: enable **Zero Data Retention** in the Groq org's Data Controls
-  (by default Groq keeps inference data up to 30 days only for abuse and
-  reliability; ZDR removes that). Deployment checklist item.
+- Groq side: by default Groq may keep inference data up to 30 days for abuse
+  and reliability. **Zero Data Retention in the Groq org's Data Controls is a
+  blocking release gate**: the free route does not ship, and the "Nothing is
+  stored" copy, the privacy page and the release notes do not go live, until
+  ZDR is on and verified in the console.
 
 **Abuse considerations** (bounded, not prevented): scripted clients using the
 API directly (limited by install/IP quotas and output caps); token farming
-(issuance limit per network); distributed abuse from many IPs (the global cap
-bounds cost, but a determined attacker can exhaust the free tier for everyone
-for a day — detection via admin stats, response: lower caps, WAF rules, kill
-switch; Turnstile/attestation later); oversized or malformed bodies (32 KB,
-schema); upstream key compromise (secret only in Worker; Groq console spend
+(issuance limit per /64 and per /48; `DENY_SUBJECTS`); distributed abuse from
+many IPs (the global cap bounds cost, but a determined attacker can exhaust the
+free tier for everyone for a day — detection via admin stats, response: lower
+caps, WAF rules, kill switch; Turnstile/attestation later); abort-before-content
+attacks (charged the full reservation, step 8); oversized or malformed bodies
+(64 KB, schema); upstream key compromise (secret only in Worker; Groq console spend
 limit as a second, independent cap).
 
 ### 5. Error contract
@@ -412,27 +514,37 @@ limit as a second, independent cap).
 | Proxy code | HTTP | App `AgentErrorCode` | Autocomplete reason | ✦ AI reason |
 | --- | --- | --- | --- | --- |
 | `quota_exhausted` | 429 | `free_quota_exhausted` | `free_exhausted` | `free_exhausted` |
-| `global_cap` | 429 | `free_global_cap` | `free_global_cap` | `free_global_cap` |
+| `global_cap` | 429 | `free_global_cap` | `free_exhausted` | `free_exhausted` |
 | `free_tier_disabled` | 503 | `free_unavailable` | `free_unavailable` | `free_unavailable` |
 | `client_outdated` | 426 | `client_outdated` | `client_outdated` | `client_outdated` |
 | `invalid_token` | 401 | (re-issue once, retry once) → `provider_unavailable` | `provider` | `provider` |
 | `upstream_busy` | 503 | `rate_limited` | `rate_limited` | `rate_limited` |
 | `upstream_error` / `upstream_timeout` | 502 / 504 / in-band | `provider_unavailable` / `request_timeout` | `provider` / `timeout` | `provider` / `timeout` |
-| `bad_request` / `too_large` | 400 / 413 | `provider_unavailable` (bug; logged by code) | `provider` / `too_long` | `provider` / `too_long` |
+| `bad_request` / `too_large` | 400 / 413 | `provider_unavailable`, detail `proxy_bad_request` (an app bug; diagnostics log the code) | `provider` | `provider` |
 | own key: Groq 401/403 | — | `invalid_api_key` | `invalid_api_key` | `invalid_api_key` |
 | own key: Groq 429 | — | `rate_limited` | `rate_limited` | `rate_limited` |
 
-`resetAt` from the proxy is kept in main; the renderer uses it only to pause
-automatic requests until then (no display of time or counts). `quota_exhausted`
-with `scope: "network"` uses the same copy as the per-install limit (the writer
-cannot tell the difference and does not need to).
+Result shapes change (handler, preload and `src/types/iliad.ts` together):
+`IdeaAutocompleteResult` and `TightenResult` failures become
+`{ ok: false; reason; resetAt?: string }`; `resetAt` (ISO 8601, from the
+proxy) is set only for `free_exhausted`. Per-install, per-network and global
+refusals are one renderer reason and one message (owner decision); main keeps
+the distinct `AgentErrorCode`s for diagnostics only. The renderer
+formats it as a local time in the app language's locale
+(`Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" })`); it
+never shows counts.
 
 Renderer changes: `IdeaAutocompleteFailureReason` / `TightenFailureReason` gain
-`free_exhausted`, `free_global_cap`, `free_unavailable`, `client_outdated`;
-`no_key` is removed (there is always a route). Autocomplete cooldowns: the
-three free "out" reasons suspend **automatic** requests until `resetAt` (or
-until an own key is saved); manual requests still run and show the notice
-again. `rate_limited` keeps today's cooldown.
+`free_exhausted`, `free_unavailable`, `client_outdated`, `key_unreadable`; `no_key` is removed (there is always a route or a blocked
+own key). `autocompleteReasonFromAgentError` and
+`tightenReasonFromAgentError` are exhaustive switches and get explicit cases
+for the new `AgentErrorCode`s. `tightenReasonFromAgentError` regex-matches
+`detail` for `quota|limit|rate` and `auth` on `provider_unavailable`; new
+codes are mapped before that branch, and proxy-derived `detail` values never
+contain those words (tests pin both). `autocompleteCooldownMsForFailure`
+gets cases for the new reasons: the free "out" reasons suspend all
+**automatic** requests until `resetAt` (shared cooldown) or until an own key
+is saved; manual requests still run. `rate_limited` keeps today's cooldown.
 
 ### 6. Key storage and settings
 
@@ -442,10 +554,15 @@ again. `rate_limited` keeps today's cooldown.
   `safeStorage.isEncryptionAvailable()` is false (should not happen on macOS),
   fall back to today's 0600 plaintext file and record `storage: "plain"`.
   Mode 0600 either way.
-- Validation on save: `GET https://api.groq.com/openai/v1/models` with the key
-  (no tokens used). 401/403 → reject with "Groq didn't accept this key";
-  network failure → save anyway and say it could not be checked. Shape check:
-  no whitespace, ≤ 512 chars (keys start with `gsk_`; do not require it).
+- Validation before save (owner decision): `GET
+  https://api.groq.com/openai/v1/models` with the key (no tokens used); the key
+  is saved only on 200. 401/403 → "Groq didn't accept this key"; network
+  failure or 5xx → not saved, "Couldn't reach Groq to check the key. Try
+  again." Shape check first: no whitespace, ≤ 512 chars (keys start with
+  `gsk_`; not required).
+- Key states: `none`, `ok`, `unreadable` (decrypt failed; section 1). Status
+  reports the state; `unreadable` shows "Re-enter your Groq key" with Change /
+  Remove.
 - `last4` for display only.
 - Migration: on first launch of the new version, `WritingSettingsStore`
   rewrites `userData/assistant/settings.json` **without** `geminiApiKey`
@@ -457,14 +574,16 @@ IPC (update handler, preload and `src/types/iliad.ts` together; preload surface
 test):
 
 - `writing-assist:status` → `WritingAssistStatus`:
-  `{ corrector, ai: { route: "free" | "own-key", model: "openai/gpt-oss-120b",
-  freeState: "ok" | "exhausted" | "global_cap" | "unavailable" | "outdated",
-  resetAt: string | null }, groqKey: { hasKey, last4 } }`. `freeState` is the
-  last known state from a proxy response this UTC day (main memory only;
-  starts `ok`). No counts.
+  `{ corrector, ai: { route: "free" | "own-key" | "blocked", model:
+  "openai/gpt-oss-120b" }, groqKey: { state: "none" | "ok" | "unreadable",
+  last4 } }`. No counts, no quota state: "out" is learned from request results
+  (with `resetAt`), which is the only place the renderer needs it.
 - `writing:get-gemini-key-state` / `writing:set-gemini-key` →
-  `writing:get-groq-key-state` / `writing:set-groq-key` (validate in main).
-- `autocomplete:*`, `tighten:*` unchanged.
+  `writing:get-groq-key-state` / `writing:set-groq-key` (validate against Groq
+  in main; returns `{ ok: true, state } | { ok: false, reason:
+  "rejected" | "unreachable" | "invalid_shape" }`).
+- `autocomplete:*`, `tighten:*` channels unchanged; failure results gain
+  `resetAt` (section 5).
 
 ### 7. Prompt porting
 
@@ -482,58 +601,84 @@ test):
   `finish_reason: "length"` when low reasoning still exhausts a small budget
   (budgets above; Phase 0 measures it).
 - Token budgets move from `geminiSelectionTransformMaxOutputTokens` /
-  per-kind Gemini numbers to `prompts.ts` (section 2).
+  per-kind Gemini numbers to `prompts/` (section 2).
 
 ### 8. UI states and copy (EN / ES)
 
-Final layout from the Figma page; behavior and copy here. Tone: calm, no
-exclamation marks, no numbers.
+Layout and final wording follow the Figma page (node `42:2`); behavior and the
+copy decided so far are here. Tone: calm, no exclamation marks, never a count.
+Spanish uses "clave".
 
 Writing assists menu (settings only):
 
-- Free route: no key field at the top anymore. Bottom row, quiet:
-  "AI: free · Use your own Groq key" / "IA: gratis · Usar tu propia clave de
-  Groq". Under it the privacy line:
+- Free route (default): a quiet row "AI included — Free, with a daily limit" /
+  "IA incluida — Gratis, con un límite diario", and below it "Use your own Groq
+  key…" / "Usa tu propia clave de Groq…". The privacy line:
   EN "Free AI sends the text near your cursor or selection through Iliad's
-  server to Groq. Nothing is stored." + link "Privacy".
+  server to Groq. Nothing is stored." + "Privacy" link.
   ES "La IA gratis envía el texto cerca del cursor o de la selección a Groq a
   través del servidor de Iliad. No se guarda nada." + "Privacidad".
-- "Use your own Groq key" expands the key field: label "Groq API key" / "Clave
-  API de Groq"; placeholder "Paste your Groq API key" / "Pega tu clave API de
-  Groq"; hint "Goes straight to Groq, with no daily limit from Iliad. Groq
-  offers free keys." / "Va directo a Groq, sin límite diario de Iliad. Groq
-  ofrece claves gratis."; buttons Save / Cancel / "Get a key"
-  (`https://console.groq.com/keys`) — "Guardar" / "Cancelar" / "Obtener una
-  clave".
+  ("Nothing is stored" ships only with the ZDR gate passed; section 4.)
+- "Use your own Groq key…" expands the key field: label "Groq API key" /
+  "Clave API de Groq"; placeholder "Paste your Groq API key" / "Pega tu clave
+  API de Groq"; hint "Goes straight to Groq, with no daily limit from Iliad."
+  / "Va directo a Groq, sin límite diario de Iliad."; buttons Save / Cancel /
+  "Get a key" (`https://console.groq.com/keys`) — "Guardar" / "Cancelar" /
+  "Obtener una clave". Save shows "Checking…" / "Comprobando…" while the key is
+  validated.
 - Own-key route: "Groq key ••••1234 · Change · Remove" / "Clave de Groq
-  ••••1234 · Cambiar · Quitar". Privacy line: "Your text goes straight to
+  ••••1234 · Cambiar · Quitar"; privacy line "Your text goes straight to
   Groq." / "Tu texto va directo a Groq."
+- Unreadable key: "Re-enter your Groq key" / "Vuelve a ingresar tu clave de
+  Groq" with Change / Remove.
 - Save errors: "Groq didn't accept this key." / "Groq no aceptó esta clave.";
-  "Saved. Iliad couldn't check it right now." / "Guardada. Iliad no pudo
-  comprobarla ahora."; generic "Could not save the key. Try again." (existing).
+  "Couldn't reach Groq to check the key. Try again." / "No se pudo contactar a
+  Groq para comprobar la clave. Intenta de nuevo."; generic "Could not save the
+  key. Try again." (existing).
 
-Inline notices (in the autocomplete status spot near the cursor and in the ✦ AI
-overlay; each with a "Use your own key" / "Usar tu propia clave" button that
-opens Writing assists at the key field, reusing today's
-`requestGeminiKey` → `requestGroqKey` flow):
+Inline notices (autocomplete status spot near the cursor, and the ✦ AI
+overlay). Out-of-quota and the other free-route notices appear **only on
+explicit requests** (length keys, ⌘↵, ✦ AI); automatic suggestions fail
+silently and pause until `resetAt`. Notices that concern the free route carry
+"Use your own Groq key…" / "Usa tu propia clave de Groq…", which opens Writing
+assists at the key field (today's `requestGeminiKey` → `requestGroqKey`).
 
 | State | EN | ES |
 | --- | --- | --- |
-| Your limit / network limit | You've used today's free AI. It's back tomorrow. | Ya usaste la IA gratis de hoy. Vuelve mañana. |
-| Global cap | Free AI has reached today's limit for everyone. It's back tomorrow. | La IA gratis llegó al límite de hoy para todos. Vuelve mañana. |
+| Out (per-user, network or global) | Today's free AI has run out. It's back at {time}. | La IA gratis de hoy se agotó. Vuelve a las {time}. |
 | Kill switch | Free AI is paused right now. | La IA gratis está en pausa por ahora. |
 | Outdated | Update Iliad to keep using free AI. | Actualiza Iliad para seguir usando la IA gratis. |
 | Proxy unreachable | Free AI isn't reachable. Check your connection. | No se pudo conectar con la IA gratis. Revisa tu conexión. |
 | Own key rejected | Groq rejected your key. Check it in Writing assists. | Groq rechazó tu clave. Revísala en Ayudas de escritura. |
 | Own key rate-limited | Your Groq key hit its rate limit. Try again shortly. | Tu clave de Groq llegó a su límite. Intenta de nuevo en un momento. |
+| Own key unreadable | Re-enter your Groq key in Writing assists. | Vuelve a ingresar tu clave de Groq en Ayudas de escritura. |
 
-Automatic suggestions show a notice at most once per session per state; manual
-requests (keys, ✦ AI) always show it. ✦ AI is enabled on first launch (the
-"disabled until key" styling in `src/styles/editor.css` is removed).
+`{time}` is `resetAt` (00:00 UTC) in the writer's local time and locale, e.g.
+"9:00 PM" / "21:00" in Chile. Own-key notices never offer the free route.
+✦ AI is enabled on first launch (the "disabled until key" styling in
+`src/styles/editor.css` is removed).
 
 Strings: all `geminiKey*`, `noKey`, `addKey`, `editNoKey`, `noProvider`,
 `autocompleteNeedsKey` and Gemini mentions in `src/i18n/strings.ts` are
 removed or replaced by the keys above, EN and ES together.
+
+### 8b. Automatic suggestions: a separable step (pending owner decision)
+
+The owner may remove automatic "suggest while I type" entirely (manual,
+key-triggered suggestions only). The spec keeps that a small, separate
+change:
+
+- This spec does **not** change automatic behavior beyond what the free route
+  needs: in free mode automatic requests count against the quota and pause
+  silently when out (above).
+- If removal is chosen, it is one follow-up commit touching only the
+  renderer: drop the automatic trigger path in
+  `src/editor/ideaAutocomplete/extension.ts` (450 ms pause, dismiss-pause,
+  `automaticEnabled`), the "Suggest while I type" switch and its strings, and
+  `manualOnly` from `AutocompletePreferences` (normalizer ignores the old
+  field). Main keeps accepting `trigger: "automatic"` → `inline` for older
+  renderers; the Worker keeps the field, so no prompt version bump is needed.
+- Nothing else in this spec depends on automatic suggestions existing.
 
 ### 9. Cost model and monitoring
 
@@ -547,14 +692,19 @@ tokens; reasoning at `low` ≈ 50–250 tokens, to be measured):
 | paragraph | ~1,300 | ~400 | ~$0.00044 |
 | idea | ~1,400 | ~900 | ~$0.00075 |
 | ✦ AI, 1,500-char selection | ~1,000 | ~800 | ~$0.00063 |
-| ✦ AI worst case (4,000 chars, edit) | ~1,700 | ~6,144 cap | ~$0.0039 |
+| ✦ AI worst case (4,000 chars, edit) | ~1,700 | 4,096 cap | ~$0.0027 |
 
 - A fully used install (50 mixed requests) ≈ $0.02–0.04/day. $5/day ≈ 10k–15k
   typical requests ≈ 150–250 writers using the full quota daily (many more at
   typical use). Monthly worst case $150 Groq + Cloudflare Workers Paid $5.
-- The reservation uses the cap (`max_completion_tokens`), so near the cap the
-  Worker refuses slightly early rather than overspending; settle releases the
-  difference.
+- Reservations are worst case (input bytes, `max_completion_tokens`): an
+  inline request reserves ~$0.0012, an idea ~$0.0017, a worst ✦ AI edit
+  ~$0.0038. Near the cap the Worker refuses slightly early rather than
+  overspending; settle with real usage releases the difference within
+  seconds. Aborted requests (common: typing cancels suggestions) are charged
+  their full reservation, so real spend is below the booked spend; the
+  benchmark's usage numbers and admin stats show how far, and the cap can be
+  raised accordingly.
 - Monitoring: `GET /v1/admin/stats` (per day: requests, installs issued,
   distinct subjects, spent/reserved micro-USD, refusals by code, upstream
   errors by status). Groq console usage + an org **spend limit** (e.g. $200 /
@@ -615,47 +765,71 @@ App (root `npm test`):
 - `keyStore.ts`: safeStorage round trip (mocked), plaintext never written,
   migration deletes `geminiApiKey` and keeps other fields, env Gemini vars
   ignored.
-- `prompts.ts` purity (import-graph test) and snapshot tests of messages per
-  task/kind/language.
-- `WritingAiService`: route selection (key → own-key, none → free, no
-  fallback), finish-reason mapping, diagnostics contain no text (assert on the
-  logged object).
-- IPC: status shape, set-groq-key validation, preload surface.
-- Renderer: new failure reasons map to the copy; automatic requests suspended
-  until `resetAt` after `free_exhausted`, manual still runs; ✦ AI enabled with
-  no key; Writing assists menu free/own-key states (EN/ES).
+- `prompts/` purity (import-graph test) and golden snapshots of messages per
+  `v`/task/kind/language (a v1 change fails); no import cycle with
+  `tighten.ts`; selection budget uses the selected text.
+- `WritingAiService`: route selection (`ok` → own-key, `none` → free,
+  `unreadable` → blocked and **never** free), finish-reason mapping,
+  diagnostics contain no text (assert on the logged object).
+- Reason mappers: every new `AgentErrorCode` has an explicit case; a proxy
+  `detail` never turns into `rate_limited`/`invalid_api_key` via the
+  `tightenReasonFromAgentError` regex.
+- IPC: status shape, set-groq-key (saved only on Groq 200; 401 → rejected;
+  network → unreachable, not saved), `resetAt` passes through failure results,
+  preload surface.
+- Renderer: every reason maps to its copy; `{time}` formatted from `resetAt`
+  in EN and ES locales; out-of-quota notice only on explicit requests;
+  automatic requests silent and suspended until `resetAt`, manual still runs;
+  ✦ AI enabled with no key; Writing assists free/own-key/unreadable states
+  (EN/ES).
 
 Worker (`relay/ai-proxy/tests`, run by root `npm test` and `npm run
 proxy:test`; injected storage/clock/fetch like the old relay tests):
 
 - Tokens: sign/verify, `kid` rotation, tampered payload/signature, unknown kid.
-- Validation: every limit ±1, unknown fields, wrong `v`, automatic with
-  non-inline kind, 32 KB body cap, wrong content type/method.
+- Validation: every limit ±1, unknown fields, unknown/unsupported `v` → 426,
+  automatic with non-inline kind, 64 KB body cap (a max-size CJK request
+  passes), wrong content type/method; `DENY_SUBJECTS`.
 - Quota core (pure class over an injected transactional store): install limit
   at 49/50/51; network limit across two installs; IPv6 addresses in the same
-  /64 share a key, different /64 do not; global cap with reservations; settle
-  lowers reserved and sets spent; abort settles with the estimate; unsettled
-  reservation swept by alarm; concurrent reserves (interleaved promises) never
+  /64 share a key, different /64 do not; /48 issuance limit; input reservation
+  from UTF-8 bytes ≥ real tokens for CJK/emoji/random strings; global cap with
+  reservations; settle with usage releases the rest; **abort or missing usage
+  settles the full reservation**; pre-first-byte upstream failure refunds count
+  and reservation; unsettled reservation swept by the alarm, and the single
+  alarm is always `min(sweep, deleteAt)`; concurrent reserves (interleaved promises) never
   exceed a limit; day rollover (23:59:59.999 vs 00:00 UTC) uses a new DO and a
   straddling request settles to its reservation day; config change applies on
   the next request; invalid config fails closed.
-- Streaming: reasoning deltas stripped; usage captured and not forwarded;
-  `x_groq.usage` variant; upstream error mid-stream → in-band error; idle and
-  total timeouts; client abort aborts the upstream fetch.
-- Privacy: `console` spy sees no body/prompt/output strings in any test; DO
-  storage dump contains only allowed keys.
+- Streaming: `delta.reasoning` stripped; usage captured and not forwarded;
+  `x_groq.usage` and top-level `usage` variants; forwarded-output cap aborts
+  upstream and ends with `length`; upstream error mid-stream → in-band error;
+  idle and total timeouts; client abort aborts the upstream fetch and still
+  settles (the `waitUntil` registered at reserve).
+- Privacy: a unique marker string in the body and in fake upstream output
+  appears in no `console` call, thrown/recorded error, error response, or DO
+  storage dump — including when each stage (body parse, validation, SSE
+  parse, transform) is made to throw.
 - Integration (package-local, `npm --prefix relay/ai-proxy run test:workers`,
-  `@cloudflare/vitest-pool-workers`/miniflare; not in root `npm test` because
-  it needs Wrangler): real SQLite DO transactions, `enable_request_signal`
-  abort propagation, alarms.
+  `@cloudflare/vitest-pool-workers`/miniflare, files named `*.workers.test.ts`
+  under `relay/ai-proxy/tests/workers/`): real SQLite DO transactions,
+  `enable_request_signal` present in config and abort propagation, alarms.
+  A root `vitest.config.ts` excludes `relay/ai-proxy/tests/workers/**` (today
+  root `npm test` is a bare `vitest run` that would pick them up and fail on
+  `cloudflare:test`), and `npm run typecheck` gains `npm run proxy:typecheck`
+  (neither `tsc -b` nor `electron/tsconfig.json` covers `relay/`).
 
 ## Benchmark
 
 Restore `npm run benchmark:autocomplete` (`scripts/benchmarkAutocomplete.mjs`,
 recovered from `1de8393^`) on Groq:
 
-- Routes: `GROQ_API_KEY` → direct; `ILIAD_AI_PROXY_URL` + a dev token → via the
-  proxy (measures proxy overhead). `--dry-run` makes no requests.
+- Routes: `GROQ_API_KEY` (from the environment or the ignored repo-root
+  `.env.local`; never printed) → direct; `ILIAD_AI_PROXY_URL` + a dev token →
+  via the proxy (measures proxy + Durable Object overhead against the 609 ms
+  direct baseline). `--dry-run` makes no requests.
+- A `--budget-probe` mode runs the Phase 0 gate (tiny `max_completion_tokens`
+  on a reasoning-heavy prompt; asserts usage ≤ budget).
 - Cases: the eight EN/ES autocomplete cases plus four selection cases (tighten
   and edit, EN/ES) and one idea case.
 - Report per route and kind: first-visible p50/p95, complete p50/p95,
@@ -669,13 +843,17 @@ recovered from `1de8393^`) on Groq:
    another; select text → ✦ AI → Shorten → inline review; Tab accepts.
 2. Proxy down (`ILIAD_AI_PROXY_URL` to a closed port, dev build): calm
    "isn't reachable" notice; editor unaffected.
-3. Out: point at `wrangler dev` with `INSTALL_DAILY_REQUESTS=2`; third request
-   shows the notice + "Use your own key"; automatic suggestions stop; manual
-   shows the notice again. Same with `GLOBAL_DAILY_USD=0.0001`.
+3. Out: point at `wrangler dev` with `INSTALL_DAILY_REQUESTS=2`; the third
+   explicit request shows "Today's free AI has run out. It's back at {time}."
+   with the local time of 00:00 UTC + "Use your own Groq key…"; automatic
+   suggestions stop silently; the next manual request shows the notice again.
+   Same message with `GLOBAL_DAILY_USD=0.0001`. Repeat in Spanish.
 4. Add own key → requests go direct (verify with the proxy stopped); remove key
    → back to free.
-5. Invalid own key on save; revoked own key after save → "Groq rejected your
-   key".
+5. Invalid own key on save (not saved); offline on save (not saved, "Couldn't
+   reach Groq"); revoked own key after save → "Groq rejected your key", no
+   free fallback; unreadable key (corrupt the encrypted field) → "Re-enter your
+   Groq key", requests blocked, proxy receives nothing.
 6. Upgrade from 0.3.x with a saved Gemini key → key gone from
    `assistant/settings.json`, no Gemini copy anywhere, AI works free.
 7. Cancel paths: type through a streaming suggestion, Esc during ✦ AI, switch
@@ -686,20 +864,26 @@ recovered from `1de8393^`) on Groq:
 
 1. Cloudflare: Workers Paid plan (recommended for CPU headroom), custom domain
    `ai.iliad.md` routed to the Worker.
-2. Groq: org on the Developer tier, **ZDR enabled** in Data Controls, a
-   dedicated API key for the proxy, an org spend limit.
-3. `cp wrangler.toml.example wrangler.toml`; set vars; `wrangler secret put
+2. Groq (**blocking**): org on the Developer tier, **ZDR enabled and verified**
+   in Data Controls, a dedicated API key for the proxy, an org spend limit,
+   prices in config checked against the console.
+3. `cp wrangler.toml.example wrangler.toml` (it sets `compatibility_flags =
+   ["enable_request_signal"]`, `[observability] enabled = false`, the DO
+   binding and SQLite migration); set vars; `wrangler secret put
    GROQ_API_KEY`, `TOKEN_SIGNING_KEYS`, `IP_HASH_KEY`, `ADMIN_TOKEN`.
-4. `wrangler deploy`; smoke: `/healthz`, `/v1/install`, one `/v1/generate`
-   with a dev token, `/v1/admin/stats`.
+4. `wrangler deploy`; confirm in the dashboard that observability is still
+   off; smoke: `/healthz`, `/v1/install`, one `/v1/generate` with a dev token,
+   `/v1/admin/stats`.
 5. Only then release the app version that uses it (it must not ship pointing
    at an undeployed URL). Website privacy page live before the release.
 
 ## Phased plan
 
 - **Phase 0 — measure** (no product change): Groq direct client + benchmark on
-  the owner's key; confirm reasoning never leaks, budgets rarely hit `length`,
-  latency p95 for sentence < 1.5 s; tune per-kind budgets/prompt lines.
+  the dev key; **gate**: `max_completion_tokens` bounds reasoning + content;
+  confirm reasoning never reaches `content`, budgets rarely hit `length`,
+  sentence first-visible p95 < 1.5 s (owner's first measurement: 609 ms
+  median); check EN/ES quality by hand; tune per-kind budgets/prompt lines.
 - **Phase 1 — app**: provider module, own-key route, Gemini removal, key
   migration, status/IPC, strings, UI states against a fake proxy.
 - **Phase 2 — Worker**: `relay/ai-proxy/` with unit + integration tests;
@@ -719,29 +903,113 @@ recovered from `1de8393^`) on Groq:
 - gpt-oss quality in Spanish and for short inline continuations is unproven
   vs Gemini; Phase 0 gates the switch.
 - Groq `usage` shape or `include_reasoning` behavior differs from docs →
-  cost falls back to estimates (conservative), leak guard still holds.
+  requests settle at their full reservation (conservative, free tier admits
+  fewer requests), leak guard still holds.
+- If Phase 0 shows `max_completion_tokens` does not bound reasoning, the spend
+  cap loses its hard bound; the Worker design must change before Phase 2.
+- Charging aborts in full makes booked spend exceed real spend, so the free
+  tier fills earlier than $5 of real cost; tune the cap from admin stats vs
+  Groq's bill.
 - Prompt-version lockstep between app and Worker can break older apps if the
   Worker drops a `v` too early.
 - Trust: some writers will not want text on Iliad's server. The privacy line,
   own-key route and the Autocomplete switch are the answers; see Open
   questions for a stronger opt-out.
+- A saved own key that becomes unreadable blocks AI until re-entered (by
+  design, to avoid a silent privacy downgrade).
 
 ## Open questions for the owner
 
-1. **Automatic suggestions in free mode.** Automatic inline suggestions fire
-   after a 450 ms pause; at 50/day they would use the free quota within minutes
-   of writing and send text without an explicit action. Proposal: in free
-   mode, automatic suggestions are off (explicit keys and ✦ AI only), with the
-   switch note "Needs your own Groq key"; own key turns them on as today.
-   Alternative: allow them and accept fast exhaustion.
+1. **Automatic "suggest while I type"** (pending; likely removal). Automatic
+   suggestions fire after a 450 ms pause; at 50/day they would use the free
+   quota within minutes of writing, and they send text without an explicit
+   action. Options: (a) remove them entirely, manual key-triggered only
+   (section 8b: one renderer-only follow-up commit); (b) keep them only with an
+   own key; (c) keep them everywhere and accept fast exhaustion (current spec
+   text: they count and pause silently).
 2. Proxy URL: `ai.iliad.md` (custom domain, movable) vs a `workers.dev` URL.
 3. `MIN_CLIENT_VERSION` / version: is the next release 0.4.0?
 4. Should there be an explicit "Built-in AI off" switch (hides ✦ AI too) for
    writers who never want text to leave the Mac? Today only Autocomplete has a
    switch.
 5. Own key storage: the spec upgrades to `safeStorage` (Keychain-backed); today's
-   Gemini key was plaintext 0600 JSON. OK?
+   Gemini key was plaintext 0600 JSON, not Keychain. OK? (Side effect: an
+   unreadable key blocks AI until re-entered.)
+6. Free-tier accounting charges aborted requests their full worst-case
+   reservation (needed for a hard cap). Accept that the free tier admits
+   fewer requests than $5 of real spend would allow, or raise the cap once
+   admin stats vs the Groq bill show the ratio?
 
 ## Review
 
-(pending — Codex xhigh)
+**Codex (xhigh, read-only) could not run** on 2026-09-25: two attempts
+(`codex exec -s read-only -c 'model_reasoning_effort="xhigh"' …`) failed
+after WebSocket reconnects with `401 Unauthorized: Incorrect API key provided`
+from `chatgpt.com/backend-api/codex/responses`, although `codex login status`
+reports a ChatGPT login. The auth needs fixing by the owner; the review prompt
+is kept for a rerun. **A Codex xhigh pass is still owed before
+implementation.**
+
+Interim: an independent adversarial review (Claude subagent, read-only, same
+prompt, checked against the code and current Groq/Cloudflare docs), on v1:
+**GO-WITH-CHANGES**, 2 P0 / 6 P1 / 7 P2. Folded in as v2:
+
+1. P0 settling aborted/usage-less requests at an estimate let
+   abort-before-content attacks (billed reasoning, no content) overspend the
+   cap. **Accepted:** without usage, settle at the full reservation; only real
+   usage releases reservation (section 4 step 8, "Why the cap is a hard
+   bound").
+2. P0 `chars/3` is not an input upper bound (CJK, emoji, random strings), and
+   whether `max_completion_tokens` bounds reasoning is undocumented.
+   **Accepted:** reserve from UTF-8 bytes; the budget question is a Phase 0
+   **gate**; the Worker also caps forwarded output per task.
+3. P1 settle could be lost on disconnect; a DO has one alarm; the request
+   signal flag is opt-in. **Accepted:** `waitUntil` registered at reserve, one
+   alarm at `min(sweep, deleteAt)`, flag in `wrangler.toml.example` and
+   asserted in the integration test.
+4. P1 the renderer cannot get `resetAt`; reason mappers are exhaustive and
+   the tighten `detail` regex would misclassify proxy codes. **Accepted:**
+   failure results carry `resetAt`; explicit cases; tests pin the regex path.
+   (`freeState` in status was dropped: request results carry the state.)
+5. P1 one shared `prompts.ts` would silently change older apps' prompts.
+   **Accepted:** frozen `prompts/vN.ts`, golden snapshots per `v`,
+   `SUPPORTED_PROMPT_VERSIONS`; markers and range normalization move into the
+   pure module to avoid a cycle with `tighten.ts`. Build feasibility was
+   confirmed (NodeNext, esbuild bundles the relative import).
+6. P1 V8 exception messages quote parsed text into platform logs; Workers
+   observability is on by default. **Accepted:** every stage catches and maps
+   to codes; a marker-string test across throwing stages; explicit
+   `enabled = false` plus a deploy check.
+7. P1 an undecryptable own key must not fall back to free. **Accepted:**
+   `unreadable` key state blocks requests.
+8. P1 "Nothing is stored" is false until Groq ZDR is on. **Accepted:** ZDR is
+   a blocking release gate for the free route and its copy.
+9. P2 the proxy remains a capped general LLM via edit instructions and long
+   `idea` fields. **Accepted:** Worker-side forwarded-output cap per task.
+10. P2 IPv6 allocations hold many /64s. **Accepted in part:** a /48 issuance
+    limit. **Rejected:** per-ASN limits (an ASN is a whole ISP; one busy ISP
+    would lock out its customers).
+11. P2 32 KB body cap rejects valid CJK requests; `too_large` mapped
+    inconsistently. **Accepted:** 64 KB; one mapping (`provider`).
+12. P2 failed requests still cost quota. **Accepted:** refund count and
+    reservation when upstream fails before the first byte (not after: Groq
+    may have billed).
+13. P2 15 s ✦ AI timeout vs a 4k edit; DO latency. **Accepted:** tighten
+    timeout 30 s, edit budget capped at 4,096; DO location hint and measured
+    overhead in Phase 2.
+14. P2 root `vitest run` would pick up pool-workers tests; `relay/` not
+    typechecked. **Accepted:** separate directory excluded by a root
+    `vitest.config.ts`; `proxy:typecheck` in `npm run typecheck`.
+15. P2 smaller: `ILIAD_DEV` escape hatch (**accepted:** env overrides only when
+    `!app.isPackaged`); selection budget from selected text (**accepted**);
+    `content_filter` undocumented (**accepted:** unknown → malformed); token
+    revocation (**accepted:** `DENY_SUBJECTS` + `kid` rotation).
+
+Also folded in (owner, via lead, same day): Spanish "clave"; reset at 00:00
+UTC with `resetAt` and one message for all limits showing the local reset
+time; Figma node `42:2` copy ("AI included — Free, with a daily limit", "Use
+your own Groq key…"); key validated against Groq before save (never saved
+unchecked); out-of-quota notice only on explicit requests; automatic
+suggestions made a separable, pending decision (section 8b); measured latency
+(gpt-oss-120b low: 609 ms median first token) and the dev key in
+`.env.local` for Phase 0.
