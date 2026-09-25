@@ -93,9 +93,9 @@ created (not Homebrew's).
 
 The latest DMG is always at
 <https://github.com/brainforwarding/iliad/releases/latest/download/Iliad-MD-arm64.dmg>.
-A Homebrew cask is drafted in `packaging/homebrew/iliad-md.rb` (tap not
-published yet); with it, `brew install --cask brainforwarding/tap/iliad-md`
-installs the app and links `iliad` itself.
+With Homebrew, `brew install --cask brainforwarding/tap/iliad-md` installs the
+app and links `iliad` itself. The cask source is `packaging/homebrew/iliad-md.rb`,
+copied to the `brainforwarding/homebrew-tap` repo on each release.
 
 ```bash
 iliad [folder]                 # open a folder (the last one if omitted)
