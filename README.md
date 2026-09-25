@@ -72,9 +72,30 @@ For a synthetic, credential-free UI preview, run Vite and open
 
 ## The `iliad` command
 
-In the packaged app, choose **Iliad MD → Install ‘iliad’ Command…**. It links
-the command into `/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin` and
-warns if that folder is not on your `PATH`.
+Put the command on your `PATH` from a terminal (this is what an agent does):
+
+```bash
+"/Applications/Iliad MD.app/Contents/Resources/bin/iliad" install
+```
+
+or, in the app, choose **Iliad MD → Install ‘iliad’ Command…**. Both run the
+same code (`bin/lib/install.mjs`): they link the command into the first
+writable of `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` (created if
+missing), never replace another program's `iliad`, and warn if that folder is
+not on your `PATH`. Running it again is harmless (`Already installed`). The
+link points at the app bundle, so it keeps working after you update the app
+in place. `iliad install --dir <folder>` picks the folder; `--json` prints one
+object (`{"ok": true, "action": "installed" | "unchanged", "linkPath", …}` or
+`{"ok": false, "code", "error"}`, also for usage errors); failures exit 1,
+usage errors 2. It refuses to link a copy running from a mounted DMG: copy
+the app to `/Applications` first. `iliad uninstall` removes the links it
+created (not Homebrew's).
+
+The latest DMG is always at
+<https://github.com/brainforwarding/iliad/releases/latest/download/Iliad-MD-arm64.dmg>.
+A Homebrew cask is drafted in `packaging/homebrew/iliad-md.rb` (tap not
+published yet); with it, `brew install --cask brainforwarding/tap/iliad-md`
+installs the app and links `iliad` itself.
 
 ```bash
 iliad [folder]                 # open a folder (the last one if omitted)
@@ -82,7 +103,11 @@ iliad status [--json]          # each window's folder and open document
 iliad open <file> [--line N]   # show a Markdown file in Iliad, at line N
 iliad skill install            # install the Iliad skill for Claude Code
 iliad skill print              # print the skill (for AGENTS.md or other agents)
+iliad install [--dir D] [--json]  # put `iliad` on PATH (run from the app bundle)
+iliad uninstall [--json]       # remove the links install created
 ```
+
+The skill is a copy: after updating Iliad, run `iliad skill install` again.
 
 `iliad status` prints `Iliad is not open.` and exits 3 when the app is not
 running. The CLI only reads and navigates; it never writes documents. The skill

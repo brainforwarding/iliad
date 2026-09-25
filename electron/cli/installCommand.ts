@@ -1,99 +1,74 @@
 import { execFile } from "node:child_process";
-import { constants } from "node:fs";
-import { access, lstat, mkdir, readlink, rm, symlink } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+/**
+ * The install logic lives once, in `bin/lib/install.mjs` (the CLI's
+ * `iliad install`). The packaged app ships `bin/` as an extra resource, so the
+ * menu item "Install ‘iliad’ Command…" loads that same module from
+ * `Contents/Resources/bin/lib/install.mjs` instead of keeping a copy here.
+ */
 
 export interface InstallCommandResult {
+  action: "installed" | "unchanged";
   linkPath: string;
   directory: string;
+  target: string;
   onPath: boolean;
+  shadowedBy: string | null;
 }
 
-export function commandInstallDirectories(home = os.homedir()) {
-  return ["/opt/homebrew/bin", "/usr/local/bin", path.join(home, ".local", "bin")];
+/** The parts of `bin/lib/install.mjs` the menu uses. */
+export interface InstallModule {
+  commandInstallDirectories(home?: string): string[];
+  bundleWrapperPath(scriptDirectory: string): Promise<string>;
+  installCliCommand(options: {
+    wrapperPath: string;
+    directories: string[];
+    pathValue: string;
+    createMissingDirectory: string | null;
+  }): Promise<InstallCommandResult>;
 }
 
-async function isWritableDirectory(directory: string) {
-  try {
-    await access(directory, constants.W_OK);
-    return true;
-  } catch {
-    return false;
+export function installModulePath(resourcesPath: string) {
+  return path.join(resourcesPath, "bin", "lib", "install.mjs");
+}
+
+export async function loadInstallModule(resourcesPath: string): Promise<InstallModule> {
+  const loaded = (await import(pathToFileURL(installModulePath(resourcesPath)).href)) as Partial<InstallModule>;
+
+  if (
+    typeof loaded.installCliCommand !== "function" ||
+    typeof loaded.bundleWrapperPath !== "function" ||
+    typeof loaded.commandInstallDirectories !== "function"
+  ) {
+    throw new Error("The bundled install script is incomplete. Reinstall Iliad MD.");
   }
+
+  return loaded as InstallModule;
 }
 
 /**
- * True for a link to an Iliad wrapper: this one, or the `iliad` wrapper of any
- * (possibly moved or deleted) Iliad app bundle.
+ * Installs the command for the app whose Resources folder is `resourcesPath`,
+ * with the same rules as `iliad install`.
  */
-export function isIliadWrapperTarget(linkTarget: string, linkDirectory: string, wrapperPath: string) {
-  const resolved = path.resolve(linkDirectory, linkTarget);
-  return resolved === path.resolve(wrapperPath) || /\.app\/Contents\/Resources\/bin\/iliad$/.test(resolved);
-}
-
-/**
- * Free when nothing is there or when it is our own earlier link. Real files
- * and links to anything else (another tool's `iliad`) are never replaced.
- */
-async function linkSlotIsFree(linkPath: string, wrapperPath: string) {
-  try {
-    const stats = await lstat(linkPath);
-
-    if (!stats.isSymbolicLink()) {
-      return false;
-    }
-
-    return isIliadWrapperTarget(await readlink(linkPath), path.dirname(linkPath), wrapperPath);
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT";
-  }
-}
-
-export function directoryIsOnPath(directory: string, pathValue: string) {
-  const target = path.resolve(directory);
-  return pathValue
-    .split(path.delimiter)
-    .filter(Boolean)
-    .some((entry) => path.resolve(entry) === target);
-}
-
-/**
- * Symlinks the packaged `iliad` wrapper into the first writable of
- * /opt/homebrew/bin, /usr/local/bin, ~/.local/bin (created if missing).
- */
-export async function installCliCommand({
-  wrapperPath,
-  directories = commandInstallDirectories(),
-  pathValue,
-  createMissingDirectory = path.join(os.homedir(), ".local", "bin")
+export async function installCommandFromResources({
+  resourcesPath,
+  home,
+  pathValue
 }: {
-  wrapperPath: string;
-  directories?: string[];
+  resourcesPath: string;
+  home: string;
   pathValue: string;
-  createMissingDirectory?: string | null;
-}): Promise<InstallCommandResult> {
-  for (const directory of directories) {
-    if (directory === createMissingDirectory) {
-      await mkdir(directory, { recursive: true }).catch(() => undefined);
-    }
-
-    if (!(await isWritableDirectory(directory))) {
-      continue;
-    }
-
-    const linkPath = path.join(directory, "iliad");
-
-    if (!(await linkSlotIsFree(linkPath, wrapperPath))) {
-      continue;
-    }
-
-    await rm(linkPath, { force: true });
-    await symlink(wrapperPath, linkPath);
-    return { linkPath, directory, onPath: directoryIsOnPath(directory, pathValue) };
-  }
-
-  throw new Error(`No writable folder for the command. Tried: ${directories.join(", ")}.`);
+}) {
+  const install = await loadInstallModule(resourcesPath);
+  const wrapperPath = await install.bundleWrapperPath(path.join(resourcesPath, "bin"));
+  return install.installCliCommand({
+    wrapperPath,
+    directories: install.commandInstallDirectories(home),
+    pathValue,
+    createMissingDirectory: path.join(home, ".local", "bin")
+  });
 }
 
 /**

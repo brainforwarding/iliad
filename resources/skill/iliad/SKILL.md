@@ -17,6 +17,9 @@ write directly; do not ask permission for each file.
   that open document.
 - If Iliad is not open, `iliad status` says `Iliad is not open.` (exit code 3);
   ask the writer which file they mean.
+- If the shell cannot find `iliad`, run
+  `"/Applications/Iliad MD.app/Contents/Resources/bin/iliad" install` once; it
+  puts the command on PATH (safe to repeat).
 
 ## Notes and comments (companion files)
 

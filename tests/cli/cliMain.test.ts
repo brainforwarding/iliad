@@ -1,8 +1,4 @@
-import { lstat, mkdir, mkdtemp, readlink, realpath, symlink, writeFile, chmod } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { directoryIsOnPath, installCliCommand, isIliadWrapperTarget } from "../../electron/cli/installCommand";
+import { describe, expect, it, vi } from "vitest";
 import { runCliOpenRequest, type CliOpenSteps } from "../../src/app/useCliBridge";
 import type { FileTreeNode } from "../../src/types/iliad";
 
@@ -28,86 +24,6 @@ vi.mock("../../electron/window/createWindow.js", () => ({
     return window;
   }
 }));
-
-describe("installCliCommand", () => {
-  let dir: string;
-
-  beforeEach(async () => {
-    dir = await realpath(await mkdtemp(path.join(os.tmpdir(), "iliad-install-")));
-  });
-
-  it("links into the first writable folder and reports PATH membership", async () => {
-    const readOnly = path.join(dir, "ro");
-    const writable = path.join(dir, "rw");
-    await mkdir(readOnly);
-    await mkdir(writable);
-    await chmod(readOnly, 0o500);
-    const wrapper = path.join(dir, "iliad-wrapper");
-    await writeFile(wrapper, "#!/bin/sh\n");
-
-    const result = await installCliCommand({
-      wrapperPath: wrapper,
-      directories: [path.join(dir, "missing"), readOnly, writable],
-      pathValue: `/usr/bin:${writable}`,
-      createMissingDirectory: null
-    });
-
-    expect(result).toEqual({ linkPath: path.join(writable, "iliad"), directory: writable, onPath: true });
-    expect((await lstat(result.linkPath)).isSymbolicLink()).toBe(true);
-    expect(await readlink(result.linkPath)).toBe(wrapper);
-
-    // Reinstall replaces our own symlink.
-    await installCliCommand({ wrapperPath: wrapper, directories: [writable], pathValue: "", createMissingDirectory: null });
-    expect(await readlink(result.linkPath)).toBe(wrapper);
-  });
-
-  it("never overwrites a real file and creates ~/.local/bin when needed", async () => {
-    const taken = path.join(dir, "taken");
-    await mkdir(taken);
-    await writeFile(path.join(taken, "iliad"), "someone else's");
-    const localBin = path.join(dir, "home", ".local", "bin");
-
-    const result = await installCliCommand({
-      wrapperPath: "/w",
-      directories: [taken, localBin],
-      pathValue: "/usr/bin",
-      createMissingDirectory: localBin
-    });
-
-    expect(result).toMatchObject({ directory: localBin, onPath: false });
-    await expect(
-      installCliCommand({ wrapperPath: "/w", directories: [taken], pathValue: "", createMissingDirectory: null })
-    ).rejects.toThrow(/No writable folder/);
-  });
-
-  it("replaces only links to an Iliad wrapper, never another tool's `iliad` link", async () => {
-    const foreign = path.join(dir, "foreign");
-    const ours = path.join(dir, "ours");
-    await mkdir(foreign);
-    await mkdir(ours);
-    await symlink("/usr/local/lib/other-tool/iliad", path.join(foreign, "iliad"));
-    await symlink("/Applications/Old Iliad.app/Contents/Resources/bin/iliad", path.join(ours, "iliad"));
-    const wrapper = "/Applications/Iliad MD.app/Contents/Resources/bin/iliad";
-
-    const result = await installCliCommand({
-      wrapperPath: wrapper,
-      directories: [foreign, ours],
-      pathValue: "",
-      createMissingDirectory: null
-    });
-
-    expect(result.directory).toBe(ours);
-    expect(await readlink(path.join(ours, "iliad"))).toBe(wrapper);
-    expect(await readlink(path.join(foreign, "iliad"))).toBe("/usr/local/lib/other-tool/iliad");
-    expect(isIliadWrapperTarget("../lib/iliad", "/usr/local/bin", wrapper)).toBe(false);
-    expect(isIliadWrapperTarget(wrapper, "/usr/local/bin", wrapper)).toBe(true);
-  });
-
-  it("matches PATH entries exactly", () => {
-    expect(directoryIsOnPath("/opt/homebrew/bin", "/usr/bin:/opt/homebrew/bin/")).toBe(true);
-    expect(directoryIsOnPath("/opt/homebrew/bin", "/usr/bin:/opt/homebrew/sbin")).toBe(false);
-  });
-});
 
 describe("IliadWindowManager CLI state", () => {
   it("tracks active documents, finds the longest containing workspace, and lists status", async () => {

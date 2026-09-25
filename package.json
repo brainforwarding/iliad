@@ -28,6 +28,7 @@
     "preview": "vite preview --host 127.0.0.1",
     "release:refresh-update-metadata": "node scripts/refreshMacUpdateMetadata.mjs",
     "release:verify-update-metadata": "node scripts/verifyUpdateMetadata.mjs",
+    "release:update-homebrew-cask": "node scripts/updateHomebrewCask.mjs",
     "test": "vitest run",
     "typecheck": "tsc -b && tsc -p electron/tsconfig.json --noEmit",
     "lint:css": "stylelint \"src/styles/**/*.css\""

@@ -11,7 +11,8 @@ npm run typecheck   # tsc -b && tsc -p electron/tsconfig.json --noEmit
 npm test            # vitest run — the full suite lives in tests/
 npm run lint:css    # stylelint src/styles/**/*.css (design-token enforcement)
 npm run release:refresh-update-metadata # refresh latest-mac.yml hashes after final artifact stapling/copying
-npm run release:verify-update-metadata # verify latest-mac.yml and app-update.yml before GitHub release upload
+npm run release:verify-update-metadata # verify latest-mac.yml, app-update.yml and the stable Iliad-MD-arm64.dmg before GitHub release upload
+npm run release:update-homebrew-cask # set version/sha256 in packaging/homebrew/iliad-md.rb from the release DMG
 npm run preview     # vite preview on 127.0.0.1 (renderer only, no Electron)
 ```
 

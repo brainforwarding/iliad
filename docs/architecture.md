@@ -36,14 +36,15 @@ app shell.
 bin/
   iliad            packaged wrapper (runs iliad.mjs with ELECTRON_RUN_AS_NODE=1)
   iliad.mjs        CLI entry (checkouts and npm link)
-  lib/             cli routing, launcher, socket protocol, paths, skill install
+  lib/             cli routing, launcher, socket protocol, paths, skill install,
+                   command install (install.mjs, also used by the app menu)
 resources/
   skill/iliad/SKILL.md   bundled skill for outside agents
 electron/
   main.ts
   preload.ts
   cli/             local socket server, CLI commands, open-request queue,
-                   "Install 'iliad' Command…" symlink
+                   "Install 'iliad' Command…" (loads bin/lib/install.mjs)
   comments/        legacy comments migration into companion files
   diagnostics/     logger
   fs/              pathSafety, fileOps, companionFiles, contentSearch,
@@ -336,14 +337,42 @@ Iliad from the bundled skill and the CLI:
   it replies only after the renderer opened the document and revealed the line.
 - `iliad skill install` copies `resources/skill/iliad/SKILL.md` to
   `~/.claude/skills/iliad/SKILL.md`; `iliad skill print` prints it.
+- `iliad install [--dir D] [--json]` / `iliad uninstall [--json]` put the
+  command on `PATH` from a terminal, so an agent can install Iliad without
+  GUI clicks (spec `specs/2026-09-25-agent-installable-iliad.md`).
 - `iliad [folder]` keeps the old launch behavior.
 
 The CLI talks to main over a user-only socket (`userData/iliad.sock`, chmod
 0600) and never writes documents. The packaged `Contents/Resources/bin/iliad`
-wrapper runs `iliad.mjs` with the app's own executable in Node mode; the app
-menu item "Install ‘iliad’ Command…" symlinks it into the first writable of
-`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` and warns when that
-folder is not on `PATH`.
+wrapper runs `iliad.mjs` with the app's own executable in Node mode.
+
+Command install has one implementation, `bin/lib/install.mjs`. `iliad install`
+(run from the bundle: `…/Iliad MD.app/Contents/Resources/bin/iliad install`)
+and the app menu item "Install ‘iliad’ Command…" both use it; main cannot
+import `bin/` statically (`electron/` compiles with `rootDir: "."`), so
+`electron/cli/installCommand.ts` dynamically imports it from
+`process.resourcesPath/bin/lib/install.mjs` (packaged only; `bin/` is an
+extraResource). Rules: link the bundle's wrapper into the first writable of
+`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` whose `iliad` slot is
+empty or already an Iliad link (a bundle named `*Iliad*.app`); never replace
+real files or other programs' links (empty slots get a plain `symlink`, old
+Iliad links are re-read and swapped by temp link + rename); `unchanged` when
+the link is already right; warn when the folder is not on `PATH` or another
+`iliad` comes first. Refused (after `realpath`): checkouts (use `npm link`),
+App Translocation, and bundles on a read-only volume (`EROFS`: a mounted DMG
+at any mount point), since those links would dangle. macOS only. `--json`
+prints one object for every outcome with a stable `code` on failure. `uninstall` removes only Iliad links and
+leaves Homebrew's (`<prefix>/Caskroom/iliad-md` exists) to `brew`. Links point
+at a bundle path, not a version, so replacing the app in place keeps them
+valid. The Homebrew cask (`packaging/homebrew/iliad-md.rb`) links the same
+wrapper with its `binary` stanza.
+
+The in-app update check (`electron/updates/updateService.ts`) is notify-only:
+it reads the latest GitHub release and opens its DMG URL. Every release also
+carries an unversioned `Iliad-MD-arm64.dmg` (the stable
+`releases/latest/download/` URL); `selectMacDmgAsset` prefers the versioned
+DMG so asset order never matters, and `latest-mac.yml` never lists the stable
+copy.
 
 Relevant files:
 

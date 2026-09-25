@@ -154,6 +154,38 @@ for (const file of latest.files) {
   verifyReleaseFile(file.url, file.sha512, file.size);
 }
 
+// The stable download (`releases/latest/download/Iliad-MD-arm64.dmg`) is an
+// extra asset: a byte-identical copy of the final, stapled versioned DMG that
+// the updater metadata never references.
+const stableDmgName = "Iliad-MD-arm64.dmg";
+const versionedDmgName = `Iliad-MD-${expectedVersion}-mac-arm64.dmg`;
+const stableDmgPath = path.join(releaseDir, stableDmgName);
+const versionedDmgPath = path.join(releaseDir, versionedDmgName);
+
+if ([latest.path, ...latest.files.map((file) => file.url)].includes(stableDmgName)) {
+  fail(`latest-mac.yml must not reference the stable ${stableDmgName}; it is an extra download asset only`);
+}
+
+const versionedDmgEntry = latest.files.find((file) => file.url === versionedDmgName);
+
+if (!versionedDmgEntry) {
+  fail(`latest-mac.yml does not list the versioned DMG ${versionedDmgName}`);
+}
+
+if (!fs.existsSync(versionedDmgPath)) {
+  fail(`missing versioned DMG: release/${versionedDmgName}`);
+}
+
+if (!fs.existsSync(stableDmgPath)) {
+  fail(`missing stable DMG: release/${stableDmgName} (cp -p "release/${versionedDmgName}" "release/${stableDmgName}")`);
+}
+
+// Compared with the versioned DMG's latest-mac.yml entry, which the loop above
+// already matched against the file on disk.
+if (fs.statSync(stableDmgPath).size !== versionedDmgEntry.size || fileDigestBase64(stableDmgPath) !== versionedDmgEntry.sha512) {
+  fail(`release/${stableDmgName} differs from release/${versionedDmgName}; copy it again after stapling`);
+}
+
 if (!fs.existsSync(appUpdatePath)) {
   fail("packaged app is missing Contents/Resources/app-update.yml");
 }

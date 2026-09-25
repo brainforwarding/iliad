@@ -4,6 +4,13 @@ import path from "node:path";
 import { launchApp, resolveLauncher } from "./launcher.mjs";
 import { abbreviateHome, cliSocketPath } from "./paths.mjs";
 import { NotRunningError, sendRequest } from "./protocol.mjs";
+import {
+  bundleWrapperPath,
+  commandInstallDirectories,
+  InstallError,
+  installCliCommand,
+  uninstallCliCommand
+} from "./install.mjs";
 import { installSkill, readSkill } from "./skill.mjs";
 
 export const exitCodes = { ok: 0, error: 1, usage: 2, notRunning: 3 };
@@ -20,6 +27,10 @@ export const usage = `Usage:
   iliad open <file> [--line N]   Show a Markdown file in Iliad, at line N
   iliad skill install            Install the Iliad skill for Claude Code
   iliad skill print              Print the Iliad skill (for AGENTS.md or other agents)
+  iliad install [--dir <folder>] [--json]
+                                 Put \`iliad\` on PATH (run it from the Iliad MD app:
+                                 "/Applications/Iliad MD.app/Contents/Resources/bin/iliad" install)
+  iliad uninstall [--json]       Remove the \`iliad\` links that install created
 
 A folder named like a command must be written as a path (iliad ./status).`;
 
@@ -98,6 +109,36 @@ export function routeArgv(args) {
     }
 
     return file ? { kind: "open", file, line } : usageError("open needs a Markdown file.");
+  }
+
+  if (command === "install") {
+    let directory = null;
+    let json = false;
+
+    for (let index = 0; index < rest.length; index += 1) {
+      const argument = rest[index];
+
+      if (argument === "--json") {
+        json = true;
+      } else if (argument === "--dir" || argument.startsWith("--dir=")) {
+        const value = argument === "--dir" ? rest[(index += 1)] : argument.slice("--dir=".length);
+
+        if (!value || value.startsWith("-")) {
+          return usageError("--dir needs a folder.");
+        }
+
+        directory = value;
+      } else {
+        return usageError(`Unknown option for install: ${argument}`);
+      }
+    }
+
+    return { kind: "install", directory, json };
+  }
+
+  if (command === "uninstall") {
+    const unknown = rest.find((argument) => argument !== "--json");
+    return unknown ? usageError(`Unknown option for uninstall: ${unknown}`) : { kind: "uninstall", json: rest.includes("--json") };
   }
 
   if (command === "skill") {
@@ -260,6 +301,95 @@ async function runLaunch(route, context) {
   }
 }
 
+/** Stable `code` for JSON failures: the InstallError code, or "error". */
+function errorCode(error) {
+  return error instanceof InstallError && error.code ? error.code : "error";
+}
+
+function reportJson(context, value) {
+  context.stdout(JSON.stringify(value, null, 2));
+}
+
+async function runInstall(route, context) {
+  let result;
+
+  try {
+    const wrapperPath = await context.wrapperPath();
+    result = await installCliCommand({
+      wrapperPath,
+      directories: context.installDirectories,
+      exactDirectory: route.directory ? path.resolve(context.cwd, route.directory) : null,
+      pathValue: context.pathValue,
+      createMissingDirectory: context.createMissingDirectory
+    });
+  } catch (error) {
+    const message = errorMessage(error);
+
+    if (route.json) {
+      reportJson(context, { ok: false, code: errorCode(error), error: message });
+    } else {
+      context.stderr(`iliad: ${message}`);
+    }
+
+    return exitCodes.error;
+  }
+
+  if (route.json) {
+    reportJson(context, { ok: true, ...result });
+    return exitCodes.ok;
+  }
+
+  const lines = [
+    `${result.action === "unchanged" ? "Already installed" : "Installed"}: ${result.linkPath} -> ${result.target}`
+  ];
+
+  if (!result.onPath) {
+    lines.push(
+      `${result.directory} is not on your PATH. Add it to your shell profile, for example:`,
+      `  export PATH="${result.directory}:$PATH"`
+    );
+  }
+
+  if (result.shadowedBy) {
+    lines.push(`Another \`iliad\` comes first on your PATH: ${result.shadowedBy}`);
+  }
+
+  if (result.action === "installed") {
+    lines.push("Next: `iliad skill install` adds the Iliad skill for Claude Code; other agents can use `iliad skill print`.");
+  }
+
+  context.stdout(lines.join("\n"));
+  return exitCodes.ok;
+}
+
+async function runUninstall(route, context) {
+  let result;
+
+  try {
+    result = await uninstallCliCommand({ directories: context.installDirectories });
+  } catch (error) {
+    if (route.json) {
+      reportJson(context, { ok: false, code: "error", error: errorMessage(error) });
+    } else {
+      context.stderr(`iliad: ${errorMessage(error)}`);
+    }
+
+    return exitCodes.error;
+  }
+
+  if (route.json) {
+    reportJson(context, { ok: true, ...result });
+    return exitCodes.ok;
+  }
+
+  const lines = [
+    ...result.removed.map((linkPath) => `Removed: ${linkPath}`),
+    ...result.skipped.map((entry) => `Kept: ${entry.linkPath} (${entry.reason})`)
+  ];
+  context.stdout(lines.length ? lines.join("\n") : "No Iliad command link found.");
+  return exitCodes.ok;
+}
+
 /**
  * Runs one CLI invocation. Every side effect goes through `deps` so tests can
  * drive it without a running app.
@@ -278,6 +408,11 @@ export async function runCli(args, deps = {}) {
     now: deps.now ?? Date.now,
     sleep: deps.sleep ?? delay,
     send: deps.send ?? ((request, timeoutMs) => sendRequest(socketPath, request, { timeoutMs })),
+    pathValue: deps.pathValue ?? env.PATH ?? "",
+    installDirectories: deps.installDirectories ?? commandInstallDirectories(home),
+    createMissingDirectory:
+      deps.createMissingDirectory !== undefined ? deps.createMissingDirectory : path.join(home, ".local", "bin"),
+    wrapperPath: deps.wrapperPath ?? (() => bundleWrapperPath(scriptDirectory)),
     launch:
       deps.launch ??
       ((launchArgs) => launchApp(resolveLauncher({ scriptDirectory, env, home }), launchArgs, { cwd, env }))
@@ -289,12 +424,22 @@ export async function runCli(args, deps = {}) {
       context.stdout(usage);
       return exitCodes.ok;
     case "usage":
-      context.stderr(`iliad: ${route.error}\n\n${usage}`);
+      // install/uninstall promise one JSON object for every outcome.
+      if ((args[0] === "install" || args[0] === "uninstall") && args.includes("--json")) {
+        reportJson(context, { ok: false, code: "usage", error: route.error });
+      } else {
+        context.stderr(`iliad: ${route.error}\n\n${usage}`);
+      }
+
       return exitCodes.usage;
     case "status":
       return runStatus(route, context);
     case "open":
       return runOpen(route, context);
+    case "install":
+      return runInstall(route, context);
+    case "uninstall":
+      return runUninstall(route, context);
     case "skill-install":
       try {
         const target = await installSkill({ scriptDirectory, home });

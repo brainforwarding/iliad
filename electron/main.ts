@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, Menu, protocol, session, shell, type MenuItemConstructorOptions } from "electron";
 import path from "node:path";
 import { createCliRequestHandler } from "./cli/commands.js";
-import { installCliCommand, loginShellPath } from "./cli/installCommand.js";
+import { installCommandFromResources, loginShellPath } from "./cli/installCommand.js";
 import { registerCliIpc } from "./cli/ipc.js";
 import { startCliServer, type CliServer } from "./cli/server.js";
 import { registerAutocompleteIpc } from "./ipc/autocomplete.js";
@@ -168,18 +168,22 @@ async function installIliadCommandFromMenu() {
   }
 
   try {
-    const result = await installCliCommand({
-      wrapperPath: path.join(process.resourcesPath, "bin", "iliad"),
+    const result = await installCommandFromResources({
+      resourcesPath: process.resourcesPath,
+      home: app.getPath("home"),
       pathValue: await loginShellPath()
     });
     const pathWarning = result.onPath
       ? ""
       : `\n\n${result.directory} is not on your PATH. Add it to your shell profile, for example:\nexport PATH="${result.directory}:$PATH"`;
+    const shadowWarning = result.shadowedBy
+      ? `\n\nAnother \u2018iliad\u2019 comes first on your PATH: ${result.shadowedBy}`
+      : "";
 
     await show({
       type: "info",
-      message: "The \u2018iliad\u2019 command is installed",
-      detail: `Installed at ${result.linkPath}.${pathWarning}\n\nTry \u2018iliad status\u2019 in a terminal, and \u2018iliad skill install\u2019 to add the Iliad skill for Claude Code.`
+      message: result.action === "unchanged" ? "The \u2018iliad\u2019 command is already installed" : "The \u2018iliad\u2019 command is installed",
+      detail: `Installed at ${result.linkPath}.${pathWarning}${shadowWarning}\n\nTry \u2018iliad status\u2019 in a terminal, and \u2018iliad skill install\u2019 to add the Iliad skill for Claude Code.`
     });
   } catch (error) {
     await show({

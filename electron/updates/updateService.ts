@@ -155,11 +155,26 @@ export function releaseInfoFromGitHubPayload(payload: unknown): UpdateReleaseInf
   };
 }
 
-export function selectMacDmgAsset(assets: UpdateReleaseAsset[], arch: NodeJS.Architecture = process.arch) {
+/**
+ * The DMG to download for this Mac. A release also carries the unversioned
+ * `Iliad-MD-arm64.dmg` (a byte-identical copy behind the stable
+ * `releases/latest/download/` URL). Order: the exact versioned file name for
+ * this arch (`Iliad-MD-X.Y.Z-mac-<arch>.dmg`), then any DMG for this arch,
+ * then an arch-neutral DMG — so the choice never depends on GitHub's asset
+ * order and never crosses architectures.
+ */
+export function selectMacDmgAsset(assets: UpdateReleaseAsset[], arch: NodeJS.Architecture = process.arch, version?: string) {
   const dmgAssets = assets.filter((asset) => asset.name.toLowerCase().endsWith(".dmg"));
   const archName = arch === "arm64" ? "arm64" : arch === "x64" ? "x64" : "";
 
   if (archName) {
+    const exactName = version ? `Iliad-MD-${version}-mac-${archName}.dmg` : null;
+    const exact = exactName ? dmgAssets.find((asset) => asset.name === exactName) : undefined;
+
+    if (exact) {
+      return exact;
+    }
+
     const matchingArch = dmgAssets.find((asset) => asset.name.toLowerCase().includes(archName));
 
     if (matchingArch) {
@@ -225,7 +240,7 @@ export class UpdateService {
         };
       }
 
-      const downloadAsset = selectMacDmgAsset(release.assets, this.arch);
+      const downloadAsset = selectMacDmgAsset(release.assets, this.arch, release.version);
 
       return {
         status: "available",

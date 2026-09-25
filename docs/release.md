@@ -183,6 +183,15 @@ cp -p "release/Iliad MD-X.Y.Z-mac-arm64.dmg.blockmap" "release/Iliad-MD-X.Y.Z-ma
 cp -p "release/Iliad MD-X.Y.Z-mac-arm64.zip.blockmap" "release/Iliad-MD-X.Y.Z-mac-arm64.zip.blockmap"
 ```
 
+Create the stable download copy of the final, stapled DMG. It backs
+`https://github.com/brainforwarding/iliad/releases/latest/download/Iliad-MD-arm64.dmg`
+(the URL the website and agents' `install.md` use), is byte-identical to the
+versioned DMG, and is never referenced by `latest-mac.yml`:
+
+```bash
+cp -p "release/Iliad MD-X.Y.Z-mac-arm64.dmg" "release/Iliad-MD-arm64.dmg"
+```
+
 Refresh `latest-mac.yml` after DMG stapling and metadata-named copies are in
 place. Stapling changes the DMG size and SHA512:
 
@@ -217,6 +226,11 @@ test -f "$APP/Contents/Resources/bin/iliad.mjs" && ls "$APP/Contents/Resources/b
 test -f "$APP/Contents/Resources/skill/iliad/SKILL.md" && echo "skill ok"
 "$APP/Contents/Resources/bin/iliad" --help
 "$APP/Contents/Resources/bin/iliad" skill print | head -5
+# Terminal command install (what agents run). Into a scratch folder only:
+CMD_DIR="$(mktemp -d /tmp/iliad-cmd.XXXXXX)"
+"$APP/Contents/Resources/bin/iliad" install --dir "$CMD_DIR" --json
+"$CMD_DIR/iliad" --help | grep -q "iliad install" && echo "install ok"
+rm -rf "$CMD_DIR"
 
 rm -rf "$MOUNT_ROOT" "$ZIP_ROOT"
 ```
@@ -238,6 +252,9 @@ This script checks:
 - its top-level `path` points to the macOS ZIP updater artifact;
 - every file referenced by `latest-mac.yml` exists in `release/`;
 - referenced file sizes and SHA512 hashes match the actual files;
+- `release/Iliad-MD-arm64.dmg` exists, has the same size and SHA512 as
+  `release/Iliad-MD-X.Y.Z-mac-arm64.dmg`, and is not referenced by
+  `latest-mac.yml`;
 - the packaged app contains `Contents/Resources/app-update.yml`;
 - `app-update.yml` points at the public GitHub update provider
   `brainforwarding/iliad`.
@@ -246,13 +263,19 @@ If this script fails, fix the build output or regenerate the metadata. Do not
 publish and hope the updater can recover.
 
 Important naming rule: upload only the exact filenames referenced by
-`latest-mac.yml`, plus `latest-mac.yml` itself. Electron Builder writes the
+`latest-mac.yml`, plus `latest-mac.yml` itself, plus the one stable extra
+asset `Iliad-MD-arm64.dmg`. Electron Builder writes the
 source artifacts with spaces, such as `Iliad MD-X.Y.Z-mac-arm64.dmg`, but GitHub
 normalizes uploaded asset names with spaces into dotted names. Uploading both
 the source artifacts and the metadata-named copies creates duplicate-looking
 assets, such as `Iliad.MD-X.Y.Z-mac-arm64.dmg` and
 `Iliad-MD-X.Y.Z-mac-arm64.dmg`. The updater uses the hyphenated filenames in
-`latest-mac.yml`, so those are the only public release assets to upload.
+`latest-mac.yml`, so those are the only updater assets to upload.
+
+The stable `Iliad-MD-arm64.dmg` is the one allowed extra asset. It is a
+URL-safe copy (no spaces, so GitHub keeps its name), identical to the
+versioned DMG, and invisible to the updater: `latest-mac.yml` does not list it,
+and the in-app update check (`selectMacDmgAsset`) prefers the versioned DMG.
 
 ## GitHub Release
 
@@ -266,6 +289,7 @@ gh release create "vX.Y.Z" \
   "release/Iliad-MD-X.Y.Z-mac-arm64.dmg.blockmap" \
   "release/Iliad-MD-X.Y.Z-mac-arm64.zip.blockmap" \
   "release/latest-mac.yml" \
+  "release/Iliad-MD-arm64.dmg" \
   --repo brainforwarding/iliad \
   --target PUBLIC_SAFE_COMMIT_SHA \
   --title "Iliad MD X.Y.Z" \
@@ -277,4 +301,36 @@ Final checks:
 ```bash
 gh release view "vX.Y.Z" --repo brainforwarding/iliad --json tagName,targetCommitish,url,assets
 git ls-remote public refs/heads/master refs/tags/vX.Y.Z
+curl -sIL -o /dev/null -w '%{http_code}\n' \
+  https://github.com/brainforwarding/iliad/releases/latest/download/Iliad-MD-arm64.dmg # 200
 ```
+
+## Homebrew Cask
+
+The cask lives in `packaging/homebrew/iliad-md.rb` and is published through
+the own tap `brainforwarding/homebrew-tap` (`Casks/iliad-md.rb`), so users run
+`brew install --cask brainforwarding/tap/iliad-md`. It installs the app and
+links `$(brew --prefix)/bin/iliad` to the bundle's CLI wrapper (`binary`
+stanza); brew users do not need `iliad install`. It uses the versioned DMG URL
+(Homebrew needs one checksum per version) and omits `auto_updates` on purpose:
+the app only notifies about updates, so `brew upgrade` must keep upgrading it.
+
+After the GitHub release is live, from the release worktree:
+
+```bash
+npm run release:update-homebrew-cask   # version + sha256 of release/Iliad-MD-X.Y.Z-mac-arm64.dmg
+git diff packaging/homebrew/iliad-md.rb
+
+TAP="$(brew --repository)/Library/Taps/brainforwarding/homebrew-tap"
+brew tap brainforwarding/tap                          # first time only
+cp packaging/homebrew/iliad-md.rb "$TAP/Casks/iliad-md.rb"
+brew style --cask brainforwarding/tap/iliad-md
+brew audit --cask --online --strict brainforwarding/tap/iliad-md
+brew reinstall --cask brainforwarding/tap/iliad-md    # or install
+iliad --help | grep -q "iliad install" && readlink "$(brew --prefix)/bin/iliad"
+git -C "$TAP" commit -am "iliad-md X.Y.Z" && git -C "$TAP" push
+```
+
+Commit the updated `packaging/homebrew/iliad-md.rb` with the post-release
+record commit. If the DMG is rebuilt after this step, run the script again:
+the audit and install fail on a checksum mismatch.

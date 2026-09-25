@@ -121,3 +121,26 @@ default `~/Library/Application Support/Iliad MD/iliad.sock` fits, but a long
 `ILIAD_USER_DATA` makes `listen`/`connect` fail with EINVAL and the CLI prints
 a raw error. Detect the length and say so (or fall back to a short path under
 `$TMPDIR` keyed by the profile).
+
+## Install and distribution
+
+From `specs/2026-09-25-agent-installable-iliad.md`.
+
+### Brew-aware update notice
+
+Brew-installed users still get the in-app "Iliad MD X.Y.Z is available."
+notice with Download (the DMG). Following it is harmless but leaves brew's
+recorded version behind until the next `brew upgrade`. When the tap has users,
+detect a brew install (`<prefix>/Caskroom/iliad-md`) in main and show "Run
+`brew upgrade --cask iliad-md`" instead (update-status IPC type, UI, i18n).
+
+### Skill refresh after updates
+
+`iliad skill install` copies `SKILL.md`; an app update does not refresh the
+copy in `~/.claude/skills/iliad/`. Consider a version marker in the skill and
+an `iliad status` hint when the installed copy is older than the bundle's.
+
+### homebrew/cask submission
+
+The cask ships from the own tap `brainforwarding/homebrew-tap`. Submit to
+`homebrew/cask` once the project meets Homebrew's notability bar.

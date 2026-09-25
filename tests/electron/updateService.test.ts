@@ -91,6 +91,28 @@ describe("UpdateService", () => {
     expect(selectMacDmgAsset(assets, "x64")?.name).toBe("Iliad MD-0.2.7-mac-x64.dmg");
   });
 
+  it("prefers the versioned DMG over the stable Iliad-MD-arm64.dmg copy, in any asset order", () => {
+    const versioned = {
+      name: "Iliad-MD-0.3.3-mac-arm64.dmg",
+      browserDownloadUrl: "https://github.com/brainforwarding/iliad/releases/download/v0.3.3/Iliad-MD-0.3.3-mac-arm64.dmg"
+    };
+    const stable = {
+      name: "Iliad-MD-arm64.dmg",
+      browserDownloadUrl: "https://github.com/brainforwarding/iliad/releases/download/v0.3.3/Iliad-MD-arm64.dmg"
+    };
+
+    expect(selectMacDmgAsset([stable, versioned], "arm64", "0.3.3")).toBe(versioned);
+    expect(selectMacDmgAsset([versioned, stable], "arm64", "0.3.3")).toBe(versioned);
+    // Without a versioned DMG the stable copy still works.
+    expect(selectMacDmgAsset([stable], "arm64", "0.3.3")).toBe(stable);
+    // A versioned DMG for another arch never hides this arch's stable copy.
+    const x64 = { ...versioned, name: "Iliad-MD-0.3.3-mac-x64.dmg" };
+    expect(selectMacDmgAsset([x64, stable], "arm64", "0.3.3")).toBe(stable);
+    // An unrelated asset that merely contains the version does not win.
+    const other = { ...versioned, name: "Notes-0.3.3-mac-arm64.dmg" };
+    expect(selectMacDmgAsset([other, stable, versioned], "arm64", "0.3.3")).toBe(versioned);
+  });
+
   it("does not fall back to the wrong architecture-specific DMG", () => {
     const assets = [
       {
