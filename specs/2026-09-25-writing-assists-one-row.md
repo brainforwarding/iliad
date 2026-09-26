@@ -45,7 +45,7 @@ writer talks to the AI; notes duplicate that.
 | --- | --- | --- |
 | Corrector | English only for now / Solo inglés por ahora (while unavailable) | switch |
 | Autocomplete / Autocompletar | none | switch |
-| Ask for a suggestion / Pedir sugerencia | none | key select (`continue`, default ⌘↵) |
+| ✦ AI menu / Menú ✦ IA (pending, see open question) | none | key select (`continue`, default ⌘↵) |
 | Sentence / Oración | none | key select |
 | Paragraph / Párrafo | none | key select |
 | Full idea / Idea completa | none | key select |
@@ -144,10 +144,24 @@ language. The page lives in the `iliad-site` repo; it describes today's
 Gemini route. The Groq release must update it (free route through Iliad's
 server, own key, processors) before the free route ships.
 
-## Open question for the owner
+## Open question for the owner: ⌘↵
 
-⌘↵ also opens the ✦ AI menu when text is selected; "Ask for a suggestion"
-describes only the no-selection case. Keep it, or use "AI key / Tecla de IA"?
+Today ⌘↵ does two things. With nothing selected it asks for a sentence and
+each further press makes it longer, which repeats ⌘, ⌘. ⌘/. With text
+selected it opens the ✦ AI list, the same list as clicking "✦ AI" in the
+selection bubble (a keyboard shortcut for that click).
+
+Agreed so far: ⌘↵ no longer asks for suggestions; suggestions come only from
+⌘, ⌘. ⌘/. Pending: keep ⌘↵ only to open the ✦ AI list (row "✦ AI menu" /
+"Menú ✦ IA", recommended) or remove it and its row.
+
+## Status (2026-09-25)
+
+- Tooltips cut off at the window edge: fixed on `master` (`cbf4ad4`).
+- Privacy page EN/ES written in `iliad-site` (`b7aae57`), with footer links
+  and sitemap; not deployed. The owner reads it first; upload steps are in
+  `iliad-site/DEPLOY.md`.
+- Implementation of this spec: not started.
 
 ## Acceptance
 
