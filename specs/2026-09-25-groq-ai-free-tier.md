@@ -261,7 +261,7 @@ there when it is included). Budgets: sentence 768, paragraph 1024, idea
 computed from the **selected** text (`tightenSelectedText`), as
 `writingAiService.ts` does today, not the whole context.
 
-**Phase 0 gate:** `max_completion_tokens` must be shown to bound reasoning +
+**Phase 0 gate** (passed 2026-09-25, see "Phase 0 results"): `max_completion_tokens` must be shown to bound reasoning +
 content (request a tiny budget with a reasoning-heavy prompt and check
 `usage.completion_tokens ≤ budget` and `finish_reason: "length"`). Groq's docs
 do not state it. If it does not bound reasoning, the spend cap below cannot be
@@ -542,7 +542,7 @@ quota, and the limit is config.
 | `SUPPORTED_PROMPT_VERSIONS` | `"1"` | `v`s the Worker serves. |
 | `GLOBAL_DAILY_NANO_USD` | `5000000000` | Spend cap ($5), integer. |
 | `INPUT_NANO_USD_PER_TOKEN` / `OUTPUT_NANO_USD_PER_TOKEN` | `150` / `600` | $0.15 / $0.60 per 1M; must be ≥ Groq's billed rates. |
-| `PROMPT_OVERHEAD_TOKENS` | set from Phase 0 | ≥ 2× measured template overhead. |
+| `PROMPT_OVERHEAD_TOKENS` | `150` | ≥ 2× measured template overhead (Phase 0: 71 tokens, v1). |
 | `TOKEN_TTL_DAYS` / `TOKEN_REFRESH_DAYS` | `30` / `60` | Token expiry and refresh window. |
 | `MIN_CLIENT_VERSION` | `0.4.0` | Below → `client_outdated`. |
 | secrets | `GROQ_API_KEY`, `TOKEN_SIGNING_KEYS`, `IP_HASH_KEY`, `ADMIN_TOKEN` | Never in the repo. |
@@ -1010,6 +1010,86 @@ per-`v` snapshot matrix.
    `/v1/admin/stats`.
 5. Only then release the app version that uses it (it must not ship pointing
    at an undeployed URL). Website privacy page live before the release.
+
+## Phase 0 results (2026-09-25)
+
+Branch `groq-impl` (from `master` `105b245`). Direct to Groq with the dev key
+(`.env.local`, never printed), prompt version 1, pinned params (§2). Harness:
+`npm run benchmark:autocomplete` (fixtures in `tests/fixtures/writingCases.ts`).
+Spend: ~80 requests in total (34 probe requests incl. 14 max-size adversarial
+ones, 39 benchmark requests, a few shape peeks), well under $0.10.
+
+**Verdict: all Phase 0 gates pass.** The cap's premises (1) and (2) hold for
+v1 on `openai/gpt-oss-120b`; re-run `--budget-probe` whenever a prompt
+version or the model changes.
+
+| Gate | Result |
+| --- | --- |
+| (a) `max_completion_tokens` bounds reasoning + content | **Pass.** A reasoning-heavy prompt (multi-step arithmetic) at budgets 8/16/32/64/128/256 returned `completion_tokens` exactly equal to the budget and `finish_reason: "length"` every time; no probe or benchmark request ever exceeded its budget (0 of 75, including the benchmark). |
+| (b) Fixed prompt overhead | **71 tokens** (near-empty system + one-char user message: 72 prompt tokens for 1 byte). No probe exceeded bytes + 71. `PROMPT_OVERHEAD_TOKENS = 150` (≥ 2×, rounded up). |
+| (c) Prompt tokens ≤ UTF-8 bytes + overhead, adversarial Unicode at every field's maximum | **Pass**, 14/14. Idea task with every field at its limit and ✦ AI edit with 4,000-char text + 1,000-char instruction, for BMP CJK, CJK Ext-B, emoji ZWJ sequences, combining-mark stacks, Hebrew/Arabic with bidi controls, random scalar values and ASCII noise. Worst ratio 0.956 tokens/byte (CJK Ext-B: 26,113 tokens for 27,322 bytes; random astral: 26,085 / 27,705). Typical prose: ~0.29 tokens/byte. |
+| Reasoning never reaches `content` | **Pass.** No harmony/think markers in any output (0/75). With `include_reasoning: false` Groq sends no `reasoning` field at all; with `true` it arrives only in `delta.reasoning` (+ `channel: "analysis"`), never in `content`. **Reasoning is billed either way** (808 reasoning tokens on the heavy prompt with it excluded), confirming the full-reservation rule for aborts. |
+| Sentence first-visible p95 < 1.5 s | **Pass**: 736 ms. |
+
+Usage is reported on the finish chunk in both `x_groq.usage` and `usage`,
+and again in a trailing `choices: []` chunk with `usage` (from
+`stream_options.include_usage`); `completion_tokens_details.reasoning_tokens`
+is present. The reader takes either.
+
+Benchmark (3 trials × 13 cases, direct route, owner's network, Chile):
+
+| Kind | n | Accepted by cleaner | finish | First visible p50 / p95 | Complete p50 / p95 | Completion tokens p50 / max (reasoning max) | Budget | Mean cost |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| sentence | 18 | 18 | 18 stop | 519 / 736 ms | 545 / 753 ms | 94 / 173 (158) | 768 | $0.00011 |
+| paragraph | 6 | 6 | 6 stop | 374 / 925 ms | 419 / 971 ms | 65 / 94 (61) | 1024 | $0.00009 |
+| idea | 3 | 3 | 3 stop | 366 / 377 ms | 622 / 878 ms | 156 / 297 (36) | 2048 | $0.00017 |
+| ✦ tighten | 6 | 6 | 6 stop | 481 / 491 ms | = first visible | 96 / 108 (80) | 1408 | $0.00010 |
+| ✦ edit | 6 | 6 | 6 stop | 522 / 648 ms | = first visible | 88 / 134 (100) | 1635 | $0.00010 |
+
+No `length`, no errors, no leaks. Real costs are ~3–5× below the §9
+estimates (short prompts, low reasoning on real writing tasks).
+
+**Budgets chosen:** keep sentence 768, paragraph 1024, idea 2048 and the
+selection formula `min(4096, answer budget + 1024)` (in
+`electron/writing/groq/prompts/limits.ts`). Observed use is ≤ 23% of each
+budget, but the reasoning-heavy probe spent 480–808 reasoning tokens at
+`low`, so a hard document (or injected text) can reason several hundred
+tokens; lowering the sentence budget toward 256 would turn those into
+`length` → no suggestion. The budgets only affect reservations, not real
+spend; revisit with admin stats.
+
+**Hand check (EN/ES, synthetic fixtures).** Voice, tense and language are
+kept; no preamble, quotes or fences; Spanish is natural. Samples:
+
+- sentence ES — prefix "…En la escalera vio " → "una sombra proyectada
+  contra la pared, como si una figura esperara allí en silencio."
+- paragraph EN — prefix "…revise their thinking. For example, " → "they
+  might revisit a problem after an initial attempt, discussing alternative
+  strategies and reflecting on errors."
+- ✦ tighten ES — "En este preciso momento es realmente muy importante que
+  todos nosotros tomemos las medidas…" → "Ahora es crucial que tomemos las
+  medidas necesarias para terminar el informe antes de la fecha límite."
+- ✦ edit EN ("Make it warmer and friendlier.") → "Just a quick heads‑up:
+  we've moved the meeting to Thursday. Could you please bring the budget
+  numbers? Thanks!"
+
+**Findings that change the plan (Phase 1, app side; no gate impact):**
+
+1. Current-line echo: in 2 of 3 `dialogue-es` runs gpt-oss repeated the
+   start of the current line ("—Solo sabía que " → "Solo sabía que todo había
+   cambiado…"). `removeEchoedPrefix` only strips an echo of the prefix's
+   last 80 chars when the trimmed prefix is ≥ 20 chars, so a short
+   current-line tail slips through and the cleaner accepts it. Proposed
+   minimal fix (cleaner, not the frozen prompt): also strip a
+   case-insensitive echo of the current line's text after its list/dialogue
+   marker when it is ≥ 2 words, with a unit test from this fixture.
+2. ✦ edit adds "¡Hola a todos!"/"Hey everyone!" greetings for "warmer": a
+   faithful reading of the instruction, not a defect; noted for the QA pass.
+3. The own-key reader and budgets are shared with the future Worker through
+   `electron/writing/groq/prompts/` (pure; import-graph test) — the Worker
+   imports `parseWritingAiTask`, `buildWritingAiPrompt`,
+   `groqChatCompletionBody`, `promptUtf8Bytes` and the limits from
+   `prompts/index.ts`.
 
 ## Phased plan
 

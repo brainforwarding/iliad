@@ -49,7 +49,7 @@ export const SELECTION_MAX_OUTPUT_CHARS = 12000;
 
 /**
  * `max_completion_tokens` per autocomplete kind. On gpt-oss it bounds billed
- * reasoning + content (Phase 0 gate, verified 2026-09-25), so each budget is
+ * reasoning + content (Phase 0 gate, passed 2026-09-25), so each budget is
  * reasoning headroom plus the kind's longest accepted answer.
  */
 export const GROQ_AUTOCOMPLETE_MAX_COMPLETION_TOKENS = {
@@ -61,3 +61,13 @@ export const GROQ_AUTOCOMPLETE_MAX_COMPLETION_TOKENS = {
 /** Reasoning headroom added to a selection transform's answer budget. */
 export const GROQ_SELECTION_REASONING_TOKENS = 1024;
 export const GROQ_SELECTION_MAX_COMPLETION_TOKENS = 4096;
+
+/**
+ * Chat-template overhead Groq bills on top of the message bytes, measured by
+ * `npm run benchmark:autocomplete -- --budget-probe` (Phase 0, 2026-09-25,
+ * prompt v1, gpt-oss-120b): 71 tokens. The Worker's reservation bound is
+ * `UTF-8 bytes + PROMPT_OVERHEAD_TOKENS`, configured at ≥ 2× the measurement;
+ * re-measure when a prompt version or the model changes.
+ */
+export const MEASURED_PROMPT_OVERHEAD_TOKENS = 71;
+export const MIN_PROMPT_OVERHEAD_TOKENS = 150;
