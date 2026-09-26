@@ -15,6 +15,37 @@ Update-aware releases also have a machine-readable updater manifest. Treat
 agents should never rely on memory here: run the verification script in this
 runbook and do not create the GitHub release if it fails.
 
+## One-command release
+
+`scripts/release-mac.sh` runs this whole runbook on the signing Mac (Apple
+Silicon, Developer ID Application certificate for `K542ZFQH6B`, `iliad-notary`
+notarytool profile, `gh` logged in, checkout whose `origin` is the public
+`brainforwarding/iliad` on an up-to-date, clean `master`):
+
+```bash
+scripts/release-mac.sh --dry-run 0.4.0                       # preflight + validation + unsigned --dir package
+scripts/release-mac.sh --bump --notes /path/to/notes.md 0.4.0  # full release
+scripts/release-mac.sh --from notarize-dmg --notes /path/to/notes.md 0.4.0  # resume after a failure
+```
+
+Steps, in order: `bump` (only with `--bump`: `npm version`, commit
+"Release Iliad MD X.Y.Z", push), `deps` (`npm ci`), `validate` (lint:css,
+typecheck, test, build, production audit), `build` (`dist:mac:signed`),
+`notarize-app`, `repackage` (`--prepackaged` DMG + ZIP), `notarize-dmg`,
+`copy` (metadata-named copies + `Iliad-MD-arm64.dmg`), `metadata` (refresh),
+`check` (codesign/spctl/stapler on the app, DMG, ZIP; packaged CLI; verify
+update metadata), `release` (`gh release create` with exactly the
+`latest-mac.yml` files, `latest-mac.yml` and the stable DMG), `verify` (every
+asset downloads; `releases/latest/download/latest-mac.yml` reports the
+version; the downloaded stable DMG's SHA512 matches the versioned DMG entry),
+`homebrew` (update the cask, push it to `brainforwarding/homebrew-tap`, commit
+it here and push `origin master`). The log is `release/release-X.Y.Z.log`.
+A dry run skips the signing/notary checks and reports git-state problems
+(branch, clean tree, sync, existing tag) as warnings instead of stopping. The
+script only supports the setup where `origin` is the public repository; with
+a private `origin`, use the public-squash flow below by hand. The sections
+below remain the reference for what each step does.
+
 ## Repositories And History
 
 The local `origin` remote may point at the old/private development repository:
