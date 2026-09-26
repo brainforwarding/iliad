@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   handleGetExternalReviewIpc,
@@ -29,7 +30,7 @@ function baseline(overrides: Partial<ReviewBaselineService> = {}): ReviewBaselin
       kind: "edit" as const,
       content: "kept\n",
       unrestored: [],
-      snapshot: { workspaceRoot: "/ws", revision: 3, proposal: null }
+      snapshot: { workspaceRoot: path.resolve("/ws"), revision: 3, proposal: null }
     })),
     restore: vi.fn(async () => ({
       status: "rejected" as const,
@@ -37,7 +38,7 @@ function baseline(overrides: Partial<ReviewBaselineService> = {}): ReviewBaselin
       relativePath: "doc.md",
       kind: "edit" as const,
       unrestored: [],
-      snapshot: { workspaceRoot: "/ws", revision: 3, proposal: null }
+      snapshot: { workspaceRoot: path.resolve("/ws"), revision: 3, proposal: null }
     })),
     restoreAll: vi.fn(async () => ({
       status: "rejected" as const,
@@ -45,7 +46,7 @@ function baseline(overrides: Partial<ReviewBaselineService> = {}): ReviewBaselin
       relativePath: null,
       kind: null,
       unrestored: [],
-      snapshot: { workspaceRoot: "/ws", revision: 3, proposal: null }
+      snapshot: { workspaceRoot: path.resolve("/ws"), revision: 3, proposal: null }
     })),
     keepChunk: vi.fn(async () => ({
       status: "applied" as const,
@@ -54,7 +55,7 @@ function baseline(overrides: Partial<ReviewBaselineService> = {}): ReviewBaselin
       kind: "edit" as const,
       content: "disk\n",
       unrestored: [],
-      snapshot: { workspaceRoot: "/ws", revision: 4, proposal: null }
+      snapshot: { workspaceRoot: path.resolve("/ws"), revision: 4, proposal: null }
     })),
     restoreChunk: vi.fn(async () => ({
       status: "stale" as const,
@@ -62,7 +63,7 @@ function baseline(overrides: Partial<ReviewBaselineService> = {}): ReviewBaselin
       relativePath: null,
       kind: null,
       unrestored: [],
-      snapshot: { workspaceRoot: "/ws", revision: 5, proposal: null }
+      snapshot: { workspaceRoot: path.resolve("/ws"), revision: 5, proposal: null }
     })),
     isExternalProposalId: vi.fn((_root: string, id: string) => id === "proposal-external"),
     ...overrides
@@ -72,7 +73,7 @@ function baseline(overrides: Partial<ReviewBaselineService> = {}): ReviewBaselin
 function deps(service = baseline()) {
   return {
     baselineService: service,
-    resolveWorkspaceRootForSession: vi.fn((_event: unknown, sessionId: string) => (sessionId === "session-1" ? "/ws" : null))
+    resolveWorkspaceRootForSession: vi.fn((_event: unknown, sessionId: string) => (sessionId === "session-1" ? path.resolve("/ws") : null))
   };
 }
 
@@ -82,9 +83,9 @@ describe("review IPC", () => {
 
     await expect(
       handleGetExternalReviewIpc(event, { workspaceSessionId: "session-1", workspaceRoot: "/elsewhere" }, d)
-    ).resolves.toMatchObject({ workspaceRoot: "/ws" });
-    expect(d.baselineService.currentReview).toHaveBeenCalledWith("/ws");
-    await expect(handleGetExternalReviewIpc(event, { workspaceRoot: "/ws" }, d)).rejects.toThrow(/trusted workspace/);
+    ).resolves.toMatchObject({ workspaceRoot: path.resolve("/ws") });
+    expect(d.baselineService.currentReview).toHaveBeenCalledWith(path.resolve("/ws"));
+    await expect(handleGetExternalReviewIpc(event, { workspaceRoot: path.resolve("/ws") }, d)).rejects.toThrow(/trusted workspace/);
     await expect(handleGetExternalReviewIpc(event, { workspaceSessionId: "other" }, d)).rejects.toThrow(/trusted workspace/);
   });
 
@@ -97,11 +98,11 @@ describe("review IPC", () => {
       status: "applied",
       content: "kept\n"
     });
-    expect(d.baselineService.keep).toHaveBeenCalledWith("/ws", "file-1");
+    expect(d.baselineService.keep).toHaveBeenCalledWith(path.resolve("/ws"), "file-1");
     await expect(handleRestoreFileIpc(event, request, d)).resolves.toBe(proposal);
-    expect(d.baselineService.restore).toHaveBeenCalledWith("/ws", "file-1");
+    expect(d.baselineService.restore).toHaveBeenCalledWith(path.resolve("/ws"), "file-1");
     await expect(handleRestoreAllIpc(event, request, d)).resolves.toBe(proposal);
-    expect(d.baselineService.restoreAll).toHaveBeenCalledWith("/ws");
+    expect(d.baselineService.restoreAll).toHaveBeenCalledWith(path.resolve("/ws"));
   });
 
   it("routes chunk actions with the hashes the renderer saw", async () => {
@@ -121,7 +122,7 @@ describe("review IPC", () => {
       content: "disk\n",
       snapshot: { revision: 4 }
     });
-    expect(d.baselineService.keepChunk).toHaveBeenCalledWith("/ws", {
+    expect(d.baselineService.keepChunk).toHaveBeenCalledWith(path.resolve("/ws"), {
       proposalId: "proposal-external",
       fileId: "file-1",
       chunkId: "file-1-hunk-2",
@@ -151,7 +152,7 @@ describe("review IPC", () => {
           relativePath: null,
           kind: null,
           unrestored: [{ relativePath: "a.md", reason: "changed" }],
-          snapshot: { workspaceRoot: "/ws", revision: 3, proposal: null }
+          snapshot: { workspaceRoot: path.resolve("/ws"), revision: 3, proposal: null }
         }))
       })
     );

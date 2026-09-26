@@ -51,6 +51,8 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveStatusRef = useRef<SaveStatus>("saved");
+  const closePendingRef = useRef(false);
+  const saveInFlight = useRef<Promise<void> | null>(null);
   const stateRef = useRef({ workspace, activeFile, documentText, savedText });
 
   // The refs are updated synchronously by the setters below, not only after
@@ -80,7 +82,7 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
     }
   }, []);
 
-  const saveCurrentDocument = useCallback(async (nextText?: string) => {
+  const writeCurrentDocument = useCallback(async (nextText?: string) => {
     const current = stateRef.current;
 
     if (!current.workspace || !current.activeFile || current.activeFile.kind !== "markdown") {
@@ -136,6 +138,15 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
       throw saveError;
     }
   }, [messages.saveDocumentFallback, onError, setSaveStatus, setSavedText]);
+
+  // Serialize writes so every compare-and-swap uses the preceding acknowledged hash.
+  const saveCurrentDocument = useCallback(async (_nextText?: string) => {
+    while (saveInFlight.current) await saveInFlight.current;
+    const pending = writeCurrentDocument();
+    saveInFlight.current = pending;
+    try { await pending; }
+    finally { if (saveInFlight.current === pending) saveInFlight.current = null; }
+  }, [writeCurrentDocument]);
 
   const flushSave = useCallback(async () => {
     cancelPendingSave();
@@ -236,8 +247,23 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
   }, [cancelPendingSave, setDocumentText, setSaveStatus, setSavedText]);
 
   useEffect(() => {
-    const onBeforeUnload = () => {
-      void flushSave().catch(() => undefined);
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      const current = stateRef.current;
+      if (!current.activeFile || current.documentText === current.savedText) return;
+      // Electron does not await an async beforeunload listener. Cancel this close,
+      // flush the buffer, and try again only after the write is acknowledged.
+      event.preventDefault();
+      event.returnValue = "Saving document";
+      if (closePendingRef.current) return;
+      closePendingRef.current = true;
+      void (async () => {
+        await flushSave();
+        closePendingRef.current = false;
+        window.close();
+      })().catch(() => {
+        closePendingRef.current = false;
+        // Keep the buffer and the error/review UI available for recovery.
+      });
     };
 
     window.addEventListener("beforeunload", onBeforeUnload);
