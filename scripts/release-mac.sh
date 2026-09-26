@@ -58,6 +58,8 @@ die() {
   printf '\n[release] ERROR: %s\n' "$*" >&2
   if [ "${DRY_RUN:-0}" -eq 1 ] && [ -n "${CURRENT_STEP:-}" ]; then
     printf '[release] Dry run failed in step "%s". Fix the cause and run the dry run again.\n' "$CURRENT_STEP" >&2
+  elif [ "${CURRENT_STEP:-}" = "preflight" ]; then
+    printf '[release] Preflight failed. Fix the cause and run the same command again.\n' >&2
   elif [ -n "${CURRENT_STEP:-}" ]; then
     printf '[release] Failed in step "%s". Fix the cause, then resume with:\n' "$CURRENT_STEP" >&2
     printf '[release]   scripts/release-mac.sh --from %s%s %s\n' "$CURRENT_STEP" "${NOTES_HINT:-}" "${VERSION:-<version>}" >&2
@@ -304,26 +306,39 @@ if wants validate; then
 fi
 
 # -------------------------------------------------------- CLI bundle checks
-# Packaged CLI wrapper and skill, per docs/release.md.
+# Packaged CLI wrapper and skill, per docs/release.md. Mode "packaged" runs
+# the wrapper (the app's own executable in Node mode). Mode "node" is for the
+# dry run: an ad-hoc-signed hardened-runtime build cannot launch its own
+# executable (library validation), so the packaged iliad.mjs runs on the
+# system Node instead and the installed link is checked, not executed.
 check_cli_bundle() {
-  local app="$1" cmd_dir help_out
-  test -x "$app/Contents/Resources/bin/iliad" || die "wrapper not executable in $app"
-  test -f "$app/Contents/Resources/bin/iliad.mjs" || die "bin/iliad.mjs missing in $app"
-  ls "$app/Contents/Resources/bin/lib" >/dev/null || die "bin/lib missing in $app"
+  local app="$1" mode="${2:-packaged}" bin cmd_dir help_out
+  bin="$app/Contents/Resources/bin"
+  test -x "$bin/iliad" || die "wrapper not executable in $app"
+  test -f "$bin/iliad.mjs" || die "bin/iliad.mjs missing in $app"
+  ls "$bin/lib" >/dev/null || die "bin/lib missing in $app"
   test -f "$app/Contents/Resources/skill/iliad/SKILL.md" || die "bundled skill missing in $app"
-  "$app/Contents/Resources/bin/iliad" --help >/dev/null || die "iliad --help failed in $app"
-  "$app/Contents/Resources/bin/iliad" skill print >"$TMP_ROOT/skill.txt" || die "iliad skill print failed in $app"
+  cli() {
+    if [ "$mode" = "node" ]; then node "$bin/iliad.mjs" "$@"; else "$bin/iliad" "$@"; fi
+  }
+  cli --help >/dev/null || die "iliad --help failed in $app ($mode)"
+  cli skill print >"$TMP_ROOT/skill.txt" || die "iliad skill print failed in $app ($mode)"
   head -5 "$TMP_ROOT/skill.txt"
   cmd_dir="$(mktemp -d "$TMP_ROOT/iliad-cmd.XXXXXX")"
-  "$app/Contents/Resources/bin/iliad" install --dir "$cmd_dir" --json || die "iliad install --dir failed ($app)"
+  cli install --dir "$cmd_dir" --json || die "iliad install --dir failed ($app)"
   echo
-  help_out="$("$cmd_dir/iliad" --help)" || die "installed iliad --help failed ($app)"
-  case "$help_out" in
-    *"iliad install"*) ;;
-    *) die "installed iliad command does not work ($app)" ;;
-  esac
+  if [ "$mode" = "node" ]; then
+    [ "$(readlink "$cmd_dir/iliad")" = "$(cd "$bin" && pwd -P)/iliad" ] \
+      || die "installed iliad link does not point at the bundle wrapper ($app)"
+  else
+    help_out="$("$cmd_dir/iliad" --help)" || die "installed iliad --help failed ($app)"
+    case "$help_out" in
+      *"iliad install"*) ;;
+      *) die "installed iliad command does not work ($app)" ;;
+    esac
+  fi
   rm -rf "$cmd_dir"
-  ok "packaged CLI wrapper, skill and install work ($app)"
+  ok "packaged CLI wrapper, skill and install work ($app, $mode)"
 }
 
 # -------------------------------------------------------------------- build
@@ -341,7 +356,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
   [ -d "$APP" ] || die "unsigned package did not produce $APP"
   ok "built $APP"
   log "app-update.yml is only written by a full (publishing-target) build; the check step verifies it in a real release"
-  check_cli_bundle "$APP"
+  check_cli_bundle "$APP" node
   CURRENT_STEP=""
   printf '\n[release] DRY RUN PASSED for %s.\n' "$VERSION"
   log "skipped: signing identity + notary profile checks, signing, notarization, stapling, repackage, metadata, GitHub release, Homebrew"
