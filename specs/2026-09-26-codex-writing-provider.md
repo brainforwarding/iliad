@@ -204,6 +204,16 @@ Windows x64 on 2026-09-26 with Codex CLI 0.154.0. It does not validate a port on
 | macOS installed app, login and capability enforcement | Not run; no macOS build is submitted as validated |
 | Current Groq integration | Not implemented or tested by the prototype |
 
+After publishing the prototype, [CI run 36248535523](https://github.com/elcomparemaquito/iliad/actions/runs/36248535523)
+passed on Windows, macOS and Linux for that same implementation commit. Each
+job ran clean dependency installation, type checking, unit tests, CSS lint,
+build and production audit. Windows also built the installer, tested the
+packaged and installed application, and completed the opt-in/opt-out,
+reinstallation, preference-preservation and uninstallation cycle. The run
+provides temporary Windows installer/checksum artifacts. The macOS job did
+not validate browser login, the desktop UI or runtime permission enforcement
+with a real account; those gates above remain pending.
+
 The local Windows installer SHA256 was
 `c9607057cb4f22286a894b1d30092a16bdea8fd96318e48334017ec6961ff3c5`.
 No installer, account profile, credentials, private document or personal log is
