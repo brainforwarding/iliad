@@ -103,6 +103,9 @@ reviewed. See the "Follow-up" section of
 
 ### Writing assists panel: one consistent row style
 
+Specified in `specs/2026-09-25-writing-assists-one-row.md` (approved
+2026-09-25); remove this item when it ships.
+
 From owner review on 2026-09-25 (mockup:
 https://www.figma.com/design/i2BTwgceho8SqRYGZKjLhB, page "Writing assists:
 one row style"). Every item is the same
