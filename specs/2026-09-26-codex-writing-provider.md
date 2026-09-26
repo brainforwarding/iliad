@@ -219,6 +219,22 @@ The local Windows installer SHA256 was
 No installer, account profile, credentials, private document or personal log is
 part of this documentation contribution.
 
+### Follow-up runtime validation: 0.156.1
+
+The separate [prototype update](https://github.com/elcomparemaquito/iliad/commit/3c51e33)
+adds only Codex CLI **0.156.1** to the accepted versions, without allowing other
+0.156.x releases by inference. On Windows x64, the existing effective-config
+checks and thread permission/instruction checks passed unchanged. The isolated
+ChatGPT session advertised GPT-6-Luna through `model/list`; synthetic Spanish
+rewriting, English continuation, cancellation and session restart passed with
+that model. A tool-seeking input completed without observed tool items. These
+are bounded checks, not a general proof of sandbox isolation.
+
+Local type checking, build, CSS lint and 563 unit tests passed (18 platform
+skips). Model identifiers remain catalog-driven. The new runtime was installed
+separately for local validation; Iliad still does not bundle or automatically
+download Codex. macOS runtime and current-Groq integration gates remain pending.
+
 Before shipping the upstream implementation:
 
 - Run `npm ci`, type checking, the complete applicable test suites, CSS lint,
