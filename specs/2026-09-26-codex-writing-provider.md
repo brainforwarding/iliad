@@ -234,6 +234,12 @@ Local type checking, build, CSS lint and 563 unit tests passed (18 platform
 skips). Model identifiers remain catalog-driven. The new runtime was installed
 separately for local validation; Iliad still does not bundle or automatically
 download Codex. macOS runtime and current-Groq integration gates remain pending.
+The upgraded Windows installation also passed real rewrite and continuation
+requests through production IPC, and its model selector displayed GPT-6-Luna.
+A keyboard-driven review test timed out waiting for the Rewrite menu option;
+accept/reject/undo was not revalidated end-to-end with this runtime. Track the
+new commit's [CI separately](https://github.com/elcomparemaquito/iliad/actions/runs/36249436182)
+from the earlier successful run.
 
 Before shipping the upstream implementation:
 
