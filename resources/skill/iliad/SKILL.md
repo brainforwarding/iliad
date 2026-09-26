@@ -1,6 +1,6 @@
 ---
 name: iliad
-description: Use when editing Markdown in a folder that is open in the Iliad app, or when the user refers to "this document", "the open doc", "my comments" or "my notes" while working on Markdown writing.
+description: Use when editing Markdown in a folder that is open in the Iliad app, or when the user refers to "this document", "the open doc", "my comments" while working on Markdown writing.
 ---
 
 # Working with Iliad
@@ -21,34 +21,32 @@ write directly; do not ask permission for each file.
   `"/Applications/Iliad MD.app/Contents/Resources/bin/iliad" install` once; it
   puts the command on PATH (safe to repeat).
 
-## Notes and comments (companion files)
+## Comments (companion file)
 
-Each document `name.md` can have two companion files in the same folder:
+Each document `name.md` can have one companion file in the same folder,
+`name.comments.md`: comments the writer attached to passages. Comments are how
+the writer tells you what to change. Each entry looks like this:
 
-- `name.notes.md`: the writer's notes for this document (audience, voice, tone,
-  facts to respect). **Read it before writing or rewriting the document** and
-  follow it. You may update it when a change you make affects it.
-- `name.comments.md`: comments the writer attached to passages. Each entry
-  looks like this:
+```markdown
+<!-- iliad:comment id=c7f2 -->
+> the exact passage the comment refers to
 
-  ```markdown
-  <!-- iliad:comment id=c7f2 -->
-  > the exact passage the comment refers to
+What the writer wants done there.
+```
 
-  What the writer wants done there.
-  ```
+Entries are separated by a line containing only `---`. The blockquote is the
+passage in `name.md` that the comment refers to. When asked to address the
+comments, make the change in `name.md` at that passage, then **delete that
+whole entry** (its metadata line, quote, comment and one separator) from
+`name.comments.md`. Leave entries you did not handle untouched. Never edit the
+metadata lines.
 
-  Entries are separated by a line containing only `---`. The blockquote is the
-  passage in `name.md` that the comment refers to. When asked to address the
-  comments, make the change in `name.md` at that passage, then **delete that
-  whole entry** (its metadata line, quote, comment and one separator) from
-  `name.comments.md`. Leave entries you did not handle untouched. Never edit
-  the metadata lines.
+Never create, rename or move the comments file yourself, and never give a
+document a name ending in `.comments.md`. If you rename or move a document, ask
+the writer to do it in Iliad instead (Iliad moves its comments file with it).
 
-Never create, rename or move companion files yourself, and never give a
-document a name ending in `.notes.md` or `.comments.md`. If you rename or move
-a document, ask the writer to do it in Iliad instead (Iliad moves its
-companions with it).
+A `name.notes.md` file is an ordinary Markdown document (Iliad no longer has
+writing notes); treat it like any other document in the folder.
 
 ## Write so the review stays small
 

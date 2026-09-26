@@ -101,31 +101,14 @@ reviewed. See the "Follow-up" section of
 
 ## Writing assists
 
-### Writing assists panel: one consistent row style
+### Key recorder, key-hint chip, and an ES-layout default for Full idea
 
-Specified in `specs/2026-09-25-writing-assists-one-row.md` (approved
-2026-09-25); remove this item when it ships.
-
-From owner review on 2026-09-25 (mockup:
-https://www.figma.com/design/i2BTwgceho8SqRYGZKjLhB, page "Writing assists:
-one row style"). Every item is the same
-row: name on the left, an optional grey note under it, the control on the
-right, thin dividers between groups. No collapsible sections, no headings in a
-different style, no pill buttons.
-
-- Suggestions come only from the AI key. Remove "Suggest while typing" and
-  "Pause for 10 min".
-- Shortcuts are always visible as ordinary rows, not under "Shortcuts &
-  accessibility" or "Accessibility".
-- Remove the "Announce suggestions" checkbox; keep the screen-reader live
-  region always on.
-- No obvious helper text such as "Click a key to change it". Reset shortcuts
-  is an ordinary row.
-- The own-key action is a short link ("Use my key"), never a truncated button.
-- Remove writing notes entirely (owner decision 2026-09-25): the "Open notes"
-  row, `name.notes.md` companions, and autocomplete reading them. Comments are
-  how the writer talks to the AI. Notes arrived with Stage D (1572229) and
-  were never asked for.
+Deferred by `specs/2026-09-25-writing-assists-one-row.md` (non-goals) and the
+release 0.4.0 plan; design on Figma page `47:2`
+(`i2BTwgceho8SqRYGZKjLhB`). The Writing assists key rows keep native selects
+over compact chips for now. Candidates: record a shortcut by pressing it, a
+small key-hint chip near the cursor, and a Full idea default that is easy to
+type on a Spanish keyboard (⌘/ needs Shift there).
 
 ### Another / Steer for selection rewrites
 

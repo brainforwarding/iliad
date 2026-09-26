@@ -23,7 +23,7 @@ It has no chat panel and no agent of its own. See
   English and Spanish; use focus mode to hide the sidebar.
 - Search file names and document contents from the sidebar.
 - **Inline completion** (Gemini): a sentence, paragraph, or full idea as ghost
-  text, accepted with Tab.
+  text when you ask for it (never while you type), accepted with Tab.
 - **✦ AI menu** on a selection (Gemini): a typed instruction, or Rewrite /
   Expand / Shorten / Summarize / Turn into a list, reviewed inline with
   Accept / Reject.
@@ -33,11 +33,9 @@ It has no chat panel and no agent of its own. See
   Restore all. Outside-created files offer Keep file / Move to Trash; outside
   deletions offer Confirm deletion / Restore file. Restores never overwrite
   newer work.
-- **Comments and notes as files**: comments on a selection live in
-  `name.comments.md` next to the document, and writing notes in
-  `name.notes.md` (Writing assists → Open notes). Both are plain Markdown that
-  outside agents can read, and they follow the document when it is renamed,
-  moved, duplicated, or trashed.
+- **Comments as files**: comments on a selection live in `name.comments.md`
+  next to the document. It is plain Markdown that outside agents can read, and
+  it follows the document when it is renamed, moved, duplicated, or trashed.
 - **`iliad` command** for the terminal and for outside agents (see below).
 
 ## Run
@@ -50,23 +48,22 @@ npm run dev
 ## Gemini key
 
 Built-in AI runs on one Gemini API key. Open **Writing assists** in the topbar
-and paste the key in the Gemini key field (it powers autocomplete and the ✦ AI
+and use **Add key** in the Gemini key row (it powers autocomplete and the ✦ AI
 menu). The key is stored in Electron app data, never in your Markdown files.
 For development, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is also read. Google
 bills this API separately. Without a key, autocomplete is off and ✦ AI is shown
 disabled.
 
-Autocomplete shortcuts (configurable under Shortcuts & accessibility):
+Shortcuts (configurable in Writing assists while Autocomplete is on):
 
-- Cmd/Ctrl+Enter (the AI key): a sentence; press again for longer. With text
-  selected it opens the ✦ AI menu.
 - Cmd/Ctrl+, / Cmd/Ctrl+. / Cmd/Ctrl+/: a sentence, paragraph, or full idea.
+  These are the only keys that ask for a suggestion; typing never does.
+- Cmd/Ctrl+Enter: with text selected, opens the ✦ AI menu; with nothing
+  selected it does nothing.
 - Tab accepts; Escape dismisses; Option/Alt+Up/Down cycles alternatives.
 
-Automatic suggestions wait for a 450 ms pause at a word boundary; "Suggest
-while I type" and "Pause for 10 min" control them. The suggestion toolbar offers
-Longer, Another, and Steer…. The document's notes file guides suggestions. See
-the [research and design notes](docs/research/writing-autocomplete-2026-09.md).
+The suggestion toolbar offers Longer, Another, and Steer…. See the
+[research and design notes](docs/research/writing-autocomplete-2026-09.md).
 For a synthetic, credential-free UI preview, run Vite and open
 `/tests/manual/autocomplete.html`.
 
@@ -112,8 +109,8 @@ The skill is a copy: after updating Iliad, run `iliad skill install` again.
 `iliad status` prints `Iliad is not open.` and exits 3 when the app is not
 running. The CLI only reads and navigates; it never writes documents. The skill
 (`resources/skill/iliad/SKILL.md`, installed to `~/.claude/skills/iliad/`)
-tells agents to check `iliad status`, read the notes file, address and delete
-handled comments, keep edits minimal, and finish with `iliad open`.
+tells agents to check `iliad status`, address and delete handled comments,
+keep edits minimal, and finish with `iliad open`.
 
 To test the CLI from a checkout:
 

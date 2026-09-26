@@ -22,7 +22,7 @@ Iliad is a local-first Markdown writing app with two jobs:
    and the writer keeps or restores it chunk by chunk.
 
 Outside agents reach Iliad only through the `iliad` CLI (status, open, skill)
-and the per-document companion files (`name.notes.md`, `name.comments.md`).
+and the per-document comments file (`name.comments.md`).
 
 Avoid broad navigation, command palettes, tabs, chat panels, direct AI writes,
 or dashboards until each addition is backed by a real writing workflow.
@@ -66,8 +66,7 @@ src/
   App.tsx
   main.tsx
   app/             useWorkspace, useDocumentPersistence, useDocumentHistory,
-                   useOutsideReview, useSelectionComments, useWritingNotes,
-                   useCliBridge
+                   useOutsideReview, useSelectionComments, useCliBridge
   comments/        comments file format, session and three-way merge
   components/      EditorPane, FileTree, menus (Typography, Language,
                    Workspace, WritingAssists), DetachedCommentsBar, …
@@ -77,7 +76,6 @@ src/
   files/           fileActions, fileTree, pathUtils, companionFiles, search
   i18n/            appLanguage, strings
   markdown/        math delimiters
-  notes/           legacy localStorage notes migration
   preferences/     editor, sidebar, autocomplete, writing assist preferences
   review/          review queue, reviewable files, pending tree markers
   styles/          tokens.css plus responsibility-specific CSS
@@ -129,13 +127,14 @@ The app manages Markdown documents and folders in the sidebar.
 - Folders can be renamed and moved to Trash; folder duplication is intentionally out of scope.
 - Rename must stay inside the current directory.
 - Rename rejects hidden names, path separators, `..`, and explicit non-Markdown extensions.
-- Creating or renaming a document to a companion-shaped name (`*.notes.md`,
-  `*.comments.md`) is rejected: those names belong to companion files.
+- Creating or renaming a document to a companion-shaped name
+  (`*.comments.md`) is rejected: that name belongs to the comments file.
+  (`*.notes.md` was reserved until 2026-09-25; it is an ordinary name now.)
 - Move to Trash uses the operating system Trash and requires confirmation.
 - A document's companion files follow it inside the same `runIliadMutation`
   (see "Companion Files"): rename and move check the document target and
-  both companion names at the destination first (an unrelated
-  `name.notes.md`/`name.comments.md` there is never attached), then move the
+  the companion name at the destination first (an unrelated
+  `name.comments.md` there is never attached), then move the
   document and each companion with a hard link and remove the source (never
   overwriting), and put back whatever moved if a step fails; duplicate picks a `name copy[-N]` stem free for the whole group and
   copies the companions; Move to Trash trashes the document, then its
@@ -154,17 +153,24 @@ Relevant files:
 - `electron/fs/pathSafety.ts`
 - `electron/ipc/files.ts`
 
-## Companion Files (Notes and Comments)
+## Companion Files (Comments)
 
-Each document `dir/name.md` (any Markdown extension) can have two companion
-files next to it: `dir/name.notes.md` (writing notes) and
-`dir/name.comments.md` (comments anchored to quoted passages). They are plain
-Markdown that the writer and outside agents read and edit directly.
+Each document `dir/name.md` (any Markdown extension) can have one companion
+file next to it: `dir/name.comments.md` (comments anchored to quoted
+passages). It is plain Markdown that the writer and outside agents read and
+edit directly. Comments are how the writer talks to the AI and to outside
+agents.
+
+Writing notes (`name.notes.md`) were a second companion until 2026-09-25 and
+were removed (ADR-0022, `specs/2026-09-25-writing-assists-one-row.md`):
+existing `name.notes.md` files are not deleted, renamed or migrated; they are
+ordinary Markdown documents (tree rows, outside review) and autocomplete no
+longer reads them.
 
 - A path is a companion by name shape alone (`isCompanionPath`, in
   `electron/shared/companionFiles.ts`, re-exported for main and the renderer).
-  There are no companions of companions: comments and "Open notes" are
-  disabled when the open file is itself a companion.
+  There are no companions of companions: comments are disabled when the open
+  file is itself a companion.
 - Companions never enter outside-change review: the baseline scan, `classify`,
   every baseline record, and `noteDiskChange` skip them. They are still
   written only through the compare-and-swap `writeMarkdownIfUnchanged`, which
@@ -178,7 +184,7 @@ Markdown that the writer and outside agents read and edit directly.
 - Main annotates `FileTreeNode.companion = {kind, documentPath}` when the
   sibling document exists; `buildFileTreeDisplayNodes` makes those rows
   children of the document. They show only under the active document (or when
-  a name search reveals them) as "Notes" and "Comments · N", with a context
+  a name search reveals them) as "Comments · N", with a context
   menu of Open, Reveal in Finder, Move to Trash. Orphans are ordinary rows.
 - Comments file format (`electron/shared/commentsFile.ts`, re-exported as
   `src/comments/commentsFile.ts`): entries separated by a blank line, `---`,
@@ -199,15 +205,11 @@ Markdown that the writer and outside agents read and edit directly.
   an outside tool removed come back if the writer restores that document's
   outside edit and the quote is found again (applied the next time the
   document is opened if it was not open).
-- Notes: the whole `name.notes.md` is autocomplete guidance
-  (`selectWritingGuidance` ranks its lines when it is long). Writing assists
-  has one "Open notes" action that creates an empty file (exclusive create) if
-  needed and opens it.
 - Migrations: comments from the old `userData/assistant/selection-comments.json`
   move into companion files per workspace when a window attaches (merged by id;
   entries whose document is gone stay in the store, which is deleted when
-  empty). Old per-document notes in `localStorage` are written to the notes
-  file the first time the document opens, only if that file does not exist.
+  empty). The old per-document notes keys in `localStorage` are left alone
+  (unused).
 
 Relevant files:
 
@@ -215,7 +217,6 @@ Relevant files:
 - `electron/fs/fileOps.ts`, `electron/ipc/files.ts`
 - `electron/comments/legacyCommentsMigration.ts`
 - `src/app/useSelectionComments.ts`, `src/comments/`
-- `src/app/useWritingNotes.ts`, `src/notes/legacyWritingNotes.ts`
 - `src/review/pendingFileTree.ts`, `src/components/FileTree.tsx`
 - `src/components/DetachedCommentsBar.tsx`
 
@@ -293,37 +294,53 @@ reversible.
 only, runs on one Gemini key (`electron/writing/`, model in `geminiText.ts`),
 and is review-first: nothing lands in the buffer without Tab or Accept.
 
-- Inline completion (`src/editor/ideaAutocomplete/`) shows ghost text; the
-  document's `name.notes.md` is its writing guidance.
+- Inline completion (`src/editor/ideaAutocomplete/`) shows ghost text, only
+  on request: typing never sends a request (no automatic suggestions since
+  2026-09-25, `specs/2026-09-25-writing-assists-one-row.md`). A shown,
+  finished suggestion is always read by the `autocomplete-announcement` live
+  region (no setting).
 - The ✦ AI selection menu runs a selection-scoped rewrite (Tighten or a canned
   Edit instruction) in one request and lands it in the inline review
   (`src/editor/aiReview/`) with exact-match-or-discard apply: if the range
   changed, the result is dropped.
 - The corrector (`src/editor/writingCorrector/`) is local and needs no key.
 - The Gemini key is stored in main (`userData/assistant/settings.json`, mode
-  0600; the path is historical) and set from Writing assists. With no key the
-  key field is the first row and ✦ AI is shown disabled; clicking it opens
-  Writing assists at the key field. Writing AI IPC is accepted only from
+  0600; the path is historical) and set from Writing assists, in the "Gemini
+  key" row (masked key and a Change link, or Add key; the link opens the key
+  form in place of the row). With no key ✦ AI is shown disabled; clicking it
+  opens Writing assists with the key form open and focused. Writing AI IPC is accepted only from
   trusted app windows (`electron/ipc/trust.ts`).
 
-**One AI key, and the selection decides** (`specs/2026-09-24-one-ai-key.md`).
-Continuation keys never rewrite. Three direct length keys (defaults ⌘, ⌘. ⌘/,
-neighbours on an English keyboard) ask for a Sentence, Paragraph, or full Idea
-(until the current idea/section is complete; no headings) in one request; if a
-shorter suggestion is visible they extend it, generating only the missing part.
-The AI key (default ⌘↵) suggests a Sentence and each repeat extends it one
-length. All four keys are configurable and kept distinct; the length keys run
-at highest precedence (they outrank the corrector's ⌘. and CodeMirror's ⌘/
-comment toggle) and do nothing over a selection. Automatic suggestions stay
-short. With text selected the same key opens the ✦ AI menu (typed instruction,
-or Rewrite / Expand / Shorten / Summarize / Turn into a list); Shorten is
-Tighten mode, the rest are canned Edit instructions. Keys are shared across
-both: Tab accepts (pending selection review → ghost → indentation), Esc
-dismisses or rejects, ⌥↑/↓ cycles alternatives. The selection keymap is
-registered before autocomplete and always consumes the key over a selection,
-so the AI key never falls through to CodeMirror's `insertBlankLine` there. The
-Writing assists menu holds settings only; in-the-moment controls (Longer,
-Another, Steer…) live on the suggestion toolbar.
+**Length keys suggest; ⌘↵ opens the ✦ AI menu**
+(`specs/2026-09-24-one-ai-key.md`, revised by
+`specs/2026-09-25-writing-assists-one-row.md`). Suggestion keys never rewrite.
+Three length keys (defaults ⌘, ⌘. ⌘/, neighbours on an English keyboard) ask
+for a Sentence, Paragraph, or full Idea (until the current idea/section is
+complete; no headings) in one request; if a shorter suggestion is visible they
+extend it, generating only the missing part. They are the only keys that ask
+for a suggestion (plus Longer, Another and Steer… on the suggestion toolbar);
+the old `inline` kind and the automatic trigger are gone, so escalation starts
+at Sentence. The ✦ AI menu key (default ⌘↵, stored as `shortcuts.continue`)
+opens the ✦ AI menu over a selection (typed instruction, or Rewrite / Expand /
+Shorten / Summarize / Turn into a list; Shorten is Tighten mode, the rest are
+canned Edit instructions) and does nothing with no selection. All four keys
+are configurable and kept distinct; the length keys run at highest precedence
+(they outrank the corrector's ⌘. and CodeMirror's ⌘/ comment toggle) and do
+nothing over a selection. Tab accepts (pending selection review → ghost →
+indentation), Esc dismisses or rejects, ⌥↑/↓ cycles alternatives. Only the
+selection keymap binds the ✦ AI menu key and it always consumes it, so the key
+never falls through to CodeMirror's `insertBlankLine`.
+
+The Writing assists menu (`src/components/WritingAssistsMenu.tsx`, Figma
+"Writing assists: one row style", frame 15) holds settings only, in one row
+style: name, optional grey note, control on the right, a hairline under each
+row. Rows: Corrector, Autocomplete, then (while Autocomplete is on) ✦ AI menu,
+Sentence, Paragraph, Full idea (key chips over native selects), Accept /
+Another / Dismiss (fixed keys), Reset shortcuts; then the Gemini key row and
+Privacy (opens `https://iliad.md/privacy/` or `https://iliad.md/es/privacidad/`
+by app language). In-the-moment controls (Longer, Another, Steer…) live on the
+suggestion toolbar. Stored preferences keep only `shortcuts`; older stored
+`manualOnly`/`announce` keys are ignored.
 
 **Outside agents** write Markdown directly in the folder. Iliad derives their
 changes from the workspace baseline (next section) and shows them in the same
@@ -431,8 +448,9 @@ Rules that must hold:
   conflict banner's confirmed Keep discards it), Esc and Tab never act on
   outside chunks, and a conflicted buffer resumes autosave only when disk
   equals its saved text again.
-- Companion files (`*.notes.md`, `*.comments.md`) are excluded everywhere in
-  the baseline service: scan, classify, records, and disk-change hints.
+- Companion files (`*.comments.md`) are excluded everywhere in the baseline
+  service: scan, classify, records, and disk-change hints. `*.notes.md` files
+  are ordinary documents and are reviewed like any other (since 2026-09-25).
 - The renderer subscribes (`agent:external-review-changed`) and pulls once
   (`agent:get-external-review`); both carry a revision and older snapshots are
   ignored. The renderer never drives the review lifecycle.
@@ -621,7 +639,7 @@ Relevant files:
 - Workspace loading and persisted workspace state: `src/app/useWorkspace.ts`.
 - Autosave, dirty state, save flushing, and load/clear document state: `src/app/useDocumentPersistence.ts`.
 - Outside-change review state and actions: `src/app/useOutsideReview.ts` and `src/review/`; inline review rendering: `src/editor/aiReview/`.
-- Comments and notes (companion files): `src/app/useSelectionComments.ts`, `src/comments/`, `src/app/useWritingNotes.ts`, `src/notes/`; companion path rules: `electron/shared/`.
+- Comments (companion files): `src/app/useSelectionComments.ts`, `src/comments/`; companion path rules: `electron/shared/`.
 - CLI bridge: `bin/` (CLI), `electron/cli/` (socket and open requests), `src/app/useCliBridge.ts` (renderer side), `resources/skill/iliad/SKILL.md` (agent instructions).
 - File tree traversal and path relocation helpers: `src/files/fileTree.ts` and `src/files/pathUtils.ts`.
 - User-facing file operations and save-before-action orchestration: `src/files/fileActions.ts`.
@@ -666,16 +684,19 @@ Manual Electron checks still matter:
 - Open several Markdown files repeatedly.
 - Open a document with local or remote image syntax.
 - Trackpad/wheel scroll a long document and confirm a native overlay scrollbar appears.
-- With a Gemini key set in Writing assists: request a completion (⌘↵, ⌘, ⌘.
-  ⌘/) and accept it with Tab; select text, run a ✦ AI action, Accept and
-  Reject it. Without a key, ✦ AI is disabled and opens Writing assists.
+- With a Gemini key set in Writing assists: type and pause (no suggestion
+  appears), request a completion (⌘, ⌘. ⌘/) and accept it with Tab; ⌘↵ with
+  nothing selected does nothing; select text, press ⌘↵ or click ✦ AI, run an
+  action, Accept and Reject it. Without a key, ✦ AI is disabled and opens
+  Writing assists with the key form open. Check the Writing assists menu
+  against Figma frame 15 in English and Spanish.
 - Edit an open document from another tool: each chunk shows Keep / Restore;
   Keep all and Restore all work from the toolbar and the tree strip; an
   outside-created file offers Keep file / Move to Trash and a deletion offers
   Confirm deletion / Restore file.
 - Add a comment on a selection and confirm `name.comments.md` appears beside
-  the document; "Open notes" creates and opens `name.notes.md`; rename the
-  document and confirm both companions follow it.
+  the document; rename the document and confirm the comments file follows it
+  (a same-stem `name.notes.md` stays where it is, as an ordinary document).
 - `iliad status` lists the window and document; `iliad open <file> --line N`
   shows the file at that line (also with the app closed).
 

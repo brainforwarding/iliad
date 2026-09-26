@@ -1,7 +1,7 @@
 # Writing Assists: One Row Style, Manual Suggestions, No Notes
 
 Date: 2026-09-25
-Status: approved direction (owner, 2026-09-25); implementation spec
+Status: implemented on branch `writing-assists-one-row` (2026-09-25), pending review; approved direction (owner, 2026-09-25)
 Design: Figma "Iliad — AI writing interactions" (`i2BTwgceho8SqRYGZKjLhB`),
 page "Writing assists: one row style (2026-09-25)", frame 15 (node `57:133`).
 Scope: the Writing assists menu, automatic suggestions, writing notes.
@@ -45,7 +45,7 @@ writer talks to the AI; notes duplicate that.
 | --- | --- | --- |
 | Corrector | English only for now / Solo inglés por ahora (while unavailable) | switch |
 | Autocomplete / Autocompletar | none | switch |
-| ✦ AI menu / Menú ✦ IA (pending, see open question) | none | key select (`continue`, default ⌘↵) |
+| ✦ AI menu / Menú ✦ IA (decided, see ⌘↵ below) | none | key select (`continue`, default ⌘↵) |
 | Sentence / Oración | none | key select |
 | Paragraph / Párrafo | none | key select |
 | Full idea / Idea completa | none | key select |
@@ -88,9 +88,8 @@ copy but use the same row and link styles.
   `openNotes`, `openNotesHint`, `openNotesFailed`, `companionNotes`.
 - The `continue` key no longer requests or extends a suggestion with nothing
   selected (remove that path and the press-again escalation); ⌘, ⌘. ⌘/ are
-  the only suggestion keys. Whether ⌘↵ stays for the ✦ AI list is the open
-  question below; if it stays, rename `continueKey` to "✦ AI menu" /
-  "Menú ✦ IA".
+  the only suggestion keys. ⌘↵ stays only to open the ✦ AI list (decided
+  below); `continueKey` is renamed "✦ AI menu" / "Menú ✦ IA".
 
 ### Announcement
 
@@ -147,16 +146,17 @@ language. The page lives in the `iliad-site` repo; it describes today's
 Gemini route. The Groq release must update it (free route through Iliad's
 server, own key, processors) before the free route ships.
 
-## Open question for the owner: ⌘↵
+## ⌘↵ (decided 2026-09-25)
 
-Today ⌘↵ does two things. With nothing selected it asks for a sentence and
-each further press makes it longer, which repeats ⌘, ⌘. ⌘/. With text
-selected it opens the ✦ AI list, the same list as clicking "✦ AI" in the
+Before this change ⌘↵ did two things. With nothing selected it asked for a
+sentence and each further press made it longer, which repeated ⌘, ⌘. ⌘/. With
+text selected it opened the ✦ AI list, the same list as clicking "✦ AI" in the
 selection bubble (a keyboard shortcut for that click).
 
-Agreed so far: ⌘↵ no longer asks for suggestions; suggestions come only from
-⌘, ⌘. ⌘/. Pending: keep ⌘↵ only to open the ✦ AI list (row "✦ AI menu" /
-"Menú ✦ IA", recommended) or remove it and its row.
+Decided by the owner: ⌘↵ no longer asks for suggestions; suggestions come only
+from ⌘, ⌘. ⌘/. ⌘↵ is kept only to open the ✦ AI list over a selection (row
+"✦ AI menu" / "Menú ✦ IA" with its key select). With nothing selected ⌘↵ does
+nothing (the key is consumed, so it never inserts a blank line).
 
 ## Status (2026-09-25)
 
@@ -164,7 +164,18 @@ Agreed so far: ⌘↵ no longer asks for suggestions; suggestions come only from
 - Privacy page EN/ES written in `iliad-site` (`b7aae57`), with footer links
   and sitemap; not deployed. The owner reads it first; upload steps are in
   `iliad-site/DEPLOY.md`.
-- Implementation of this spec: not started.
+- Implementation of this spec: done on branch `writing-assists-one-row`
+  (2026-09-25); typecheck, tests, build and lint:css green; menu checked in
+  the Electron app in EN and ES against frame 15. Awaiting lead review and
+  merge.
+- Implementation notes: frame 15 still labels the first key row "Ask for a
+  suggestion"; the app uses "✦ AI menu" / "Menú ✦ IA" per the ⌘↵ decision.
+  Key selects are compact chips (⌘↵, ⌘,) with the native select laid over
+  them. Without a key the Gemini row's note is "Powers autocomplete and the ✦
+  AI menu." and its link "Add key" / "Agregar clave"; the old "Add a Gemini
+  API key" note under Autocomplete is gone (the row table has no note there).
+  The popover keeps the app's surface radius token instead of the frame's
+  14px. The unused `trigger` request field went with the automatic trigger.
 
 ## Acceptance
 

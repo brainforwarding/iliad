@@ -2,6 +2,7 @@
 
 Status: living decision log. Started 2026-05-26. ADR-0001–0020 describe the
 removed internal agent and are kept as history; ADR-0021 supersedes them.
+ADR-0022 removes writing notes and automatic suggestions.
 
 ## ADR-0001: Context Is Built Per Turn
 
@@ -444,3 +445,28 @@ read (comments and notes are migrated to companion files). The product guardrail
 moves from `agent-vision.md` to `product-vision.md`.
 
 Spec: [2026-09-24 Iliad writing surface](../specs/2026-09-24-iliad-writing-surface.md).
+
+## ADR-0022: No Writing Notes, No Automatic Suggestions
+
+Status: accepted (2026-09-25). Amends ADR-0021 (notes companion).
+
+Writing notes (`name.notes.md`, "Open notes" in Writing assists) are removed.
+Comments (`name.comments.md`) stay the one companion file: they are how the
+writer talks to the AI and to outside agents, and notes duplicated them.
+Existing `name.notes.md` files are not deleted, renamed or migrated; they become
+ordinary Markdown documents (listed in the tree, reviewed by the workspace
+baseline) and `*.notes.md` is no longer a reserved name. Autocomplete no longer
+reads notes, and the old localStorage notes keys are left alone.
+
+Automatic suggestions while typing are removed too, with the settings that only
+existed to tame them ("Suggest while I type", "Pause for 10 min") and the
+`inline` suggestion kind. Suggestions come only on request: the length keys
+(⌘, ⌘. ⌘/) and the suggestion toolbar (Longer, Another, Steer…). ⌘↵ only opens
+the ✦ AI menu over a selection. The screen-reader announcement of a shown
+suggestion is always on (the "Announce suggestions" checkbox is gone).
+
+Why: the owner never asked for notes, and automatic requests cost quota and
+attention for suggestions the writer did not ask for. Fewer settings keep
+Writing assists to one calm row style.
+
+Spec: [2026-09-25 writing assists one row](../specs/2026-09-25-writing-assists-one-row.md).
