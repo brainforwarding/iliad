@@ -171,7 +171,7 @@ describe("free route (Iliad AI proxy)", () => {
     expect(await runAutocomplete(service)).toEqual({ ok: false, reason });
     server.state.nextGenerateError = refusal;
     const tighten = await runTighten(service);
-    expect(tighten).toEqual({ ok: false, reason: reason === "timeout" ? "provider" : reason });
+    expect(tighten).toEqual({ ok: false, reason });
   });
 
   it("re-issues once on invalid_token and retries once, never looping", async () => {
@@ -242,6 +242,7 @@ describe("free route (Iliad AI proxy)", () => {
     const server = await proxy({ reply: () => ({ deltas: ["partial "], inBandError: "upstream_timeout" }) });
     const { service } = await freeService(server);
     expect(await runAutocomplete(service)).toEqual({ ok: false, reason: "timeout" });
+    expect(await runTighten(service)).toEqual({ ok: false, reason: "timeout" });
     server.state.reply = () => ({ deltas: ["partial "], inBandError: "upstream_error" });
     expect(await runAutocomplete(service)).toEqual({ ok: false, reason: "provider" });
   });

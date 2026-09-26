@@ -273,6 +273,8 @@ describe("tightenReasonFromAgentError", () => {
     expect(tightenReasonFromAgentError(agentError("request_canceled"), true)).toBe("timeout");
     expect(tightenReasonFromAgentError(agentError("request_canceled"), false)).toBe("aborted");
     expect(tightenReasonFromAgentError(agentError("request_timeout"), true)).toBe("timeout");
+    // A proxy/provider timeout is a timeout even when the local timer did not fire.
+    expect(tightenReasonFromAgentError(agentError("request_timeout"), false)).toBe("timeout");
   });
 
   it("maps the free route's refusals explicitly, before the detail regex (Groq spec §5)", () => {

@@ -266,8 +266,10 @@ export function tightenReasonFromAgentError(error: AgentError, timedOut: boolean
       }
 
       return "provider";
+    // Proxy/provider timeouts (spec §5: upstream_timeout → timeout). `timedOut`
+    // only tells a local timeout from a user cancel below.
     case "request_timeout":
-      return timedOut ? "timeout" : "provider";
+      return "timeout";
     case "request_canceled":
       return timedOut ? "timeout" : "aborted";
     case "output_truncated":
