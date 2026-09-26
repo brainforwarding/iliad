@@ -115,7 +115,10 @@ const CURRENT_LINE_MARKER = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+
  * the echo ends on a word boundary.
  */
 function removeEchoedCurrentLine(text: string, prefix: string) {
-  const line = prefix.slice(prefix.lastIndexOf("\n") + 1);
+  // On a fresh line right after a single line break, the line being continued
+  // is the previous one (live QA: gpt-oss restated it on the new line).
+  const continued = /[^\n]\n[ \t]*$/.test(prefix) ? prefix.replace(/\n[ \t]*$/, "") : prefix;
+  const line = continued.slice(continued.lastIndexOf("\n") + 1);
   const body = line.replace(CURRENT_LINE_MARKER, "").trim();
 
   if (body.split(/\s+/u).filter(Boolean).length < 2) {

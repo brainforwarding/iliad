@@ -195,6 +195,15 @@ describe("current-line echo (Groq Phase 0 finding 1)", () => {
     })).toBe("cuenta lo que aprendió.");
   });
 
+  it("strips a restated previous line on a fresh line after a single break, not after a paragraph break", () => {
+    const raw = "She climbed the stairs slowly, and each creak echoed her thoughts.";
+    expect(cleanAutocompleteOutput(raw, { prefix: "Intro.\n\nShe climbed the stairs slowly, and\n", suffix: "", suggestionKind: "paragraph" }))
+      .toBe("each creak echoed her thoughts.");
+    // After a blank line (a new paragraph) the restatement is left to the model.
+    expect(cleanAutocompleteOutput(raw, { prefix: "Intro.\n\nShe climbed the stairs slowly, and\n\n", suffix: "", suggestionKind: "paragraph" }))
+      .toBe(raw);
+  });
+
   it("leaves one-word lines and word-prefix matches alone", () => {
     // A single word on the line is not enough evidence of an echo.
     expect(cleanAutocompleteOutput("She said it again.", { prefix: "Intro.\n\nShe ", suffix: "", suggestionKind: "sentence" }))
