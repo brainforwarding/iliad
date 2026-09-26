@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, protocol, session, shell, type MenuItemConstructorOptions } from "electron";
+import { app, BrowserWindow, dialog, Menu, protocol, safeStorage, session, shell, type MenuItemConstructorOptions } from "electron";
 import path from "node:path";
 import { createCliRequestHandler } from "./cli/commands.js";
 import { installCommandFromResources, loginShellPath } from "./cli/installCommand.js";
@@ -22,6 +22,7 @@ import { canonicalizeWorkspaceDirectory, type WorkspaceInfo } from "./launch/wor
 import { createDiagnosticsLogger } from "./diagnostics/logger.js";
 import { WorkspaceBaselineService } from "./review/workspaceBaseline.js";
 import { UpdateService } from "./updates/updateService.js";
+import { migrateLegacyWritingSettings } from "./writing/groq/migration.js";
 import { WritingAiService } from "./writing/writingAiService.js";
 import { installYouTubeEmbedHeaders } from "./window/youtubeEmbedHeaders.js";
 import { IliadWindowManager } from "./window/windowManager.js";
@@ -335,7 +336,21 @@ app.whenReady().then(async () => {
   });
   registerDiagnosticsIpc({ logger: diagnosticsLogger });
   registerReviewIpc({ baselineService, resolveWorkspaceRootForSession, diagnostics: diagnosticsLogger });
-  const writingAiService = new WritingAiService(userDataPath, { diagnostics: diagnosticsLogger });
+  // Awaited before the writing IPC is registered, so no status call or request
+  // can observe a saved Gemini key (Groq spec §6). Failures retry next launch.
+  const migration = await migrateLegacyWritingSettings(userDataPath);
+  diagnosticsLogger.info({
+    area: "app",
+    event: "writing_settings_migration",
+    details: migration.ok ? { outcome: migration.outcome } : { outcome: "failed", errorCode: migration.errorCode }
+  });
+  const writingAiService = new WritingAiService(userDataPath, {
+    diagnostics: diagnosticsLogger,
+    safeStorage,
+    // Dev overrides (GROQ_API_KEY, ILIAD_AI_PROXY_URL) are ignored in packaged builds.
+    isPackaged: app.isPackaged,
+    clientVersion: app.getVersion()
+  });
   registerWritingSettingsIpc({ service: writingAiService });
   registerWritingCorrectorMemoryIpc({ resolveWorkspaceRootForSession });
   registerAutocompleteIpc({ service: writingAiService, resolveWorkspaceRootForSession });

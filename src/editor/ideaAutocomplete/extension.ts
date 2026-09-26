@@ -57,7 +57,8 @@ export type IdeaAutocompleteStatus =
   | { state: "idle" }
   | { state: "requesting" }
   | { state: "shown"; insert?: string; streaming?: boolean; kind?: IdeaAutocompleteSuggestionKind; alternativeIndex?: number; alternativeCount?: number }
-  | { state: "failed"; reason: IdeaAutocompleteFailureReason };
+  /** `resetAt` (ISO 8601) comes with `free_exhausted`: the notice shows it as a local time. */
+  | { state: "failed"; reason: IdeaAutocompleteFailureReason; resetAt?: string };
 
 interface ActiveSuggestion {
   requestId: string;
@@ -85,9 +86,25 @@ export function autocompleteCooldownMsForFailure(reason: IdeaAutocompleteFailure
     case "provider":
     case "timeout":
       return transientProviderCooldownMs;
+    // Free "out" reasons and the key/connection notices set no cooldown: every
+    // request is explicit, so the next one reaches main again and, if still
+    // refused, shows its notice again (Groq spec §5).
+    case "free_exhausted":
+    case "free_unavailable":
+    case "client_outdated":
+    case "key_unreadable":
+    case "invalid_api_key":
+    case "unreachable":
+      return 0;
     default:
       return 0;
   }
+}
+
+/** Refusals that always show their notice, even over a visible draft. */
+export function autocompleteFailureNeedsNotice(reason: IdeaAutocompleteFailureReason) {
+  return reason === "free_exhausted" || reason === "free_unavailable" || reason === "client_outdated" ||
+    reason === "key_unreadable" || reason === "invalid_api_key" || reason === "unreachable";
 }
 
 export function applySharedAutocompleteCooldown(reason: IdeaAutocompleteFailureReason, now = Date.now()) {
@@ -457,11 +474,16 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
             if (cooldownMs > 0) this.cooldownUntil = applySharedAutocompleteCooldown(result.reason);
             if (this.suggestion) {
               this.renderSuggestion();
+              // A refusal the writer must act on (free AI out, key problems) still
+              // shows its notice; the visible draft stays and can be accepted.
+              if (autocompleteFailureNeedsNotice(result.reason)) {
+                this.setStatus({ state: "failed", reason: result.reason, resetAt: result.resetAt });
+              }
               return;
             }
 
             if (result.reason !== "aborted") {
-              this.setStatus({ state: "failed", reason: result.reason });
+              this.setStatus({ state: "failed", reason: result.reason, resetAt: result.resetAt });
             }
 
             return;

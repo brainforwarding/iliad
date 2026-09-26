@@ -147,7 +147,9 @@ export async function handleAutocompleteIpc(
     return insert ? { ok: true, insert } : { ok: false, reason: "no_suggestion" };
   } catch (error) {
     const agentError = normalizeAgentError(error, { wasCanceled: controller.signal.aborted });
-    return { ok: false, reason: autocompleteReasonFromAgentError(agentError, timedOut) };
+    const reason = autocompleteReasonFromAgentError(agentError, timedOut);
+    // `resetAt` (from the proxy) reaches the renderer only with the "out" reason.
+    return reason === "free_exhausted" && agentError.resetAt ? { ok: false, reason, resetAt: agentError.resetAt } : { ok: false, reason };
   } finally {
     clearTimeout(timeout);
 

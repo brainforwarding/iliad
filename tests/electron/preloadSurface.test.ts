@@ -46,8 +46,18 @@ describe("preload API surface", () => {
     expect(Object.keys(cli).sort()).toEqual(["completeOpenRequest", "onOpenRequested", "setActiveDocument", "takeOpenRequest"]);
   });
 
-  it("exposes the Gemini key state and setter", () => {
-    expect(typeof exposed.api?.getGeminiKeyState).toBe("function");
-    expect(typeof exposed.api?.setGeminiApiKey).toBe("function");
+  it("exposes the Groq key state and setter, and nothing for Gemini", () => {
+    expect(typeof exposed.api?.getGroqKeyState).toBe("function");
+    expect(typeof exposed.api?.setGroqApiKey).toBe("function");
+    expect(JSON.stringify(Object.keys(exposed.api ?? {}))).not.toMatch(/gemini/i);
+  });
+
+  it("routes the Groq key calls to the writing IPC channels", async () => {
+    const { ipcRenderer } = await import("electron");
+    const invoke = vi.mocked(ipcRenderer.invoke);
+    invoke.mockClear();
+    await (exposed.api?.getGroqKeyState as () => Promise<unknown>)();
+    await (exposed.api?.setGroqApiKey as (key: string | null) => Promise<unknown>)(null);
+    expect(invoke.mock.calls.map((call) => call[0])).toEqual(["writing:get-groq-key-state", "writing:set-groq-key"]);
   });
 });

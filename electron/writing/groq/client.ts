@@ -1,7 +1,7 @@
-// Groq chat-completions client. Today: the own-key route (Mac → Groq direct)
-// and key validation. The free route (Iliad AI proxy, structured task body)
-// joins `GroqRoute` in the next stage and reuses the same SSE reader.
-// Spec: specs/2026-09-25-groq-ai-free-tier.md §2 (`client.ts`), §5, §6.
+// Groq chat-completions client for both routes (spec §1, §2 `client.ts`, §5,
+// §6): own key (Mac → Groq direct, `Authorization: Bearer <key>`) and free
+// (Mac → Iliad AI proxy → Groq, structured task; see proxyClient.ts). Both use
+// the same prompts, the same content-only SSE reader and the same output cap.
 //
 // Never includes provider bodies in errors or diagnostics: they can echo
 // document text or credentials.
@@ -9,9 +9,12 @@
 import { AgentRuntimeError } from "../errors.js";
 import { GROQ_API_KEY_MAX_CHARS, GROQ_CHAT_COMPLETIONS_URL, GROQ_MODELS_URL } from "./config.js";
 import { buildWritingAiPrompt, groqChatCompletionBody, type WritingAiPrompt, type WritingAiTask } from "./prompts/index.js";
+import type { IliadAiProxyClient } from "./proxyClient.js";
 import { readChatCompletionStream, type ChatCompletionResult } from "./sse.js";
 
-export type GroqRoute = { kind: "own-key"; apiKey: string };
+export type GroqRoute =
+  | { kind: "own-key"; apiKey: string }
+  | { kind: "free"; proxy: Pick<IliadAiProxyClient, "stream"> };
 
 export interface GroqStreamResult extends ChatCompletionResult {
   /** Milliseconds from the request to the first visible content delta. */
@@ -29,7 +32,25 @@ interface StreamCommon {
 /** One writing task on a route: builds the prompt from `prompts/`, streams, returns the aggregate. */
 export async function streamGroqText(options: StreamCommon & { route: GroqRoute; task: WritingAiTask }): Promise<GroqStreamResult> {
   const prompt = buildWritingAiPrompt(options.task);
-  return streamGroqPrompt({ ...options, apiKey: options.route.apiKey, prompt });
+  if (options.route.kind === "own-key") {
+    return streamGroqPrompt({ ...options, apiKey: options.route.apiKey, prompt });
+  }
+
+  // Free route: the proxy builds the same prompt from the structured task;
+  // the app still caps what it reads at the task's maxOutputChars.
+  const now = options.now ?? Date.now;
+  const startedAt = now();
+  let firstDeltaMs: number | null = null;
+  const result = await options.route.proxy.stream({
+    task: options.task,
+    signal: options.signal,
+    maxOutputChars: prompt.maxOutputChars,
+    onDelta: (delta, text) => {
+      if (firstDeltaMs === null) firstDeltaMs = now() - startedAt;
+      options.onDelta?.(delta, text);
+    }
+  });
+  return { ...result, firstDeltaMs, durationMs: now() - startedAt };
 }
 
 /** A prebuilt prompt on the own-key route (the benchmark uses it to vary budgets). */

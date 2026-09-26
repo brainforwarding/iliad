@@ -144,7 +144,9 @@ export async function handleTightenIpc(
     return { ok: true, rewrite, unchanged: isTightenUnchanged(rewrite, text) };
   } catch (error) {
     const agentError = normalizeAgentError(error, { wasCanceled: controller.signal.aborted });
-    return { ok: false, reason: tightenReasonFromAgentError(agentError, timedOut) };
+    const reason = tightenReasonFromAgentError(agentError, timedOut);
+    // `resetAt` (from the proxy) reaches the renderer only with the "out" reason.
+    return reason === "free_exhausted" && agentError.resetAt ? { ok: false, reason, resetAt: agentError.resetAt } : { ok: false, reason };
   } finally {
     clearTimeout(timeout);
 

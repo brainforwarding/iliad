@@ -45,8 +45,16 @@ export interface IdeaAutocompleteTextRequest {
 
 export type AutocompleteFailureReason =
   | "disabled"
-  | "no_key"
   | "invalid_api_key"
+  /** Free route: today's quota (install, network or global) is used up; `resetAt` says when it returns. */
+  | "free_exhausted"
+  /** Free route: paused (kill switch) or not configured in this build. */
+  | "free_unavailable"
+  | "client_outdated"
+  /** A saved own key cannot be decrypted; AI is blocked until it is re-entered or removed. */
+  | "key_unreadable"
+  /** The route's server (proxy or Groq) could not be reached. */
+  | "unreachable"
   | "rate_limited"
   | "too_long"
   | "empty"
@@ -58,7 +66,7 @@ export type AutocompleteFailureReason =
 
 export type IdeaAutocompleteResult =
   | { ok: true; insert: string }
-  | { ok: false; reason: AutocompleteFailureReason };
+  | { ok: false; reason: AutocompleteFailureReason; resetAt?: string };
 
 export function normalizeAutocompleteLanguage(language: unknown): IdeaAutocompleteLanguage {
   return language === "es" ? "es" : "en";
@@ -96,6 +104,37 @@ function removeEchoedPrefix(text: string, prefix: string) {
   return text;
 }
 
+/** List, quote and dialogue markers at the start of a line (not part of the line's text). */
+const CURRENT_LINE_MARKER = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?(?:[\u2014\u2013]|--?)?\s*/u;
+
+/**
+ * gpt-oss sometimes repeats the start of the current line ("—Solo sabía que "
+ * → "Solo sabía que todo…"; Groq spec, Phase 0 finding 1). `removeEchoedPrefix`
+ * misses short lines, so strip a case-insensitive echo of the current line's
+ * text after its list/quote/dialogue marker when it is at least two words and
+ * the echo ends on a word boundary.
+ */
+function removeEchoedCurrentLine(text: string, prefix: string) {
+  const line = prefix.slice(prefix.lastIndexOf("\n") + 1);
+  const body = line.replace(CURRENT_LINE_MARKER, "").trim();
+
+  if (body.split(/\s+/u).filter(Boolean).length < 2) {
+    return text;
+  }
+
+  const candidate = text.replace(/^\s+/, "");
+  const wanted = body.toLocaleLowerCase();
+
+  for (const start of [candidate, candidate.replace(CURRENT_LINE_MARKER, "")]) {
+    if (start.slice(0, body.length).toLocaleLowerCase() !== wanted) continue;
+    const rest = start.slice(body.length);
+    if (/^[\p{L}\p{N}]/u.test(rest)) continue;
+    return rest.replace(/^\s+/, " ");
+  }
+
+  return text;
+}
+
 function normalizeInsertionBoundary(text: string, prefix: string) {
   if (!text) {
     return text;
@@ -121,6 +160,7 @@ function cleanInlineAutocompleteOutput(raw: string, context: AutocompleteCleanCo
   let text = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/^\n+/, "").replace(/\n+$/, "");
   text = unwrapSingleLineQuotes(text);
   text = removeEchoedPrefix(text, context.prefix);
+  text = removeEchoedCurrentLine(text, context.prefix);
   text = text.replace(/[ \t]+\n/g, "\n");
 
   const maxChars = context.suggestionKind === "paragraph" ? AUTOCOMPLETE_MAX_PARAGRAPH_OUTPUT_CHARS
@@ -206,6 +246,7 @@ function cleanParagraphAutocompleteOutput(raw: string, context: AutocompleteClea
   let text = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n+$/g, "");
   text = unwrapSingleLineQuotes(text);
   text = removeEchoedPrefix(text, context.prefix);
+  text = removeEchoedCurrentLine(text, context.prefix);
   const cleaned = normalizeParagraphBoundary(text, context.prefix, context.suggestionKind === "idea", context.extend === true);
 
   if (!cleaned.trim()) {
@@ -240,17 +281,25 @@ export function autocompleteReasonFromAgentError(error: AgentError, timedOut: bo
   }
 
   switch (error.code) {
-    case "missing_api_key":
-      return "no_key";
     case "invalid_api_key":
       return "invalid_api_key";
     case "rate_limited":
       return "rate_limited";
     case "request_canceled":
       return "aborted";
-    case "provider_unavailable":
+    case "free_quota_exhausted":
+    case "free_global_cap":
+      return "free_exhausted";
+    case "free_unavailable":
+      return "free_unavailable";
+    case "client_outdated":
+      return "client_outdated";
+    case "key_unreadable":
+      return "key_unreadable";
     case "network_unreachable":
     case "dns_failure":
+      return "unreachable";
+    case "provider_unavailable":
     case "model_not_found":
     case "malformed_provider_response":
     case "output_truncated":

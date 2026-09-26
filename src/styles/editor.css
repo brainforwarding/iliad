@@ -309,6 +309,64 @@
   outline: none;
 }
 
+/* AI notices (Groq spec §8, Figma 42:2 frames 4–6): one calm line, an optional
+   grey action and a dismiss button. Same surface as the suggestion toolbar. */
+.editor-ai-notice {
+  position: absolute;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(460px, calc(100% - 24px));
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--overlay);
+  box-shadow: var(--shadow-sm);
+  color: var(--muted-1);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
+.editor-ai-notice.is-corner {
+  right: 22px;
+  bottom: 18px;
+}
+
+.editor-ai-notice-message {
+  min-width: 0;
+}
+
+.editor-ai-notice-action,
+.editor-ai-notice-dismiss {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--hover-wash);
+  color: var(--ink-1);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.editor-ai-notice-dismiss {
+  padding: 4px;
+  background: transparent;
+  color: var(--muted-2);
+}
+
+.editor-ai-notice-action:hover,
+.editor-ai-notice-dismiss:hover,
+.editor-ai-notice-action:focus-visible,
+.editor-ai-notice-dismiss:focus-visible {
+  background: var(--card);
+  color: var(--ink-1);
+}
+
 .autocomplete-announcement {
   position: absolute;
   width: 1px;
@@ -498,15 +556,6 @@
 .editor-ai-action:disabled {
   color: var(--muted-3);
   cursor: default;
-}
-
-/* No Gemini key: looks disabled, but a click opens Writing assists at the key field. */
-.editor-ai-action.is-unavailable {
-  color: var(--muted-3);
-}
-
-.editor-ai-action.is-unavailable kbd {
-  color: var(--muted-3);
 }
 
 @keyframes editor-comment-action-enter {

@@ -1,10 +1,16 @@
-import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { handleAutocompleteIpc } from "../../electron/ipc/autocomplete";
 import { handleTightenIpc } from "../../electron/ipc/tighten";
-import { WritingSettingsStore } from "../../electron/writing/settingsStore";
-import { generateGeminiSelectionTransform, WritingAiService } from "../../electron/writing/writingAiService";
+import { handleSetGroqKeyIpc, handleWritingAssistStatusIpc } from "../../electron/ipc/writingSettings";
+import { GroqKeyStore, type SafeStorageLike } from "../../electron/writing/groq/keyStore";
+import { GROQ_MODEL } from "../../electron/writing/groq/prompts/index";
+import { WritingAiService } from "../../electron/writing/writingAiService";
+import { startFakeAiProxy } from "../fixtures/fakeAiProxy";
 
 vi.mock("electron", () => ({
   app: { getPath: () => os.tmpdir() },
@@ -12,198 +18,283 @@ vi.mock("electron", () => ({
   BrowserWindow: { fromWebContents: () => ({}) }
 }));
 
-let tempDirs: string[] = [];
+const cleanups: Array<() => Promise<unknown>> = [];
 
 afterEach(async () => {
-  vi.unstubAllEnvs();
-  await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
-  tempDirs = [];
+  await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
 });
 
 async function userDataDir() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "iliad-writing-ai-"));
-  tempDirs.push(dir);
+  cleanups.push(() => rm(dir, { recursive: true, force: true }));
   return dir;
 }
 
-function geminiReply(text: string, finishReason = "STOP") {
-  return Response.json({
-    candidates: [{ finishReason, content: { parts: [{ thought: true, text: "private" }, { text }] } }]
-  });
-}
-
 function quietDiagnostics() {
-  return { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn(), log: vi.fn(), flush: vi.fn(async () => undefined) };
+  const records: unknown[] = [];
+  const push = (record: unknown) => records.push(record);
+  return { records, info: push, warn: push, debug: push, error: push, log: push, flush: vi.fn(async () => undefined) };
 }
 
+/** A fake safeStorage: reversible, but the stored bytes never contain the plaintext. */
+const fakeSafeStorage: SafeStorageLike = {
+  isEncryptionAvailable: () => true,
+  encryptString: (text) => Buffer.from(`enc:${Buffer.from(text).toString("hex")}`),
+  decryptString: (buffer) => {
+    const value = buffer.toString();
+    if (!value.startsWith("enc:")) throw new Error("decrypt failed");
+    return Buffer.from(value.slice(4), "hex").toString();
+  }
+};
+
+type GroqHandler = (request: http.IncomingMessage, body: string, response: http.ServerResponse) => void;
+
+/** A fake Groq; `fetchImpl` rewrites api.groq.com to it. */
+async function fakeGroq(handler: GroqHandler) {
+  const seen: Array<{ url: string; auth: string | undefined; body: unknown }> = [];
+  const server = http.createServer((request, response) => {
+    let body = "";
+    request.on("data", (part) => (body += part));
+    request.on("end", () => {
+      seen.push({ url: request.url ?? "", auth: request.headers.authorization, body: body ? JSON.parse(body) : null });
+      handler(request, body, response);
+    });
+  });
+  cleanups.push(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const fetchImpl: typeof fetch = (input, init) => fetch(String(input).replace("https://api.groq.com/openai/v1", base), init);
+  return { fetchImpl, seen };
+}
+
+const frame = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\n`;
+
+function groqStream(response: http.ServerResponse, text: string, finishReason: string | null = "stop") {
+  response.writeHead(200, { "Content-Type": "text/event-stream" });
+  response.write(frame({ choices: [{ index: 0, delta: { reasoning: "hidden analysis" }, finish_reason: null }] }));
+  response.write(frame({ choices: [{ index: 0, delta: { content: text }, finish_reason: null }] }));
+  if (finishReason) response.write(frame({ choices: [{ index: 0, delta: {}, finish_reason: finishReason }] }));
+  response.end("data: [DONE]\n\n");
+}
+
+const event = { sender: { id: 7, isDestroyed: () => false, send: vi.fn() }, senderFrame: { url: "file:///app/index.html" } } as never;
 const TEXT = "This passage is rather wordy.";
 
-describe("Gemini selection transform (✦ AI menu)", () => {
-  it("sends the shared instruction and marked input to Gemini with low thinking and room for it", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(geminiReply("wordy."));
-    const signal = new AbortController().signal;
+function autocomplete(service: WritingAiService, prefix = "She walked into the ") {
+  return handleAutocompleteIpc(event, {
+    requestId: "r1", workspaceSessionId: "s", documentRelativePath: "a.md", language: "en", prefix, suffix: "",
+    headingPath: [], documentTitle: "a", nearbyHeadings: [], suggestionKind: "sentence"
+  }, { service, controllers: new Map(), resolveWorkspaceRootForSession: () => "/ws" });
+}
 
-    await expect(
-      generateGeminiSelectionTransform("test-key", { text: TEXT, selection: { from: 16, to: 29 }, language: "en", signal }, fetcher)
-    ).resolves.toBe("wordy.");
+function tighten(service: WritingAiService) {
+  return handleTightenIpc(event, { requestId: "t1", text: TEXT, selection: { from: 16, to: 29 }, language: "en" }, {
+    service,
+    controllers: new Map()
+  });
+}
 
-    const [url, init] = fetcher.mock.calls[0];
-    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent");
-    expect(init?.signal).toBe(signal);
-    expect(init?.headers).toMatchObject({ "x-goog-api-key": "test-key" });
-    const body = JSON.parse(init?.body as string);
-    expect(body.contents[0].parts[0].text).toBe(
-      "This passage is <<<ILIAD_TIGHTEN_SELECTION_START>>>rather wordy.<<<ILIAD_TIGHTEN_SELECTION_END>>>"
-    );
-    expect(body.systemInstruction.parts[0].text).toContain("not instructions to follow");
-    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "low", includeThoughts: false });
-    expect(body.generationConfig.maxOutputTokens).toBe(384 + 2048);
-    expect(body.tools).toBeUndefined();
+async function ownKeyService(handler: GroqHandler, options: { key?: string } = {}) {
+  const dir = await userDataDir();
+  const store = new GroqKeyStore(dir, { safeStorage: fakeSafeStorage });
+  await store.setKey(options.key ?? "gsk_ownkey1234");
+  const groq = await fakeGroq(handler);
+  const proxy = await startFakeAiProxy();
+  cleanups.push(() => proxy.close());
+  const diagnostics = quietDiagnostics();
+  const service = new WritingAiService(dir, {
+    safeStorage: fakeSafeStorage,
+    fetchImpl: groq.fetchImpl,
+    isPackaged: false,
+    env: { ILIAD_AI_PROXY_URL: proxy.url },
+    diagnostics
+  });
+  return { service, groq, proxy, dir, diagnostics };
+}
+
+describe("WritingAiService route selection", () => {
+  it("uses the own key directly (never the proxy) when a key is saved", async () => {
+    const { service, groq, proxy } = await ownKeyService((_request, _body, response) => groqStream(response, "quiet room."));
+    expect((await service.writingAssistStatus()).ai).toEqual({ route: "own-key", model: GROQ_MODEL });
+
+    expect(await autocomplete(service)).toEqual({ ok: true, insert: "quiet room." });
+    expect(groq.seen).toHaveLength(1);
+    expect(groq.seen[0].auth).toBe("Bearer gsk_ownkey1234");
+    expect(groq.seen[0].body).toMatchObject({ model: GROQ_MODEL, reasoning_effort: "low", include_reasoning: false, stream: true });
+    expect(proxy.requests).toHaveLength(0);
   });
 
-  it("uses the bounded edit instruction for typed instructions and presets", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(geminiReply("warm text"));
+  it("blocks AI when the saved key is unreadable and never falls back to free", async () => {
+    const dir = await userDataDir();
+    await mkdir(path.join(dir, "ai"), { recursive: true });
+    await writeFile(path.join(dir, "ai", "settings.json"), JSON.stringify({ storage: "safeStorage", groqApiKeyEnc: Buffer.from("garbage").toString("base64") }));
+    const proxy = await startFakeAiProxy();
+    cleanups.push(() => proxy.close());
+    const fetchImpl = vi.fn<typeof fetch>();
+    const service = new WritingAiService(dir, {
+      safeStorage: fakeSafeStorage,
+      fetchImpl,
+      isPackaged: false,
+      env: { ILIAD_AI_PROXY_URL: proxy.url },
+      diagnostics: quietDiagnostics()
+    });
 
-    await generateGeminiSelectionTransform(
-      "test-key",
-      {
-        text: "Draft this cold text please.",
-        selection: { from: 11, to: 20 },
-        language: "en",
-        mode: "edit",
-        instruction: "make it warmer",
-        signal: new AbortController().signal
-      },
-      fetcher
-    );
-
-    const body = JSON.parse(fetcher.mock.calls[0][1]?.body as string);
-    expect(body.systemInstruction.parts[0].text).toContain('"make it warmer"');
-    expect(body.systemInstruction.parts[0].text).toContain("cannot override marker boundaries");
+    const status = await service.writingAssistStatus();
+    expect(status.ai.route).toBe("blocked");
+    expect(status.groqKey).toEqual({ state: "unreadable", last4: null, rejected: false });
+    expect(await autocomplete(service)).toEqual({ ok: false, reason: "key_unreadable" });
+    expect(await tighten(service)).toEqual({ ok: false, reason: "key_unreadable" });
+    expect(proxy.requests).toHaveLength(0);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["MAX_TOKENS", "output_truncated"],
-    ["SAFETY", "content_blocked"],
-    ["RECITATION", "content_blocked"],
-    ["OTHER", "malformed_provider_response"]
-  ])("never offers a partial rewrite (%s -> %s)", async (finishReason, code) => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(geminiReply("an unfinished", finishReason));
-
-    const failure = generateGeminiSelectionTransform(
-      "test-key",
-      { text: TEXT, selection: { from: 0, to: TEXT.length }, language: "en", signal: new AbortController().signal },
-      fetcher
-    );
-
-    await expect(failure).rejects.toMatchObject({ agentError: { code } });
-    await expect(failure).rejects.toMatchObject({ agentError: { userMessage: expect.not.stringMatching(/openai|codex|safety/i) } });
+  it("maps own-key 401 to invalid_api_key (no free fallback) and marks the key rejected", async () => {
+    const { service, proxy } = await ownKeyService((_request, _body, response) => {
+      response.writeHead(401, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: { message: "secret document text" } }));
+    });
+    expect(await autocomplete(service)).toEqual({ ok: false, reason: "invalid_api_key" });
+    expect(await tighten(service)).toEqual({ ok: false, reason: "invalid_api_key" });
+    expect(proxy.requests).toHaveLength(0);
+    expect((await service.writingAssistStatus()).groqKey).toEqual({ state: "ok", last4: "1234", rejected: true });
   });
 
-  it("treats a blocked prompt as declined", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ promptFeedback: { blockReason: "SAFETY" } }));
-
-    await expect(
-      generateGeminiSelectionTransform(
-        "test-key",
-        { text: TEXT, selection: { from: 0, to: TEXT.length }, language: "en", signal: new AbortController().signal },
-        fetcher
-      )
-    ).rejects.toMatchObject({ agentError: { code: "content_blocked" } });
-  });
-
-  it("maps HTTP failures without exposing provider content", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ error: { message: "secret document" } }, { status: 403 }));
-
-    await expect(
-      generateGeminiSelectionTransform(
-        "test-key",
-        { text: TEXT, selection: { from: 0, to: TEXT.length }, language: "en", signal: new AbortController().signal },
-        fetcher
-      )
-    ).rejects.toMatchObject({ agentError: { code: "invalid_api_key", userMessage: expect.not.stringContaining("secret") } });
+  it("maps own-key 429 to rate_limited", async () => {
+    const { service } = await ownKeyService((_request, _body, response) => {
+      response.writeHead(429);
+      response.end();
+    });
+    expect(await autocomplete(service)).toEqual({ ok: false, reason: "rate_limited" });
+    expect(await tighten(service)).toEqual({ ok: false, reason: "rate_limited" });
   });
 });
 
-describe("WritingAiService tighten through the IPC contract", () => {
-  function trustedEvent() {
-    return { sender: { id: 7 }, senderFrame: { url: "file:///app/index.html" } } as never;
+describe("WritingAiService finish reasons and leak guard", () => {
+  it.each([
+    ["length", { ok: false, reason: "no_suggestion" }],
+    ["content_filter", { ok: false, reason: "no_suggestion" }],
+    [null, { ok: false, reason: "no_suggestion" }]
+  ])("autocomplete offers only a clean stop (%s)", async (finish, expected) => {
+    const { service } = await ownKeyService((_request, _body, response) => groqStream(response, "quiet room.", finish));
+    expect(await autocomplete(service)).toEqual(expected);
+  });
+
+  it.each([
+    ["length", "incomplete"],
+    ["content_filter", "blocked"],
+    [null, "provider"],
+    ["tool_calls", "provider"]
+  ])("✦ AI never offers a partial rewrite (%s -> %s)", async (finish, reason) => {
+    const { service } = await ownKeyService((_request, _body, response) => groqStream(response, "wordy.", finish));
+    expect(await tighten(service)).toEqual({ ok: false, reason });
+  });
+
+  it("cleans a stopped rewrite and merges it into the safe unit", async () => {
+    const { service } = await ownKeyService((_request, _body, response) => groqStream(response, "```\nwordy.\n```\n"));
+    expect(await tighten(service)).toEqual({ ok: true, rewrite: "This passage is wordy.", unchanged: false });
+  });
+
+  it.each(["<|channel|>analysis then text", "<think>hmm</think> text"])("discards output carrying reasoning markers (%s)", async (text) => {
+    const { service } = await ownKeyService((_request, _body, response) => groqStream(response, text));
+    expect(await autocomplete(service)).toEqual({ ok: false, reason: "no_suggestion" });
+    expect(await tighten(service)).toEqual({ ok: false, reason: "provider" });
+  });
+
+  it("logs no text, key or provider body", async () => {
+    const marker = "QQMARKERQQ";
+    const { service, diagnostics } = await ownKeyService((_request, _body, response) => groqStream(response, `${marker} out.`));
+    await autocomplete(service, `The ${marker} went into the `);
+    await tighten(service);
+    const logged = JSON.stringify(diagnostics.records);
+    expect(logged).not.toContain(marker);
+    expect(logged).not.toContain("gsk_ownkey1234");
+    expect(logged).toContain('"route":"own-key"');
+    expect(logged).toContain("selection_ai.ai.completed");
+  });
+});
+
+describe("Groq key IPC (validated before saving)", () => {
+  const trusted = { sender: { id: 1 }, senderFrame: { url: "file:///app/index.html" } } as never;
+
+  async function keyService(status: number | "network") {
+    const dir = await userDataDir();
+    const validator = status === "network"
+      ? vi.fn<typeof fetch>(async () => { throw new TypeError("fetch failed"); })
+      : vi.fn<typeof fetch>(async () => new Response("{}", { status }));
+    const service = new WritingAiService(dir, {
+      safeStorage: fakeSafeStorage,
+      fetchImpl: validator,
+      diagnostics: quietDiagnostics()
+    });
+    return { service, dir, validator };
   }
 
-  it("cleans the Gemini answer and merges it into the safe unit", async () => {
-    vi.stubEnv("GEMINI_API_KEY", "");
-    vi.stubEnv("GOOGLE_API_KEY", "");
-    const dir = await userDataDir();
-    await new WritingSettingsStore(dir).setGeminiApiKey("test-key");
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(geminiReply("```\nwordy.\n```\n"));
-    const service = new WritingAiService(dir, { fetchImpl: fetcher, diagnostics: quietDiagnostics() });
+  it("saves a key only after Groq returns 200, encrypted and never in plaintext", async () => {
+    const { service, dir, validator } = await keyService(200);
+    const result = await handleSetGroqKeyIpc(trusted, "  gsk_newKey9876  ", service);
+    expect(result).toEqual({ ok: true, state: { state: "ok", last4: "9876", rejected: false } });
+    expect(String(validator.mock.calls[0][0])).toBe("https://api.groq.com/openai/v1/models");
+    const raw = await import("node:fs/promises").then((fs) => fs.readFile(path.join(dir, "ai", "settings.json"), "utf8"));
+    expect(raw).not.toContain("gsk_newKey9876");
+    expect(JSON.parse(raw)).toMatchObject({ storage: "safeStorage" });
 
-    await expect(
-      handleTightenIpc(trustedEvent(), { requestId: "r1", text: TEXT, selection: { from: 16, to: 29 }, language: "en" }, {
-        service,
-        controllers: new Map()
-      })
-    ).resolves.toEqual({ ok: true, rewrite: "This passage is wordy.", unchanged: false });
+    const status = await handleWritingAssistStatusIpc(trusted, service);
+    expect(status).toEqual({
+      corrector: { available: true, provider: "local" },
+      ai: { route: "own-key", model: GROQ_MODEL },
+      groqKey: { state: "ok", last4: "9876", rejected: false }
+    });
+    expect(JSON.stringify(status)).not.toMatch(/count|quota|remaining/i);
+
+    expect(await handleSetGroqKeyIpc(trusted, null, service)).toEqual({ ok: true, state: { state: "none", last4: null, rejected: false } });
+    expect((await service.writingAssistStatus()).ai.route).toBe("free");
   });
 
   it.each([
-    [undefined, "no_key"],
-    ["MAX_TOKENS", "incomplete"],
-    ["SAFETY", "blocked"]
-  ])("maps failures to explicit reasons (%s -> %s)", async (finishReason, reason) => {
-    vi.stubEnv("GEMINI_API_KEY", "");
-    vi.stubEnv("GOOGLE_API_KEY", "");
-    const dir = await userDataDir();
+    [401, "rejected"],
+    [403, "rejected"],
+    [500, "unreachable"],
+    ["network" as const, "unreachable"]
+  ])("does not save a key Groq answers with %s (%s)", async (status, reason) => {
+    const { service } = await keyService(status);
+    expect(await handleSetGroqKeyIpc(trusted, "gsk_candidate", service)).toEqual({ ok: false, reason });
+    expect((await service.getGroqKeyState()).state).toBe("none");
+  });
 
-    if (finishReason) {
-      await new WritingSettingsStore(dir).setGeminiApiKey("test-key");
-    }
+  it("rejects malformed keys before any network call", async () => {
+    const { service, validator } = await keyService(200);
+    expect(await handleSetGroqKeyIpc(trusted, "has space", service)).toEqual({ ok: false, reason: "invalid_shape" });
+    expect(await handleSetGroqKeyIpc(trusted, "x".repeat(513), service)).toEqual({ ok: false, reason: "invalid_shape" });
+    expect(await handleSetGroqKeyIpc(trusted, 42, service)).toEqual({ ok: false, reason: "invalid_shape" });
+    expect(validator).not.toHaveBeenCalled();
+  });
 
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(geminiReply("partial", finishReason ?? "STOP"));
-    const service = new WritingAiService(dir, { fetchImpl: fetcher, diagnostics: quietDiagnostics() });
-
-    await expect(
-      handleTightenIpc(trustedEvent(), { requestId: "r2", text: TEXT, language: "en" }, { service, controllers: new Map() })
-    ).resolves.toEqual({ ok: false, reason });
-
-    if (!finishReason) {
-      expect(fetcher).not.toHaveBeenCalled();
-    }
+  it("refuses untrusted senders", async () => {
+    const { service } = await keyService(200);
+    const untrusted = { sender: { id: 1 }, senderFrame: { url: "https://evil.example" } } as never;
+    await expect(handleSetGroqKeyIpc(untrusted, "gsk_x", service)).rejects.toThrow();
+    expect((await handleWritingAssistStatusIpc(untrusted, service)).ai.route).toBe("blocked");
   });
 });
 
-describe("Gemini key state", () => {
-  it("reports only the last four characters and saves, replaces, and removes the key", async () => {
-    vi.stubEnv("GEMINI_API_KEY", "");
-    vi.stubEnv("GOOGLE_API_KEY", "");
-    const dir = await userDataDir();
-    const service = new WritingAiService(dir, { diagnostics: quietDiagnostics() });
+describe("dev env overrides", () => {
+  it("reads GROQ_API_KEY and ILIAD_AI_PROXY_URL only when not packaged; never Gemini env vars", async () => {
+    const env = { GROQ_API_KEY: "gsk_envkeyWXYZ", ILIAD_AI_PROXY_URL: "http://127.0.0.1:9", GEMINI_API_KEY: "g", GOOGLE_API_KEY: "g" };
+    const dev = new WritingAiService(await userDataDir(), { isPackaged: false, env, diagnostics: quietDiagnostics() });
+    expect((await dev.writingAssistStatus()).groqKey).toEqual({ state: "ok", last4: "WXYZ", rejected: false });
 
-    expect(await service.getGeminiKeyState()).toEqual({ hasKey: false, last4: null });
-    expect(await service.setGeminiApiKey("  AIzaSecretKey1234  ")).toEqual({ hasKey: true, last4: "1234" });
-    expect(await service.getGeminiKeyState()).toEqual({ hasKey: true, last4: "1234" });
-    expect(await service.setGeminiApiKey("AIzaOther9876")).toEqual({ hasKey: true, last4: "9876" });
-    expect(await service.setGeminiApiKey(null)).toEqual({ hasKey: false, last4: null });
-  });
+    // Only the background ai.json check may run (stubbed here); never a request to the dev URL.
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}", { status: 404 }));
+    const packaged = new WritingAiService(await userDataDir(), { isPackaged: true, env, fetchImpl, diagnostics: quietDiagnostics() });
+    expect((await packaged.writingAssistStatus()).groqKey.state).toBe("none");
+    expect(await autocomplete(packaged)).toEqual({ ok: false, reason: "free_unavailable" });
+    expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual(["https://iliad.md/ai.json"]);
 
-  it("keeps using keys saved by earlier versions and preserves their other fields", async () => {
-    vi.stubEnv("GEMINI_API_KEY", "");
-    vi.stubEnv("GOOGLE_API_KEY", "");
-    const dir = await userDataDir();
-    const file = path.join(dir, "assistant", "settings.json");
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, JSON.stringify({ openAiApiKey: "sk-old", geminiApiKey: "legacyKeyABCD", model: "x" }), "utf8");
-    const store = new WritingSettingsStore(dir);
-
-    expect(await store.getGeminiKeyState()).toEqual({ hasKey: true, last4: "ABCD" });
-    await store.setGeminiApiKey(null);
-    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ openAiApiKey: "sk-old", model: "x" });
-  });
-
-  it("falls back to the environment key", async () => {
-    vi.stubEnv("GEMINI_API_KEY", "envKeyWXYZ");
-    const dir = await userDataDir();
-
-    expect(await new WritingSettingsStore(dir).getGeminiKeyState()).toEqual({ hasKey: true, last4: "WXYZ" });
+    const noGroq = new WritingAiService(await userDataDir(), {
+      isPackaged: false,
+      env: { GEMINI_API_KEY: "g", GOOGLE_API_KEY: "g" },
+      diagnostics: quietDiagnostics()
+    });
+    expect((await noGroq.writingAssistStatus()).ai.route).toBe("free");
   });
 });

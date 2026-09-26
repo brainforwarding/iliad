@@ -16,7 +16,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { cleanAutocompleteOutput } from "../electron/writing/autocomplete";
 import { normalizeAgentError } from "../electron/writing/errors";
-import { stableAutocompletePrefix } from "../electron/writing/geminiAutocomplete";
+import { stableAutocompletePrefix } from "../electron/writing/groq/partials";
 import { streamGroqChatCompletion, streamGroqPrompt, type GroqStreamResult } from "../electron/writing/groq/client";
 import {
   AUTOCOMPLETE_MAX_AVOID_CHARS,

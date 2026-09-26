@@ -38,7 +38,7 @@ const LOG_FILENAME_PATTERN = /^iliad-\d{4}-\d{2}-\d{2}\.jsonl$/;
 const MAX_STRING_LENGTH = 180;
 const LOG_LEVELS: DiagnosticLogLevel[] = ["debug", "info", "warn", "error"];
 const SECRET_KEY_PATTERN = /key|token|secret|authorization|password|credential/i;
-const SECRET_VALUE_PATTERN = /\b(?:sk-[A-Za-z0-9_-]{8,}|gh[opsu]_[A-Za-z0-9_]{8,}|Bearer\s+[A-Za-z0-9._-]{8,})\b/i;
+const SECRET_VALUE_PATTERN = /\b(?:gsk_[A-Za-z0-9]{8,}|sk-[A-Za-z0-9_-]{8,}|gh[opsu]_[A-Za-z0-9_]{8,}|Bearer\s+[A-Za-z0-9._-]{8,})\b/i;
 const ABSOLUTE_PATH_PATTERN = /(?:\/Users\/|\/private\/|\/var\/folders\/|\/tmp\/|[A-Za-z]:\\)[^\s"'`<>)]*/g;
 const FORBIDDEN_CONTENT_KEYS = new Set([
   "basecontent",

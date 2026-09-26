@@ -182,8 +182,8 @@ const api = {
     void invoke("autocomplete:cancel", requestId);
   },
   getWritingAssistStatus: () => invoke("writing-assist:status"),
-  getGeminiKeyState: () => invoke("writing:get-gemini-key-state"),
-  setGeminiApiKey: (key: string | null) => invoke("writing:set-gemini-key", key),
+  getGroqKeyState: () => invoke("writing:get-groq-key-state"),
+  setGroqApiKey: (key: string | null) => invoke("writing:set-groq-key", key),
   companions: {
     read: (workspaceRoot: string, filePath: string) => invoke("file:read-companion", workspaceRoot, filePath),
     remove: (workspaceRoot: string, filePath: string, expectedHash: string) =>

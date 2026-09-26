@@ -7,7 +7,9 @@ import {
   type KeyboardEvent,
   type MutableRefObject
 } from "react";
-import type { SelectionComment, TightenFailureReason, TightenResult } from "../../types/iliad";
+import type { AiRoute, SelectionComment, TightenFailureReason, TightenResult } from "../../types/iliad";
+import { AiNoticeBar } from "../../components/AiNoticeBar";
+import { aiNoticeForReason, type AiNoticeLabels } from "../aiNotice";
 import { isAnchoredSelectionComment } from "../../app/selectionCommentsAnchor";
 import { aiMenuKeyAction } from "./extension";
 import { anchoredOverlayPosition, type OverlayPosition } from "./positioning";
@@ -48,12 +50,8 @@ export interface TightenOverlayLabels {
   working: string;
   alreadyTight: string;
   failed: string;
-  noKey: string;
-  invalidKey: string;
   incomplete: string;
   blocked: string;
-  /** Title of the disabled ✦ AI action when no Gemini key is set. */
-  addKey: string;
   tooLong: string;
   editAction: string;
   editComposerLabel: string;
@@ -61,7 +59,6 @@ export interface TightenOverlayLabels {
   editWorking: string;
   editUnchanged: string;
   editFailed: string;
-  editNoKey: string;
   editTooLong: string;
   aiAction: string;
   aiMenuLabel: string;
@@ -72,10 +69,14 @@ export interface TightenOverlayLabels {
 }
 
 export interface TightenOverlayApi {
-  /** A Gemini key is set and a Markdown file is active. When false the ✦ AI action shows disabled. */
+  /** A Markdown file is active. ✦ AI needs no key (free route by default). */
   enabled: boolean;
-  /** Opens Writing assists at the Gemini key field (used while `enabled` is false). */
+  /** Opens Writing assists with the Groq key form expanded (a notice's "Use my key" / "Update key"). */
   onRequestKey?: () => void;
+  /** The current AI route, for route-specific notice copy (null while unknown). */
+  route: AiRoute | null;
+  language: "en" | "es";
+  noticeLabels: AiNoticeLabels;
   minChars: number;
   maxChars: number;
   /** Current active-file path — compared at accept time to discard a file-switch race. */
@@ -100,7 +101,7 @@ type TightenViewState =
   | { phase: "idle" }
   | { phase: "working"; requestId: string; anchorPos: number; kind: "tighten" | "edit" }
   | { phase: "alreadyTight"; anchorPos: number; kind: "tighten" | "edit" }
-  | { phase: "error"; reason: TightenFailureReason; anchorPos: number; kind: "tighten" | "edit" };
+  | { phase: "error"; reason: TightenFailureReason; resetAt?: string; anchorPos: number; kind: "tighten" | "edit" };
 
 interface SelectionCommentsOverlayProps {
   view: EditorView | null;
@@ -611,8 +612,14 @@ export function SelectionCommentsOverlay({
 
         if (!result.ok) {
           activeTighten.onProposedRangeChange(null);
-          setTightenState({ phase: "error", reason: result.reason, anchorPos, kind });
-          scheduleTightenAutoDismiss();
+          setTightenState({ phase: "error", reason: result.reason, resetAt: result.resetAt, anchorPos, kind });
+          // An actionable notice (free AI out, key problems) stays until dismissed
+          // or the writer moves on; plain errors fade out.
+          if (!aiNoticeForReason(result.reason, { route: activeTighten.route, language: activeTighten.language, labels: activeTighten.noticeLabels })) {
+            scheduleTightenAutoDismiss();
+          } else {
+            clearTightenTimer();
+          }
           return;
         }
 
@@ -729,12 +736,7 @@ export function SelectionCommentsOverlay({
     }
 
     if (!activeTighten.enabled) {
-      if (shortcutView.state.selection.main.empty || !activeTighten.onRequestKey) {
-        return false;
-      }
-
-      activeTighten.onRequestKey();
-      return true;
+      return false;
     }
 
     const selection = shortcutView.state.selection.main;
@@ -901,7 +903,6 @@ export function SelectionCommentsOverlay({
   const tightenOverCap = Boolean(
     tighten?.enabled && tightenSelectionMetrics && tightenSelectionMetrics.safeLength > tighten.maxChars
   );
-  const aiNeedsKey = Boolean(tighten && !tighten.enabled);
   const floatingWidth = 96 + (showEditAction ? 96 : 0);
   const floatingPosition =
     floatingPos !== null
@@ -915,17 +916,22 @@ export function SelectionCommentsOverlay({
     tightenAnchorPos !== null
       ? overlayPositionAt(view, tightenAnchorPos, { width: 220, height: 30 }, "above")
       : null;
+  const tightenNotice =
+    tighten && tightenState.phase === "error"
+      ? aiNoticeForReason(tightenState.reason, {
+          route: tighten.route,
+          resetAt: tightenState.resetAt,
+          language: tighten.language,
+          labels: tighten.noticeLabels
+        })
+      : null;
   const tightenErrorLabel =
     tighten && tightenState.phase === "error"
       ? tightenState.kind === "edit"
-        ? tightenState.reason === "no_key"
-          ? tighten.labels.editNoKey
-          : tightenState.reason === "too_long"
-            ? tighten.labels.editTooLong
-            : sharedTightenErrorLabel(tightenState.reason, tighten.labels) ?? tighten.labels.editFailed
-        : tightenState.reason === "no_key"
-          ? tighten.labels.noKey
-          : sharedTightenErrorLabel(tightenState.reason, tighten.labels) ?? tighten.labels.failed
+        ? tightenState.reason === "too_long"
+          ? tighten.labels.editTooLong
+          : sharedTightenErrorLabel(tightenState.reason, tighten.labels) ?? tighten.labels.editFailed
+        : sharedTightenErrorLabel(tightenState.reason, tighten.labels) ?? tighten.labels.failed
       : "";
   const composerPosition = composer
     ? overlayPositionAt(view, composer.anchorPos, { width: 280, height: 92 }, "below")
@@ -981,19 +987,11 @@ export function SelectionCommentsOverlay({
           {showEditAction && tighten ? (
             <button
               type="button"
-              className={aiNeedsKey ? "editor-ai-action is-unavailable" : "editor-ai-action"}
+              className="editor-ai-action"
               disabled={tightenOverCap}
-              aria-disabled={aiNeedsKey || undefined}
-              title={
-                aiNeedsKey ? tighten.labels.addKey : tightenOverCap ? tighten.labels.editTooLong : tighten.labels.aiMenuLabel
-              }
+              title={tightenOverCap ? tighten.labels.editTooLong : tighten.labels.aiMenuLabel}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
-                if (aiNeedsKey) {
-                  tighten.onRequestKey?.();
-                  return;
-                }
-
                 if (!tightenOverCap) {
                   openEditComposer(view);
                 }
@@ -1029,7 +1027,27 @@ export function SelectionCommentsOverlay({
         </div>
       ) : null}
 
-      {tighten && tightenStatusPosition && tightenState.phase === "error" ? (
+      {tighten && tightenStatusPosition && tightenState.phase === "error" && tightenNotice ? (
+        <AiNoticeBar
+          notice={tightenNotice}
+          labels={tighten.noticeLabels}
+          style={{ top: tightenStatusPosition.top, left: tightenStatusPosition.left }}
+          onAction={
+            tighten.onRequestKey
+              ? () => {
+                  resetTighten();
+                  tighten.onRequestKey?.();
+                }
+              : undefined
+          }
+          onDismiss={() => {
+            resetTighten();
+            view.focus();
+          }}
+        />
+      ) : null}
+
+      {tighten && tightenStatusPosition && tightenState.phase === "error" && !tightenNotice ? (
         <div
           className="editor-tighten-status is-error"
           style={{ top: tightenStatusPosition.top, left: tightenStatusPosition.left }}
@@ -1176,8 +1194,6 @@ export function SelectionCommentsOverlay({
 
 function sharedTightenErrorLabel(reason: TightenFailureReason, labels: TightenOverlayLabels) {
   switch (reason) {
-    case "invalid_api_key":
-      return labels.invalidKey;
     case "incomplete":
       return labels.incomplete;
     case "blocked":

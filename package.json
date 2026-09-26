@@ -32,7 +32,8 @@
     "test": "vitest run",
     "typecheck": "tsc -b && tsc -p electron/tsconfig.json --noEmit",
     "lint:css": "stylelint \"src/styles/**/*.css\"",
-    "benchmark:autocomplete": "vite-node scripts/benchmarkAutocomplete.ts --"
+    "benchmark:autocomplete": "vite-node scripts/benchmarkAutocomplete.ts --",
+    "dev:fake-ai-proxy": "vite-node scripts/devFakeAiProxy.ts --"
   },
   "dependencies": {
     "@codemirror/commands": "^6.8.1",

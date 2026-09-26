@@ -1,6 +1,15 @@
 export type AgentErrorCode =
-  | "missing_api_key"
   | "invalid_api_key"
+  /** A saved own Groq key that cannot be decrypted: AI is blocked, never rerouted to free. */
+  | "key_unreadable"
+  /** Free route: this install's or network's daily quota (proxy `quota_exhausted` / `install_limited`). */
+  | "free_quota_exhausted"
+  /** Free route: the proxy's global daily spend cap (`global_cap`). */
+  | "free_global_cap"
+  /** Free route: kill switch (`free_tier_disabled`) or no proxy configured for this build. */
+  | "free_unavailable"
+  /** Free route: this app version is below the proxy's minimum (`client_outdated`). */
+  | "client_outdated"
   | "rate_limited"
   | "provider_unavailable"
   | "network_unreachable"
@@ -19,6 +28,8 @@ export interface AgentError {
   detail?: string;
   providerStatus?: number;
   retryable: boolean;
+  /** ISO 8601 time the free quota resets (00:00 UTC); only on free-route "out" refusals. */
+  resetAt?: string;
 }
 
 export class AgentRuntimeError extends Error {
@@ -31,10 +42,10 @@ export class AgentRuntimeError extends Error {
   }
 }
 
-export function missingGeminiKeyError() {
+export function keyUnreadableError() {
   return new AgentRuntimeError({
-    code: "missing_api_key",
-    userMessage: "Add a Gemini API key in Writing assists.",
+    code: "key_unreadable",
+    userMessage: "Re-enter your Groq key in Writing assists.",
     retryable: false
   });
 }
@@ -95,7 +106,7 @@ export function normalizeAgentError(error: unknown, options: { wasCanceled?: boo
 }
 
 export function agentErrorDiagnostic(agentError: AgentError) {
-  const diagnosticCode = `GEMINI_${agentError.code.toUpperCase()}`;
+  const diagnosticCode = `AI_${agentError.code.toUpperCase()}`;
   return agentError.detail ? `${diagnosticCode} ${agentError.detail}` : diagnosticCode;
 }
 

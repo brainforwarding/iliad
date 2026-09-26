@@ -249,8 +249,12 @@ export interface TightenSelectionRequest {
 }
 
 export type TightenFailureReason =
-  | "no_key"
   | "invalid_api_key"
+  | "free_exhausted"
+  | "free_unavailable"
+  | "client_outdated"
+  | "key_unreadable"
+  | "unreachable"
   | "rate_limited"
   | "too_long"
   | "empty"
@@ -263,7 +267,8 @@ export type TightenFailureReason =
 
 export type TightenResult =
   | { ok: true; rewrite: string; unchanged: boolean }
-  | { ok: false; reason: TightenFailureReason };
+  /** `resetAt` (ISO 8601, 00:00 UTC) only with `free_exhausted`. */
+  | { ok: false; reason: TightenFailureReason; resetAt?: string };
 
 export interface IdeaAutocompleteRequest {
   direction?: string;
@@ -285,8 +290,12 @@ export interface IdeaAutocompleteRequest {
 
 export type IdeaAutocompleteFailureReason =
   | "disabled"
-  | "no_key"
   | "invalid_api_key"
+  | "free_exhausted"
+  | "free_unavailable"
+  | "client_outdated"
+  | "key_unreadable"
+  | "unreachable"
   | "rate_limited"
   | "too_long"
   | "empty"
@@ -298,20 +307,23 @@ export type IdeaAutocompleteFailureReason =
 
 export type IdeaAutocompleteResult =
   | { ok: true; insert: string }
-  | { ok: false; reason: IdeaAutocompleteFailureReason };
+  /** `resetAt` (ISO 8601, 00:00 UTC) only with `free_exhausted`. */
+  | { ok: false; reason: IdeaAutocompleteFailureReason; resetAt?: string };
 
 export interface WritingAssistStatus {
   corrector: {
     available: boolean;
     provider: "local" | null;
   };
-  autocomplete: {
-    available: boolean;
-    provider: "gemini-api" | null;
-    model: string | null;
+  /** Which route requests take: free (Iliad AI proxy), own key (direct to Groq), or blocked (unreadable key). */
+  ai: {
+    route: AiRoute;
+    model: string;
   };
-  geminiKey: GeminiKeyState;
+  groqKey: GroqKeyState;
 }
+
+export type AiRoute = "free" | "own-key" | "blocked";
 
 export type SelectionCommentStatus = "pending" | "sent" | "discarded";
 
@@ -393,11 +405,17 @@ export type ApplyAgentProposalFileResponse =
       status: AgentProposalFileStatus;
     };
 
-export interface GeminiKeyState {
-  hasKey: boolean;
+export interface GroqKeyState {
+  state: "none" | "ok" | "unreadable";
   /** Last four characters of the key in use, for display only. */
   last4: string | null;
+  /** Groq refused the saved key on a request since it was saved. */
+  rejected: boolean;
 }
+
+export type SetGroqKeyResult =
+  | { ok: true; state: GroqKeyState }
+  | { ok: false; reason: "rejected" | "unreachable" | "invalid_shape" };
 
 export interface ReviewChunkActionRequest {
   workspaceSessionId: string;
@@ -529,8 +547,9 @@ export interface IliadApi {
   onAutocompletePartial: (listener: (event: { requestId: string; insert: string }) => void) => () => void;
   cancelAutocompleteIdea: (requestId: string) => void;
   getWritingAssistStatus: () => Promise<WritingAssistStatus>;
-  getGeminiKeyState: () => Promise<GeminiKeyState>;
-  setGeminiApiKey: (key: string | null) => Promise<GeminiKeyState>;
+  getGroqKeyState: () => Promise<GroqKeyState>;
+  /** Validates a new key against Groq in main and saves it only if Groq accepts it; null removes it. */
+  setGroqApiKey: (key: string | null) => Promise<SetGroqKeyResult>;
   assetUrl: (absolutePath: string) => string;
   agent: AgentApi;
 }

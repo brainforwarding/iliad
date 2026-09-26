@@ -308,4 +308,33 @@ describe("autocomplete lifecycle", () => {
     expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ suggestionKind: "paragraph" }));
     plugin.destroy();
   });
+
+  it("sets no cooldown after free_exhausted: the next explicit request reaches IPC and shows the notice again", async () => {
+    const resetAt = "2026-09-26T00:00:00.000Z";
+    const request = vi.fn<() => Promise<IdeaAutocompleteResult>>().mockResolvedValue({ ok: false, reason: "free_exhausted", resetAt });
+    const { plugin, status } = harness(request);
+    plugin.lengthKey("sentence");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(status).toHaveBeenLastCalledWith({ state: "failed", reason: "free_exhausted", resetAt });
+    status.mockClear();
+    plugin.lengthKey("sentence");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(status).toHaveBeenLastCalledWith({ state: "failed", reason: "free_exhausted", resetAt });
+    plugin.destroy();
+  });
+
+  it("shows an actionable notice even when extending a visible draft is refused", async () => {
+    const request = vi.fn<() => Promise<IdeaAutocompleteResult>>()
+      .mockResolvedValueOnce({ ok: true, insert: "quiet room." })
+      .mockResolvedValueOnce({ ok: false, reason: "free_exhausted", resetAt: "2026-09-26T00:00:00.000Z" });
+    const { plugin, status } = harness(request);
+    plugin.lengthKey("sentence");
+    await vi.advanceTimersByTimeAsync(0);
+    plugin.action("longer");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(plugin.suggestion?.insert).toBe("quiet room.");
+    expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ state: "failed", reason: "free_exhausted" }));
+    plugin.destroy();
+  });
 });

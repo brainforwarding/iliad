@@ -8,9 +8,10 @@ const providerUnavailable: AgentError = {
 };
 
 describe("writing AI error diagnostics", () => {
-  it("uses the Gemini diagnostic prefix and keeps safe details", () => {
-    expect(agentErrorDiagnostic(providerUnavailable)).toBe("GEMINI_PROVIDER_UNAVAILABLE");
-    expect(agentErrorDiagnostic({ ...providerUnavailable, detail: "quota" })).toBe("GEMINI_PROVIDER_UNAVAILABLE quota");
+  it("uses the provider-neutral AI_ diagnostic prefix and keeps safe details", () => {
+    expect(agentErrorDiagnostic(providerUnavailable)).toBe("AI_PROVIDER_UNAVAILABLE");
+    expect(agentErrorDiagnostic({ ...providerUnavailable, detail: "proxy_error" })).toBe("AI_PROVIDER_UNAVAILABLE proxy_error");
+    expect(agentErrorDiagnostic({ ...providerUnavailable, code: "free_quota_exhausted" })).toBe("AI_FREE_QUOTA_EXHAUSTED");
   });
 
   it("never mentions a removed provider in user messages", () => {
@@ -21,7 +22,7 @@ describe("writing AI error diagnostics", () => {
     ];
 
     for (const sample of samples) {
-      expect(sample.userMessage).not.toMatch(/openai|codex/i);
+      expect(sample.userMessage).not.toMatch(/openai|codex|gemini/i);
     }
   });
 });

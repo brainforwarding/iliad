@@ -162,4 +162,45 @@ describe("agent autocomplete helpers", () => {
       )
     ).toBe("timeout");
   });
+
+  it("maps the Groq route's codes to their own reasons (Groq spec §5)", () => {
+    const reason = (code: Parameters<typeof autocompleteReasonFromAgentError>[0]["code"]) =>
+      autocompleteReasonFromAgentError({ code, userMessage: code, retryable: false }, false);
+    expect(reason("free_quota_exhausted")).toBe("free_exhausted");
+    expect(reason("free_global_cap")).toBe("free_exhausted");
+    expect(reason("free_unavailable")).toBe("free_unavailable");
+    expect(reason("client_outdated")).toBe("client_outdated");
+    expect(reason("key_unreadable")).toBe("key_unreadable");
+    expect(reason("invalid_api_key")).toBe("invalid_api_key");
+    expect(reason("network_unreachable")).toBe("unreachable");
+    expect(reason("dns_failure")).toBe("unreachable");
+    expect(reason("provider_unavailable")).toBe("provider");
+  });
+});
+
+describe("current-line echo (Groq Phase 0 finding 1)", () => {
+  it("strips gpt-oss repeating the start of a Spanish dialogue line (dialogue-es fixture)", () => {
+    const context = { prefix: "—Tú lo sabías.\n\n—Solo sabía que ", suffix: " —respondió él.", suggestionKind: "sentence" as const };
+    expect(cleanAutocompleteOutput("Solo sabía que todo había cambiado", context)).toBe("todo había cambiado");
+    expect(cleanAutocompleteOutput("solo sabía que todo había cambiado", context)).toBe("todo había cambiado");
+    expect(cleanAutocompleteOutput("—Solo sabía que todo había cambiado", context)).toBe("todo había cambiado");
+    expect(cleanAutocompleteOutput("todo había cambiado", context)).toBe("todo había cambiado");
+  });
+
+  it("strips the echo after list and quote markers, in paragraph mode too", () => {
+    expect(cleanAutocompleteOutput("First we listen to each other.", { prefix: "Notes\n\n- First we ", suffix: "", suggestionKind: "sentence" }))
+      .toBe("listen to each other.");
+    expect(cleanAutocompleteOutput("Una persona cuenta lo que aprendió.", {
+      prefix: "1. Formen parejas.\n2. Una persona ", suffix: "", suggestionKind: "paragraph"
+    })).toBe("cuenta lo que aprendió.");
+  });
+
+  it("leaves one-word lines and word-prefix matches alone", () => {
+    // A single word on the line is not enough evidence of an echo.
+    expect(cleanAutocompleteOutput("She said it again.", { prefix: "Intro.\n\nShe ", suffix: "", suggestionKind: "sentence" }))
+      .toBe("She said it again.");
+    // The line ends mid-word ("que"); output continuing with "quedó" is not an echo boundary.
+    expect(cleanAutocompleteOutput("Solo sabía quedó claro", { prefix: "Intro.\n—Solo sabía que", suffix: "", suggestionKind: "sentence" }))
+      .toBe(" Solo sabía quedó claro");
+  });
 });

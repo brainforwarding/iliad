@@ -4,7 +4,6 @@ import {
   TIGHTEN_SELECTION_END,
   TIGHTEN_SELECTION_START,
   normalizeTightenSelectionRange,
-  selectionTransformMaxOutputTokens,
   type SelectionMode,
   type SelectionRange,
   type WritingLanguage
@@ -12,7 +11,7 @@ import {
 
 // On-demand, selection-scoped concise rewrite (ADR-0020). Pure helpers only;
 // the IPC wiring (trust gate, abort map) lives in electron/ipc/tighten.ts and
-// the Gemini request in electron/writing/writingAiService.ts.
+// the Groq request in electron/writing/writingAiService.ts.
 
 export { TIGHTEN_MAX_INPUT_CHARS, TIGHTEN_MAX_INSTRUCTION_CHARS } from "./groq/prompts/limits.js";
 // Markers, range normalization and the prompt builders live in the pure,
@@ -30,15 +29,20 @@ export {
   tightenModelInput,
   tightenSelectedText
 } from "./groq/prompts/v1.js";
-export const TIGHTEN_TIMEOUT_MS = 15000;
+/** 30 s so a full 4,000-char edit is not cut off by the app before the proxy's own limits (Groq spec §2). */
+export const TIGHTEN_TIMEOUT_MS = 30000;
 
 export type TightenLanguage = WritingLanguage;
 export type TightenMode = SelectionMode;
 export type TightenSelectionRange = SelectionRange;
 
 export type TightenFailureReason =
-  | "no_key"
   | "invalid_api_key"
+  | "free_exhausted"
+  | "free_unavailable"
+  | "client_outdated"
+  | "key_unreadable"
+  | "unreachable"
   | "rate_limited"
   | "too_long"
   | "empty"
@@ -51,7 +55,7 @@ export type TightenFailureReason =
 
 export type TightenResult =
   | { ok: true; rewrite: string; unchanged: boolean }
-  | { ok: false; reason: TightenFailureReason };
+  | { ok: false; reason: TightenFailureReason; resetAt?: string };
 
 export function normalizeTightenLanguage(language: unknown): TightenLanguage {
   return language === "es" ? "es" : "en";
@@ -100,13 +104,6 @@ export function validateTightenInstruction(instruction: unknown): TightenInstruc
 export function mergeTightenSelectionRewrite(text: string, selection: TightenSelectionRange, selectedRewrite: string): string {
   const focus = normalizeTightenSelectionRange(text, selection);
   return `${text.slice(0, focus.from)}${selectedRewrite}${text.slice(focus.to)}`;
-}
-
-/** Gemini counts thinking in the output budget, so a low thinking pass gets its own headroom on top. */
-export const TIGHTEN_GEMINI_THINKING_BUDGET = 2048;
-
-export function geminiSelectionTransformMaxOutputTokens(text: string, mode: TightenMode): number {
-  return Math.min(8192, selectionTransformMaxOutputTokens(text, mode) + TIGHTEN_GEMINI_THINKING_BUDGET);
 }
 
 function originalIsFenced(originalText: string): boolean {
@@ -240,13 +237,25 @@ export function isTightenUnchanged(rewrite: string, originalText: string): boole
 }
 
 export function tightenReasonFromAgentError(error: AgentError, timedOut: boolean): TightenFailureReason {
+  // New codes are mapped explicitly before the `provider_unavailable` detail
+  // regex below (Groq spec §5); proxy-derived details never match it.
   switch (error.code) {
-    case "missing_api_key":
-      return "no_key";
     case "invalid_api_key":
       return "invalid_api_key";
     case "rate_limited":
       return "rate_limited";
+    case "free_quota_exhausted":
+    case "free_global_cap":
+      return "free_exhausted";
+    case "free_unavailable":
+      return "free_unavailable";
+    case "client_outdated":
+      return "client_outdated";
+    case "key_unreadable":
+      return "key_unreadable";
+    case "network_unreachable":
+    case "dns_failure":
+      return "unreachable";
     case "provider_unavailable":
       if (isTightenRateLimitDetail(error.detail)) {
         return "rate_limited";
@@ -265,7 +274,9 @@ export function tightenReasonFromAgentError(error: AgentError, timedOut: boolean
       return "incomplete";
     case "content_blocked":
       return "blocked";
-    default:
+    case "model_not_found":
+    case "malformed_provider_response":
+    case "unknown":
       return "provider";
   }
 }

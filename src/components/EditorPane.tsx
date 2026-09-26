@@ -35,8 +35,10 @@ import {
   type ContentSearchRevealTarget
 } from "../editor/contentSearchReveal";
 import type { TightenInlineReview } from "../editor/tightenSafeRange";
+import { aiNoticeForReason, type AiNoticeLabels } from "../editor/aiNotice";
 import type { EditorFontPreset } from "../preferences/editorPreferences";
 import type {
+  AiRoute,
   FileTreeNode,
   IdeaAutocompleteRequest,
   IdeaAutocompleteResult,
@@ -44,6 +46,7 @@ import type {
   TightenResult,
   WritingCorrectorMemorySnapshot
 } from "../types/iliad";
+import { AiNoticeBar } from "./AiNoticeBar";
 import { ClipMark } from "./ClipMark";
 import { DetachedCommentsBar } from "./DetachedCommentsBar";
 import { FilePlus } from "lucide-react";
@@ -58,9 +61,14 @@ export interface EditorSelectionCommentsProps {
 }
 
 export interface EditorTightenProps {
+  /** A Markdown file is active. ✦ AI needs no key: it runs free, on the writer's key, or reports a blocked key. */
   enabled: boolean;
-  /** Opens Writing assists at the Gemini key field when `enabled` is false. */
+  /** Opens Writing assists with the Groq key form expanded (notice "Use my key" / "Update key"). */
   onRequestKey?: () => void;
+  /** The current AI route, for route-specific notice copy (null while unknown). */
+  route: AiRoute | null;
+  language: "en" | "es";
+  noticeLabels: AiNoticeLabels;
   minChars: number;
   maxChars: number;
   labels: TightenOverlayLabels;
@@ -78,8 +86,10 @@ export interface EditorWritingAssistsProps {
   onPartial?: (listener: (event: { requestId: string; insert: string }) => void) => () => void;
   correctorEnabled: boolean;
   autocompleteEnabled: boolean;
-  /** A Gemini key is set; without one a request reports the missing key. */
-  hasAiKey?: boolean;
+  /** The current AI route, for route-specific notice copy (null while unknown). */
+  aiRoute?: AiRoute | null;
+  /** Opens Writing assists with the Groq key form expanded (notice "Use my key" / "Update key"). */
+  onRequestAiKey?: () => void;
   language: "en" | "es";
   workspaceSessionId?: string;
   documentRelativePath?: string;
@@ -98,15 +108,13 @@ export interface EditorWritingAssistsProps {
       longer: string; steer: string; steerLabel: string; steerPlaceholder: string;
       working: string;
       autocompleteOff: string;
-      noProvider: string;
-      invalidApiKey: string;
-      rateLimited: string;
       tooLong: string;
       timeout: string;
       unavailable: string;
       noSuggestion: string;
       unavailableInDocument: string;
     };
+    aiNotices: AiNoticeLabels;
   };
   autocompleteIdea: (request: IdeaAutocompleteRequest) => Promise<IdeaAutocompleteResult>;
   cancelAutocompleteIdea: (requestId: string) => void;
@@ -856,12 +864,15 @@ export function EditorPane({
     }
 
     switch (autocompleteStatus.reason) {
-      case "no_key":
-        return writingAssists.labels.autocomplete.noProvider;
+      // Rendered as an actionable notice below (autocompleteNotice).
+      case "free_exhausted":
+      case "free_unavailable":
+      case "client_outdated":
+      case "key_unreadable":
       case "invalid_api_key":
-        return writingAssists.labels.autocomplete.invalidApiKey;
+      case "unreachable":
       case "rate_limited":
-        return writingAssists.labels.autocomplete.rateLimited;
+        return null;
       case "too_long":
         return writingAssists.labels.autocomplete.tooLong;
       case "timeout":
@@ -876,6 +887,15 @@ export function EditorPane({
       case "untrusted":
         return writingAssists.labels.autocomplete.unavailable;
     }
+  }, [autocompleteStatus, writingAssists]);
+  const autocompleteNotice = useMemo(() => {
+    if (!writingAssists?.autocompleteEnabled || autocompleteStatus.state !== "failed") return null;
+    return aiNoticeForReason(autocompleteStatus.reason, {
+      route: writingAssists.aiRoute ?? null,
+      resetAt: autocompleteStatus.resetAt,
+      language: writingAssists.language,
+      labels: writingAssists.labels.aiNotices
+    });
   }, [autocompleteStatus, writingAssists]);
 
   // Preserve the autocomplete controller when unrelated decorations (such as
@@ -1221,6 +1241,9 @@ export function EditorPane({
                 ? {
                     enabled: tighten.enabled,
                     onRequestKey: tighten.onRequestKey,
+                    route: tighten.route,
+                    language: tighten.language,
+                    noticeLabels: tighten.noticeLabels,
                     minChars: tighten.minChars,
                     maxChars: tighten.maxChars,
                     labels: tighten.labels,
@@ -1352,6 +1375,19 @@ export function EditorPane({
         </span>
         {lengthKeyHint && !autocompleteStatusMessage && writingAssists ? (
           <div className="editor-autocomplete-status" role="status">{writingAssists.labels.autocomplete.autocompleteOff}</div>
+        ) : null}
+        {autocompleteNotice && writingAssists ? (
+          <AiNoticeBar
+            notice={autocompleteNotice}
+            labels={writingAssists.labels.aiNotices}
+            className={autocompleteStatusAnchor ? "is-anchored" : "is-corner"}
+            style={autocompleteStatusAnchor ? { left: autocompleteStatusAnchor.left, top: autocompleteStatusAnchor.top } : undefined}
+            onAction={writingAssists.onRequestAiKey}
+            onDismiss={() => {
+              setAutocompleteStatus({ state: "idle" });
+              setAutocompleteStatusAnchor(null);
+            }}
+          />
         ) : null}
         {autocompleteStatusMessage ? (
           <div

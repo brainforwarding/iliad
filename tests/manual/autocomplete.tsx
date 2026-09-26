@@ -59,7 +59,7 @@ function Preview() {
     correctorEnabled: false, autocompleteEnabled: enabled,
     workspaceSessionId: "preview", documentRelativePath: files[chapter].relativePath, language,
     preferences: options.preferences,
-    labels: { corrector: strings.editor.writingCorrector, autocomplete: strings.editor.ideaAutocomplete },
+    labels: { corrector: strings.editor.writingCorrector, autocomplete: strings.editor.ideaAutocomplete, aiNotices: strings.editor.aiNotices },
     autocompleteIdea: requestAutocomplete, cancelAutocompleteIdea: cancel, onPartial
   }), [enabled, chapter, language, options.preferences, strings]);
   return <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "var(--editor)" }}>
@@ -68,13 +68,13 @@ function Preview() {
       <WritingAssistsMenu labels={strings.writingAssists} menuRef={menuRef} open={open} onToggleOpen={() => setOpen(!open)}
         correctorEnabled={corrector} onSetCorrectorEnabled={setCorrector} correctorAvailable={true}
         autocompleteEnabled={enabled} onSetAutocompleteEnabled={setEnabled}
-        geminiKey={{ hasKey: true, last4: "demo" }} onSaveGeminiKey={async () => undefined} onGetGeminiKey={() => undefined} onOpenPrivacy={() => undefined}
+        groqKey={{ state: "none", last4: null, rejected: false }} onSaveGroqKey={async () => ({ ok: true, state: { state: "none", last4: null, rejected: false } })} onGetGroqKey={() => undefined} onOpenPrivacy={() => undefined}
         preferences={options.preferences} onPreferencesChange={options.setPreferences}
         onResetShortcuts={options.resetShortcuts} />
     </header>
     <EditorPane file={files[chapter]} value={text[chapter]} editorFontSize={19} editorFontPreset="serif" labels={strings.editor} review={null}
       selectionComments={selectionComments}
-      tighten={{ enabled: true, minChars: 12, maxChars: 4000, labels: strings.editor.tighten, run: fakeRewrite, cancel: () => undefined }}
+      tighten={{ enabled: true, route: "free", language: "en", noticeLabels: strings.editor.aiNotices, minChars: 12, maxChars: 4000, labels: strings.editor.tighten, run: fakeRewrite, cancel: () => undefined }}
       writingAssists={writingAssists} onChange={(value) => setText((current) => current.map((item, index) => index === chapter ? value : item))}
       onInsertImage={nothing} onInsertImageReference={nothing} onOpenLink={ignoreLink}
       onEditorViewChange={(editor) => { view.current = editor; editor.dispatch({ selection: { anchor: editor.state.doc.length } }); }} />

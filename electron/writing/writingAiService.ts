@@ -1,24 +1,34 @@
 import { createDiagnosticsLogger, type DiagnosticsLogger } from "../diagnostics/logger.js";
 import type { IdeaAutocompleteTextRequest } from "./autocomplete.js";
-import { AgentRuntimeError, missingGeminiKeyError, normalizeAgentError } from "./errors.js";
-import { generateGeminiAutocomplete } from "./geminiAutocomplete.js";
-import { GEMINI_TEXT_MODEL, geminiProse, readGeminiJson, requestGeminiText } from "./geminiText.js";
-import { WritingSettingsStore, type GeminiKeyState } from "./settingsStore.js";
-import {
-  geminiSelectionTransformMaxOutputTokens,
-  selectionTransformInstruction,
-  tightenModelInput,
-  tightenSelectedText,
-  type TightenLanguage,
-  type TightenMode,
-  type TightenSelectionRange
-} from "./tighten.js";
+import { AgentRuntimeError, keyUnreadableError, normalizeAgentError } from "./errors.js";
+import { streamGroqText, validateGroqApiKey, type GroqKeyValidation, type GroqRoute, type GroqStreamResult } from "./groq/client.js";
+import { DEV_PROXY_URL_ENV } from "./groq/config.js";
+import { ProxyEndpointResolver, parseDevProxyUrl } from "./groq/endpoint.js";
+import { InstallTokenStore } from "./groq/installToken.js";
+import { GroqKeyStore, type GroqKeyStateName, type SafeStorageLike } from "./groq/keyStore.js";
+import { createAutocompletePartialEmitter } from "./groq/partials.js";
+import { GROQ_MODEL, LATEST_PROMPT_VERSION, parseWritingAiTask, type WritingAiTask } from "./groq/prompts/index.js";
+import { IliadAiProxyClient } from "./groq/proxyClient.js";
+import { containsReasoningMarkers } from "./groq/sse.js";
+import type { TightenLanguage, TightenMode, TightenSelectionRange } from "./tighten.js";
+
+export type AiRoute = "free" | "own-key" | "blocked";
 
 export interface WritingAssistStatus {
   corrector: { available: boolean; provider: "local" | null };
-  autocomplete: { available: boolean; provider: "gemini-api" | null; model: string | null };
-  geminiKey: GeminiKeyState;
+  /** No counts, no quota state: "out" is learned from request results (spec §6). */
+  ai: { route: AiRoute; model: typeof GROQ_MODEL };
+  groqKey: {
+    state: GroqKeyStateName;
+    last4: string | null;
+    /** Groq refused the saved key on a request since it was saved (shown in Writing assists). */
+    rejected: boolean;
+  };
 }
+
+export type SetGroqKeyResult =
+  | { ok: true; state: WritingAssistStatus["groqKey"] }
+  | { ok: false; reason: Exclude<GroqKeyValidation, { ok: true }>["reason"] };
 
 export interface TightenSelectionRequest {
   requestId: string;
@@ -30,173 +40,151 @@ export interface TightenSelectionRequest {
   signal: AbortSignal;
 }
 
-interface WritingAiServiceOptions {
-  settingsStore?: WritingSettingsStore;
+export interface WritingAiServiceOptions {
+  keyStore?: Pick<GroqKeyStore, "read" | "getState" | "setKey">;
+  /** The free route's proxy client (tests inject a fake-proxy-backed one). */
+  proxy?: Pick<IliadAiProxyClient, "stream">;
   diagnostics?: DiagnosticsLogger;
   fetchImpl?: typeof fetch;
-}
-
-/** Gemini finish reasons that mean the model declined the text (not a transport failure). */
-const BLOCKED_FINISH_REASONS = new Set([
-  "SAFETY",
-  "RECITATION",
-  "BLOCKLIST",
-  "PROHIBITED_CONTENT",
-  "SPII",
-  "IMAGE_SAFETY",
-  "LANGUAGE"
-]);
-
-/**
- * One Gemini selection rewrite (✦ AI menu: Shorten and edit presets or a typed
- * instruction). The shared instruction, marked input, and output cleaning are
- * the same ones the menu has always used; only the model call changed.
- * Unfinished (MAX_TOKENS) and declined (SAFETY and similar) answers become
- * explicit failures so a partial rewrite is never offered.
- */
-export async function generateGeminiSelectionTransform(
-  apiKey: string,
-  request: Omit<TightenSelectionRequest, "requestId">,
-  fetchImpl: typeof fetch = fetch
-): Promise<string> {
-  const mode = request.mode ?? "tighten";
-  const response = await requestGeminiText({
-    apiKey,
-    systemInstruction: selectionTransformInstruction({
-      mode,
-      language: request.language,
-      instruction: request.instruction
-    }),
-    input: tightenModelInput(request.text, request.selection),
-    maxOutputTokens: geminiSelectionTransformMaxOutputTokens(tightenSelectedText(request.text, request.selection), mode),
-    stream: false,
-    signal: request.signal,
-    unavailableMessage: "The AI menu is unavailable. Check your Gemini API key and quota.",
-    fetchImpl
-  });
-  const data = await readGeminiJson(response);
-  const candidate = data.candidates?.[0];
-  const finishReason = candidate?.finishReason ?? "";
-
-  if (data.promptFeedback?.blockReason || BLOCKED_FINISH_REASONS.has(finishReason)) {
-    throw new AgentRuntimeError({
-      code: "content_blocked",
-      userMessage: "The AI did not return a rewrite for this text.",
-      detail: (data.promptFeedback?.blockReason || finishReason).toLowerCase(),
-      retryable: false
-    });
-  }
-
-  if (finishReason === "MAX_TOKENS") {
-    throw new AgentRuntimeError({
-      code: "output_truncated",
-      userMessage: "The AI could not finish this rewrite. Try a shorter selection.",
-      detail: "max_tokens",
-      retryable: true
-    });
-  }
-
-  if (finishReason !== "STOP") {
-    throw new AgentRuntimeError({
-      code: "malformed_provider_response",
-      userMessage: "The AI returned an incomplete response. Try again.",
-      detail: finishReason ? finishReason.toLowerCase() : "missing_finish_reason",
-      retryable: true
-    });
-  }
-
-  return geminiProse(data);
+  safeStorage?: SafeStorageLike | null;
+  /** Env overrides (`GROQ_API_KEY`, `ILIAD_AI_PROXY_URL`) are read only when false. Defaults to true. */
+  isPackaged?: boolean;
+  env?: NodeJS.ProcessEnv;
+  clientVersion?: string;
+  validateKey?: (key: string) => Promise<GroqKeyValidation>;
 }
 
 /**
- * Built-in writing AI: inline autocomplete and the ✦ AI selection menu, both
- * on one Gemini key. The corrector runs locally and needs no key.
+ * Built-in writing AI: inline autocomplete and the ✦ AI selection menu, on
+ * Groq (`openai/gpt-oss-120b`) through one of two routes, chosen per request
+ * from the key store (spec §1): no key → free (Iliad AI proxy); a key → own
+ * key (direct); an unreadable key → blocked. There is no fallback between
+ * routes. The corrector runs locally and needs no AI.
  */
 export class WritingAiService {
-  private readonly settingsStore: WritingSettingsStore;
+  private readonly keyStore: Pick<GroqKeyStore, "read" | "getState" | "setKey">;
+  private readonly proxy: Pick<IliadAiProxyClient, "stream">;
   private readonly diagnostics: DiagnosticsLogger;
   private readonly fetchImpl: typeof fetch | undefined;
+  private readonly validateKey: (key: string) => Promise<GroqKeyValidation>;
+  /** The saved key Groq rejected on a request (memory only), for the menu's error state. */
+  private rejectedKey: string | null = null;
 
   constructor(userDataPath: string, options: WritingAiServiceOptions = {}) {
-    this.settingsStore = options.settingsStore ?? new WritingSettingsStore(userDataPath);
-    this.diagnostics = options.diagnostics ?? createDiagnosticsLogger(userDataPath);
+    const isPackaged = options.isPackaged ?? true;
+    const env = options.env ?? process.env;
     this.fetchImpl = options.fetchImpl;
+    this.keyStore = options.keyStore ?? new GroqKeyStore(userDataPath, {
+      safeStorage: options.safeStorage ?? null,
+      allowEnvKey: !isPackaged,
+      env
+    });
+    this.proxy = options.proxy ?? new IliadAiProxyClient({
+      endpoint: new ProxyEndpointResolver(userDataPath, {
+        devOverrideUrl: isPackaged ? null : parseDevProxyUrl(env[DEV_PROXY_URL_ENV]),
+        fetchImpl: options.fetchImpl
+      }),
+      tokens: new InstallTokenStore(userDataPath),
+      clientVersion: options.clientVersion ?? "0.0.0",
+      fetchImpl: options.fetchImpl
+    });
+    this.diagnostics = options.diagnostics ?? createDiagnosticsLogger(userDataPath);
+    this.validateKey = options.validateKey ?? ((key) => validateGroqApiKey(key, { fetchImpl: this.fetchImpl }));
   }
 
-  getGeminiKeyState() {
-    return this.settingsStore.getGeminiKeyState();
+  async getGroqKeyState(): Promise<WritingAssistStatus["groqKey"]> {
+    const read = await this.keyStore.read();
+    const state = await this.keyStore.getState();
+    return { ...state, rejected: read.state === "ok" && read.key === this.rejectedKey };
   }
 
-  setGeminiApiKey(key: string | null) {
-    return this.settingsStore.setGeminiApiKey(key);
+  /** Validates a new key against Groq before saving it (only a 200 saves); null removes it. */
+  async setGroqApiKey(key: string | null): Promise<SetGroqKeyResult> {
+    if (key !== null) {
+      const trimmed = key.trim();
+      const validation = await this.validateKey(trimmed);
+      this.diagnostics.info({
+        area: "provider",
+        event: "ai.key.validated",
+        details: { outcome: validation.ok ? "ok" : validation.reason }
+      });
+      if (!validation.ok) return validation;
+      key = trimmed;
+    }
+
+    this.rejectedKey = null;
+    await this.keyStore.setKey(key);
+    return { ok: true, state: await this.getGroqKeyState() };
   }
 
   async writingAssistStatus(): Promise<WritingAssistStatus> {
-    const geminiKey = await this.settingsStore.getGeminiKeyState();
-
+    const groqKey = await this.getGroqKeyState();
     return {
       corrector: { available: true, provider: "local" },
-      autocomplete: {
-        available: geminiKey.hasKey,
-        provider: geminiKey.hasKey ? "gemini-api" : null,
-        model: geminiKey.hasKey ? GEMINI_TEXT_MODEL : null
-      },
-      geminiKey
+      ai: { route: routeForKeyState(groqKey.state), model: GROQ_MODEL },
+      groqKey
     };
   }
 
   async autocompleteIdea(request: IdeaAutocompleteTextRequest): Promise<string> {
-    const apiKey = await this.requireGeminiKey();
-    const startedAt = Date.now();
+    const task = checkedTask({
+      v: LATEST_PROMPT_VERSION,
+      task: "autocomplete",
+      language: request.language,
+      kind: request.suggestionKind,
+      extend: request.extend === true,
+      prefix: request.prefix,
+      suffix: request.suffix,
+      documentTitle: request.documentTitle,
+      headingPath: request.headingPath,
+      nearbyHeadings: request.nearbyHeadings,
+      direction: request.direction ?? "",
+      avoid: request.avoid ?? []
+    });
+    const emitPartial = request.onPartial ? createAutocompletePartialEmitter(request.onPartial) : null;
+    const result = await this.run("autocomplete", request.signal, task, emitPartial ? (_delta, text) => emitPartial(text) : undefined, {
+      suggestionKind: request.suggestionKind
+    });
 
-    try {
-      const text = await generateGeminiAutocomplete(apiKey, request, this.fetchImpl ?? fetch);
-      this.diagnostics.info({
-        area: "provider",
-        event: "autocomplete.gemini.completed",
-        model: GEMINI_TEXT_MODEL,
-        durationMs: Date.now() - startedAt,
-        details: { suggestionKind: request.suggestionKind, outputTextChars: text.length }
-      });
-      return text;
-    } catch (error) {
-      this.diagnostics.info({
-        area: "provider",
-        event: "autocomplete.gemini.failed",
-        model: GEMINI_TEXT_MODEL,
-        durationMs: Date.now() - startedAt,
-        errorCode: normalizeAgentError(error, { wasCanceled: request.signal.aborted }).code
-      });
-      throw error;
-    }
+    // Only a clean stop is offered; `length`, `content_filter` or a missing
+    // reason → no suggestion. Reasoning/control markers → discarded.
+    if (result.finishReason !== "stop" || containsReasoningMarkers(result.text)) return "";
+    return result.text;
   }
 
   async tightenSelection(request: TightenSelectionRequest): Promise<string> {
-    const apiKey = await this.requireGeminiKey();
-    const startedAt = Date.now();
     const mode = request.mode ?? "tighten";
+    const task = checkedTask({
+      v: LATEST_PROMPT_VERSION,
+      task: "selection",
+      language: request.language,
+      mode,
+      ...(mode === "edit" ? { instruction: request.instruction ?? "" } : {}),
+      text: request.text,
+      selection: { from: request.selection.from, to: request.selection.to }
+    });
+    const result = await this.run("selection_ai", request.signal, task, undefined, { mode });
 
-    try {
-      const text = await generateGeminiSelectionTransform(apiKey, request, this.fetchImpl ?? fetch);
-      this.diagnostics.info({
-        area: "provider",
-        event: "selection_ai.gemini.completed",
-        model: GEMINI_TEXT_MODEL,
-        durationMs: Date.now() - startedAt,
-        details: { mode, outputTextChars: text.length }
-      });
-      return text;
-    } catch (error) {
-      const agentError = normalizeAgentError(error, { wasCanceled: request.signal.aborted });
-      this.diagnostics.info({
-        area: "provider",
-        event: "selection_ai.gemini.failed",
-        model: GEMINI_TEXT_MODEL,
-        durationMs: Date.now() - startedAt,
-        errorCode: agentError.code,
-        details: { mode, detail: agentError.detail ?? null }
-      });
-      throw error;
+    switch (result.finishReason) {
+      case "stop":
+        if (containsReasoningMarkers(result.text)) throw malformed("reasoning_marker");
+        return result.text;
+      case "length":
+        throw new AgentRuntimeError({
+          code: "output_truncated",
+          userMessage: "The AI could not finish this rewrite. Try a shorter selection.",
+          detail: "length",
+          retryable: true
+        });
+      case "content_filter":
+        throw new AgentRuntimeError({
+          code: "content_blocked",
+          userMessage: "The AI did not return a rewrite for this text.",
+          detail: "content_filter",
+          retryable: false
+        });
+      default:
+        throw malformed(result.finishReason ? "finish_other" : "missing_finish_reason");
     }
   }
 
@@ -204,13 +192,82 @@ export class WritingAiService {
     void this.diagnostics.flush();
   }
 
-  private async requireGeminiKey() {
-    const apiKey = await this.settingsStore.getGeminiApiKey();
-
-    if (!apiKey) {
-      throw missingGeminiKeyError();
-    }
-
-    return apiKey;
+  private async route(): Promise<{ name: AiRoute; route: GroqRoute | null; key: string | null }> {
+    const read = await this.keyStore.read();
+    if (read.state === "ok") return { name: "own-key", route: { kind: "own-key", apiKey: read.key }, key: read.key };
+    if (read.state === "unreadable") return { name: "blocked", route: null, key: null };
+    return { name: "free", route: { kind: "free", proxy: this.proxy }, key: null };
   }
+
+  private async run(
+    area: "autocomplete" | "selection_ai",
+    signal: AbortSignal,
+    task: WritingAiTask,
+    onDelta: ((delta: string, text: string) => void) | undefined,
+    details: Record<string, string>
+  ): Promise<GroqStreamResult> {
+    const startedAt = Date.now();
+    const route = await this.route();
+
+    try {
+      // An unreadable own key blocks AI: never sent through the free proxy.
+      if (!route.route) throw keyUnreadableError();
+      const result = await streamGroqText({ route: route.route, task, signal, onDelta, fetchImpl: this.fetchImpl });
+      // Diagnostics: codes, counts and timings only — never text, keys, tokens or bodies.
+      this.diagnostics.info({
+        area: "provider",
+        event: `${area}.ai.completed`,
+        model: GROQ_MODEL,
+        durationMs: Date.now() - startedAt,
+        details: {
+          ...details,
+          route: route.name,
+          firstDeltaMs: result.firstDeltaMs,
+          finishReason: result.finishReason,
+          outputTextChars: result.text.length
+        }
+      });
+      return result;
+    } catch (error) {
+      const agentError = normalizeAgentError(error, { wasCanceled: signal.aborted });
+      if (agentError.code === "invalid_api_key" && route.key) this.rejectedKey = route.key;
+      this.diagnostics.info({
+        area: "provider",
+        event: `${area}.ai.failed`,
+        model: GROQ_MODEL,
+        durationMs: Date.now() - startedAt,
+        errorCode: agentError.code,
+        providerStatus: agentError.providerStatus,
+        details: { ...details, route: route.name, detail: agentError.detail ?? null }
+      });
+      throw error;
+    }
+  }
+}
+
+export function routeForKeyState(state: GroqKeyStateName): AiRoute {
+  return state === "ok" ? "own-key" : state === "unreadable" ? "blocked" : "free";
+}
+
+/** Tasks are built from already-normalized IPC requests; the strict parser is a last check before sending. */
+function checkedTask(task: WritingAiTask): WritingAiTask {
+  const parsed = parseWritingAiTask(task);
+  if (!parsed.ok) {
+    throw new AgentRuntimeError({
+      code: "provider_unavailable",
+      userMessage: "The AI couldn't take this request.",
+      detail: `task_invalid_${parsed.field.replace(/[^A-Za-z]/g, "").slice(0, 24)}`,
+      retryable: false
+    });
+  }
+  return parsed.task;
+}
+
+function malformed(detail: string) {
+  return new AgentRuntimeError({
+    code: "malformed_provider_response",
+    userMessage: "The AI returned an incomplete response. Try again.",
+    detail,
+    retryable: true
+  });
 }

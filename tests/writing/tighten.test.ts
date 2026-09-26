@@ -4,7 +4,6 @@ import {
   TIGHTEN_MAX_INSTRUCTION_CHARS,
   cleanTightenOutput,
   editInstruction,
-  geminiSelectionTransformMaxOutputTokens,
   isTightenUnchanged,
   looksLikePreambleEcho,
   mergeTightenSelectionRewrite,
@@ -162,11 +161,6 @@ describe("tightenMaxOutputTokens", () => {
     expect(selectionTransformMaxOutputTokens("x".repeat(4000), "edit")).toBe(4096);
     expect(selectionTransformMaxOutputTokens("short", "tighten")).toBe(tightenMaxOutputTokens("short"));
   });
-
-  it("adds thinking headroom for Gemini, which counts thinking in the output budget", () => {
-    expect(geminiSelectionTransformMaxOutputTokens("short", "tighten")).toBe(384 + 2048);
-    expect(geminiSelectionTransformMaxOutputTokens("x".repeat(4000), "edit")).toBe(4096 + 2048);
-  });
 });
 
 describe("cleanTightenOutput", () => {
@@ -245,8 +239,8 @@ describe("isTightenUnchanged", () => {
 
 describe("tightenReasonFromAgentError", () => {
   it("keeps key and rate-limit signals distinct", () => {
-    expect(tightenReasonFromAgentError(agentError("missing_api_key"), false)).toBe("no_key");
     expect(tightenReasonFromAgentError(agentError("invalid_api_key"), false)).toBe("invalid_api_key");
+    expect(tightenReasonFromAgentError(agentError("key_unreadable"), false)).toBe("key_unreadable");
     expect(tightenReasonFromAgentError(agentError("rate_limited"), false)).toBe("rate_limited");
   });
 
@@ -281,7 +275,19 @@ describe("tightenReasonFromAgentError", () => {
     expect(tightenReasonFromAgentError(agentError("request_timeout"), true)).toBe("timeout");
   });
 
-  it("maps unfinished and declined Gemini answers to explicit reasons", () => {
+  it("maps the free route's refusals explicitly, before the detail regex (Groq spec §5)", () => {
+    expect(tightenReasonFromAgentError(agentError("free_quota_exhausted"), false)).toBe("free_exhausted");
+    expect(tightenReasonFromAgentError(agentError("free_global_cap"), false)).toBe("free_exhausted");
+    expect(tightenReasonFromAgentError(agentError("free_unavailable"), false)).toBe("free_unavailable");
+    expect(tightenReasonFromAgentError(agentError("client_outdated"), false)).toBe("client_outdated");
+    expect(tightenReasonFromAgentError(agentError("network_unreachable"), false)).toBe("unreachable");
+    expect(tightenReasonFromAgentError(agentError("dns_failure"), false)).toBe("unreachable");
+    // Quota-looking details on the new codes never become rate_limited / invalid_api_key.
+    expect(tightenReasonFromAgentError({ ...agentError("free_quota_exhausted"), detail: "quota_limit_rate" }, false)).toBe("free_exhausted");
+    expect(tightenReasonFromAgentError({ ...agentError("free_unavailable"), detail: "auth" }, false)).toBe("free_unavailable");
+  });
+
+  it("maps unfinished and declined answers to explicit reasons", () => {
     expect(tightenReasonFromAgentError(agentError("output_truncated"), false)).toBe("incomplete");
     expect(tightenReasonFromAgentError(agentError("content_blocked"), false)).toBe("blocked");
   });

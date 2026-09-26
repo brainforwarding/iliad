@@ -33,7 +33,7 @@ import { FileTree } from "./components/FileTree";
 import { LanguageMenu } from "./components/LanguageMenu";
 import { TreeContextMenu, type TreeContextMenuState } from "./components/TreeContextMenu";
 import { TypographyMenu } from "./components/TypographyMenu";
-import { GEMINI_KEY_URL, WritingAssistsMenu } from "./components/WritingAssistsMenu";
+import { GROQ_KEY_URL, WritingAssistsMenu } from "./components/WritingAssistsMenu";
 import {
   markLatestContentSearchRequestId,
   type FileTreeContentSearchProvider
@@ -479,10 +479,10 @@ export default function App() {
   const handleEditorViewChange = useCallback((view: EditorView) => {
     editorViewRef.current = view;
   }, []);
-  // Gates autocomplete and the ✦ AI menu; main re-checks the key on each request.
+  // The AI route (free / own key / blocked) and key state; main picks the route on each request.
   const [writingAssistStatus, setWritingAssistStatus] = useState<WritingAssistStatus | null>(null);
   const [keyFieldFocusRequest, setKeyFieldFocusRequest] = useState(0);
-  const hasGeminiKey = Boolean(writingAssistStatus?.geminiKey.hasKey);
+  const aiRoute = writingAssistStatus?.ai.route ?? null;
   const [updateStatus, setUpdateStatus] = useState<UpdateCheckResult | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const updateCheckRequestIdRef = useRef(0);
@@ -498,20 +498,21 @@ export default function App() {
     void refreshWritingAssistStatus();
   }, [refreshWritingAssistStatus]);
 
-  const saveGeminiKey = useCallback(
+  const saveGroqKey = useCallback(
     async (key: string | null) => {
-      await window.iliad.setGeminiApiKey(key);
+      const result = await window.iliad.setGroqApiKey(key);
       await refreshWritingAssistStatus();
+      return result;
     },
     [refreshWritingAssistStatus]
   );
 
-  const openGeminiKeyPage = useCallback(() => {
-    void window.iliad.openUrl(GEMINI_KEY_URL);
+  const openGroqKeyPage = useCallback(() => {
+    void window.iliad.openUrl(GROQ_KEY_URL);
   }, []);
 
-  // ✦ AI without a key: open Writing assists with the key field focused.
-  const requestGeminiKey = useCallback(() => {
+  // A notice's "Use my key" / "Update key": open Writing assists with the key form expanded.
+  const requestGroqKey = useCallback(() => {
     setTypographyOpen(false);
     setLanguageOpen(false);
     setWritingAssistsOpen(true);
@@ -1346,8 +1347,11 @@ export default function App() {
     }
 
     return {
-      enabled: hasGeminiKey,
-      onRequestKey: requestGeminiKey,
+      enabled: true,
+      onRequestKey: requestGroqKey,
+      route: aiRoute,
+      language,
+      noticeLabels: strings.editor.aiNotices,
       minChars: 12,
       maxChars: 4000,
       labels: strings.editor.tighten,
@@ -1362,7 +1366,7 @@ export default function App() {
         }),
       cancel: (requestId) => window.iliad.cancelTighten(requestId)
     };
-  }, [activeFile, editorFile, hasGeminiKey, language, requestGeminiKey, strings.editor.tighten]);
+  }, [activeFile, aiRoute, editorFile, language, requestGroqKey, strings.editor.aiNotices, strings.editor.tighten]);
   const editorWritingAssists = useMemo<EditorWritingAssistsProps | undefined>(() => {
     if (!activeFile || activeFile.kind !== "markdown" || editorFile !== activeFile) {
       return undefined;
@@ -1375,7 +1379,8 @@ export default function App() {
     return {
       correctorEnabled,
       autocompleteEnabled,
-      hasAiKey: hasGeminiKey,
+      aiRoute,
+      onRequestAiKey: requestGroqKey,
       preferences: autocompleteOptions.preferences,
       onPartial: window.iliad.onAutocompletePartial,
       language,
@@ -1383,7 +1388,8 @@ export default function App() {
       documentRelativePath,
       labels: {
         corrector: strings.editor.writingCorrector,
-        autocomplete: strings.editor.ideaAutocomplete
+        autocomplete: strings.editor.ideaAutocomplete,
+        aiNotices: strings.editor.aiNotices
       },
       autocompleteIdea: (request) => window.iliad.autocompleteIdea(request),
       cancelAutocompleteIdea: (requestId) => window.iliad.cancelAutocompleteIdea(requestId),
@@ -1411,7 +1417,9 @@ export default function App() {
     activeFile,
     autocompleteEnabled,
     correctorEnabled,
-    hasGeminiKey,
+    aiRoute,
+    requestGroqKey,
+    strings.editor.aiNotices,
     autocompleteOptions.preferences,
     editorFile,
     language,
@@ -1562,9 +1570,9 @@ export default function App() {
               correctorEnabled={correctorEnabled}
               autocompleteEnabled={autocompleteEnabled}
               correctorAvailable={language === "en"}
-              geminiKey={writingAssistStatus?.geminiKey ?? null}
-              onSaveGeminiKey={saveGeminiKey}
-              onGetGeminiKey={openGeminiKeyPage}
+              groqKey={writingAssistStatus?.groqKey ?? null}
+              onSaveGroqKey={saveGroqKey}
+              onGetGroqKey={openGroqKeyPage}
               onOpenPrivacy={() => void window.iliad.openUrl(strings.writingAssists.privacyUrl)}
               keyFieldFocusRequest={keyFieldFocusRequest}
               onToggleOpen={() => {

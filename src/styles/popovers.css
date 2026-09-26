@@ -211,6 +211,26 @@
   font-size: var(--text-xs);
 }
 
+.writing-assist-key input.is-error {
+  border-color: var(--error-border);
+}
+
+.writing-assist-key-hint {
+  flex-basis: 100%;
+  white-space: normal;
+}
+
+.writing-assist-row-note.is-error {
+  color: var(--error);
+}
+
+.writing-assist-links {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 14px;
+}
+
 .writing-assist-key-error {
   flex-basis: 100%;
   color: var(--error);
