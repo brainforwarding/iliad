@@ -38,8 +38,12 @@ Install-App
 if (-not (Test-Path $commandPath)) { throw 'Reinstall lost CLI selection.' }
 if ((Get-FileHash -LiteralPath $preferences).Hash -ne $preferencesHash) { throw 'Preferences changed.' }
 Write-Output 'PASS opt-in and reinstall preserve CLI and preferences'
-& node (Join-Path $PSScriptRoot 'smokeWindows.mjs') (Join-Path $installDirectory 'Iliad MD.exe')
-if ($LASTEXITCODE -ne 0) { throw 'Installed application smoke test failed.' }
+$previousSmokeCli = $env:ILIAD_SMOKE_CLI
+try {
+  $env:ILIAD_SMOKE_CLI = $commandPath
+  & node (Join-Path $PSScriptRoot 'smokeWindows.mjs') (Join-Path $installDirectory 'Iliad MD.exe')
+  if ($LASTEXITCODE -ne 0) { throw 'Installed application smoke test failed.' }
+} finally { $env:ILIAD_SMOKE_CLI = $previousSmokeCli }
 Install-App '0'
 if (Test-Path $commandPath) { throw 'Explicit opt-out left the managed command.' }
 Install-App

@@ -19,7 +19,7 @@ delete env.ELECTRON_RUN_AS_NODE;
 delete env.VITE_DEV_SERVER_URL;
 delete env.GEMINI_API_KEY;
 delete env.GOOGLE_API_KEY;
-const cli = path.join(path.dirname(executablePath), "resources", "bin", "iliad.cmd");
+const cli = process.env.ILIAD_SMOKE_CLI || path.join(path.dirname(executablePath), "resources", "bin", "iliad.cmd");
 const results = [];
 let app, page;
 const pass = name => { results.push(name); console.log(`PASS ${name}`); };
@@ -39,9 +39,9 @@ async function launch() {
   await waitFor(async () => Boolean((await page.evaluate(() => window.iliad.getLaunchWorkspace()))?.sessionId), "workspace session");
 }
 async function open(shell = "powershell") {
-  const commandEnv = { ...env, PATH: `${process.env.SystemRoot}\\System32;${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0`, ILIAD_TEST_CLI: cli, ILIAD_TEST_DOC: document };
-  if (shell === "powershell") await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "& $env:ILIAD_TEST_CLI open $env:ILIAD_TEST_DOC; exit $LASTEXITCODE"], { env: commandEnv, windowsHide: true });
-  else await run("cmd.exe", ["/d", "/s", "/c", '""%ILIAD_TEST_CLI%" open "%ILIAD_TEST_DOC%""'], { env: commandEnv, windowsHide: true, windowsVerbatimArguments: true });
+  const commandEnv = { ...env, PATH: `${path.dirname(cli)};${process.env.SystemRoot}\\System32;${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0`, ILIAD_TEST_CLI: cli, ILIAD_TEST_DOC: document };
+  if (shell === "powershell") await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "& iliad.cmd open $env:ILIAD_TEST_DOC; exit $LASTEXITCODE"], { env: commandEnv, windowsHide: true });
+  else await run("cmd.exe", ["/d", "/s", "/c", 'iliad.cmd open "%ILIAD_TEST_DOC%"'], { env: commandEnv, windowsHide: true, windowsVerbatimArguments: true });
   await page.locator(".cm-content").waitFor();
 }
 try {
