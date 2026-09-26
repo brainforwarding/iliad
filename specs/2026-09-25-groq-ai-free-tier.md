@@ -11,7 +11,7 @@ writing notes, the always-on announcement, the Privacy row, and ⌘↵. This spe
 owns the provider, proxy, quota, key storage, notices, and the privacy page
 content for the Groq release.
 Branch: `groq-ai-free-tier` (from `master` at `2cd1901`, Iliad MD 0.3.2)
-ADR: ADR-0022 (draft, `docs/decisions.md`)
+ADR: ADR-0023 (draft, `docs/decisions.md`)
 Design: Figma `i2BTwgceho8SqRYGZKjLhB`, page "AI: free + your Groq key
 (2026-09-25)" (node `42:2`); it is the source of truth for layout.
 
@@ -843,7 +843,7 @@ tokens; reasoning at `low` ≈ 50–250 tokens, to be measured):
 - Docs: `README.md` ("Gemini key" section → "AI: free, or your own Groq key"),
   `CLAUDE.md` (Gemini mentions), `docs/architecture.md` ("Writing AI and
   Outside Review"), `docs/product-vision.md` ("One Gemini key powers it" →
-  new rule, per ADR-0022), `docs/decisions.md` (ADR-0022 accepted; ADR-0021
+  new rule, per ADR-0023), `docs/decisions.md` (ADR-0023 accepted; ADR-0021
   amended by it), `docs/backlog.md`, `docs/research/writing-autocomplete-2026-09.md`
   (append a dated "Groq route" note; do not rewrite history).
 - Release notes: "Built-in AI is now free and needs no setup. It runs on Groq
@@ -1022,7 +1022,7 @@ per-`v` snapshot matrix.
   migration, status/IPC, strings, UI states against a fake proxy.
 - **Phase 2 — Worker**: `relay/ai-proxy/` with unit + integration tests;
   `wrangler dev` QA with the app.
-- **Phase 3 — docs and release**: ADR-0022 accepted, product-vision rule,
+- **Phase 3 — docs and release**: ADR-0023 accepted, product-vision rule,
   architecture section, README, privacy note (app + website), release notes;
   deploy the Worker, then release. Phases 1–3 ship together: an app without
   the proxy would require a key again.

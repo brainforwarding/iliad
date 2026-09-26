@@ -101,15 +101,6 @@ reviewed. See the "Follow-up" section of
 
 ## Writing assists
 
-### Key recorder, key-hint chip, and an ES-layout default for Full idea
-
-Deferred by `specs/2026-09-25-writing-assists-one-row.md` (non-goals) and the
-release 0.4.0 plan; design on Figma page `47:2`
-(`i2BTwgceho8SqRYGZKjLhB`). The Writing assists key rows keep native selects
-over compact chips for now. Candidates: record a shortcut by pressing it, a
-small key-hint chip near the cursor, and a Full idea default that is easy to
-type on a Spanish keyboard (⌘/ needs Shift there).
-
 ### Key recorder, key-hint chip, ES-layout default for Full idea
 
 From Figma page "Writing assists" option A (node `47:2`, file
