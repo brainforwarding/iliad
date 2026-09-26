@@ -24,14 +24,19 @@ Features fail this rule in one of two ways:
 
 ## Companion files are part of the contract
 
-A document's writing notes and comments live next to it as plain Markdown:
-`name.notes.md` and `name.comments.md`. They are owned by the writer like any
-other file: readable and editable in any editor, by any agent, moved, copied,
-and trashed with their document. Iliad never hides that state in app data.
-The comments file is a readable list of blockquoted passages with the comment
-under each; a small `<!-- iliad:comment id=… -->` line per entry is the only
-Iliad-specific syntax, and it renders as nothing. Deleting an entry is how an
-agent marks a comment as handled.
+A document's comments live next to it as plain Markdown: `name.comments.md`.
+The comments file is owned by the writer like any other file: readable and
+editable in any editor, by any agent, moved, copied, and trashed with its
+document. Iliad never hides that state in app data. It is a readable list of
+blockquoted passages with the comment under each; a small
+`<!-- iliad:comment id=… -->` line per entry is the only Iliad-specific
+syntax, and it renders as nothing. Deleting an entry is how an agent marks a
+comment as handled.
+
+Writing notes (`name.notes.md`) are no longer companions (ADR-0022). Existing
+notes files stay on disk as ordinary Markdown documents: listed in the tree,
+edited like any document, and never moved, copied or trashed along with
+another file.
 
 ## The decision rule
 

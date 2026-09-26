@@ -40,8 +40,10 @@ work belongs to outside agents, which are stronger and improve on their own.
   the writer is looking at (`status`), shows a result (`open`), and installs the
   skill that explains how to work with Iliad. The CLI reads and navigates; it
   never writes documents.
-- **Built-in AI is small and fast.** One Gemini key powers it. It works on the
-  current document and the current selection only.
+- **Built-in AI is small and fast.** It is free by default through Iliad's
+  proxy on Groq, or direct to Groq with the writer's own key (ADR-0023). It
+  works on the current document and the current selection only, and only an
+  explicit request sends text.
 - **Calm UI.** No tabs of chat, no dashboards, no settings sprawl. Controls
   appear where the writing is, when they are needed.
 

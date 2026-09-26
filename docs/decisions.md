@@ -2,7 +2,8 @@
 
 Status: living decision log. Started 2026-05-26. ADR-0001–0020 describe the
 removed internal agent and are kept as history; ADR-0021 supersedes them.
-ADR-0022 removes writing notes and automatic suggestions.
+ADR-0022 removes writing notes and automatic suggestions. ADR-0023 moves
+built-in AI from Gemini to Groq (free through Iliad's proxy, or your own key).
 
 ## ADR-0001: Context Is Built Per Turn
 
@@ -409,7 +410,8 @@ Spec: [2026-06-13 tighten selection](../specs/2026-06-13-tighten-selection.md).
 ## ADR-0021: Iliad Has No Internal Agent; Outside Agents Write, Iliad Reviews
 
 Status: accepted (2026-09-24). Supersedes ADR-0001–0019 and the agent parts of
-ADR-0020.
+ADR-0020. Its notes companion is amended by ADR-0022 and its Gemini key by
+ADR-0023.
 
 Iliad removes its built-in agent: the chat panel, the Codex and OpenAI runtimes,
 agent proposals, chat history, context manifests, dictation, and the Telegram
@@ -445,7 +447,6 @@ moves from `agent-vision.md` to `product-vision.md`.
 
 Spec: [2026-09-24 Iliad writing surface](../specs/2026-09-24-iliad-writing-surface.md).
 
-<<<<<<< HEAD
 ## ADR-0022: No Writing Notes, No Automatic Suggestions
 
 Status: accepted (2026-09-25). Amends ADR-0021 (notes companion).
@@ -473,8 +474,10 @@ Spec: [2026-09-25 writing assists one row](../specs/2026-09-25-writing-assists-o
 
 ## ADR-0023: Built-In AI Is Free Through Iliad's Proxy, Or Direct With Your Own Groq Key
 
-Status: proposed (2026-09-25, draft; becomes accepted when the spec ships).
-Amends ADR-0021 ("one Gemini key").
+Status: accepted (2026-09-25). Amends ADR-0021 ("one Gemini key"). Release
+gates met: Groq Zero Data Retention verified on Iliad's account by the owner
+on 2026-09-25 (Global ZDR and Inference ZDR on), Worker observability off
+(verified at deploy), EN/ES privacy pages written (live with the release).
 
 Built-in writing AI (inline completion and the ✦ AI selection menu) moves from
 Gemini to Groq (`openai/gpt-oss-120b`, low reasoning, streaming) and needs no

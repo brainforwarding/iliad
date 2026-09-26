@@ -189,21 +189,21 @@ Future manual checks (Stage B of the writing-surface spec).
 | I9 | Keep all / Restore all from the file toolbar and from the tree strip | same result as deciding each chunk | |
 | I10 | App language Spanish | chunk and file labels translated; actions work | |
 
-## J. Companion files (notes and comments)
+## J. Companion files (comments)
 
 Future manual checks (Stage D of the writing-surface spec).
 
 | ID | Case | Expected | Status |
 | --- | --- | --- | --- |
-| J1 | Outside tool edits or creates `name.notes.md` / `name.comments.md` | no review item, no amber dot, no count change | |
+| J1 | Outside tool edits or creates `name.comments.md` (a `name.notes.md` is an ordinary document and is reviewed) | no review item, no amber dot, no count change for the comments file | |
 | J2 | Outside tool deletes a handled comment entry and edits the document | comment disappears from the editor; the document edit is reviewed per chunk | |
 | J3 | Restore that document edit | the removed comment comes back if its quote is found again | |
 | J4 | Add a comment on a selection | `name.comments.md` created beside the document; tree shows "Comments · 1" under the active document | |
 | J5 | Delete the last comment | `name.comments.md` moved to the Trash | |
-| J6 | Writing assists → Open notes | empty `name.notes.md` created and opened; Back returns to the document | |
-| J7 | Rename, move, duplicate, trash a document with both companions | companions follow (duplicate picks a stem free for the group); no outside items | |
-| J8 | Unrelated `name.notes.md` already at the rename/move target | action refused; nothing overwritten | |
-| J9 | Create or rename a document to `x.notes.md` | refused | |
+| J6 | Removed 2026-09-25 (ADR-0022: no writing notes) | — | n/a |
+| J7 | Rename, move, duplicate, trash a document with its comments file | the comments file follows (duplicate picks a stem free for the group); a same-stem `name.notes.md` stays put; no outside items | |
+| J8 | Unrelated `name.comments.md` already at the rename/move target | action refused; nothing overwritten | |
+| J9 | Create or rename a document to `x.comments.md` (`x.notes.md` is allowed) | refused | |
 | J10 | Outside edit to a comment's quote while the document is open | comment re-anchors from the file; ambiguous duplicate becomes detached ("N detached comments") | |
 | J11 | Autosave of comments while an outside tool writes the comments file | three-way merge by id; no comment lost; outside deletion wins unless edited here | |
 
