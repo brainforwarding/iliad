@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { handleAutocompleteIpc } from "../../electron/ipc/autocomplete";
-import { handleTightenIpc } from "../../electron/ipc/tighten";
+import { handleTightenCancelIpc, handleTightenIpc } from "../../electron/ipc/tighten";
 import { handleSetGroqKeyIpc, handleWritingAssistStatusIpc } from "../../electron/ipc/writingSettings";
 import { GroqKeyStore, type SafeStorageLike } from "../../electron/writing/groq/keyStore";
 import { GROQ_MODEL } from "../../electron/writing/groq/prompts/index";
@@ -274,6 +274,28 @@ describe("Groq key IPC (validated before saving)", () => {
     const untrusted = { sender: { id: 1 }, senderFrame: { url: "https://evil.example" } } as never;
     await expect(handleSetGroqKeyIpc(untrusted, "gsk_x", service)).rejects.toThrow();
     expect((await handleWritingAssistStatusIpc(untrusted, service)).ai.route).toBe("blocked");
+  });
+});
+
+describe("tighten:cancel", () => {
+  it("aborts only for a trusted sender and a non-empty request id", () => {
+    const controllers = new Map<string, AbortController>();
+    const run = new AbortController();
+    const anon = new AbortController();
+    controllers.set("1:t1", run);
+    controllers.set("1:anon", anon);
+    const untrusted = { sender: { id: 1 }, senderFrame: { url: "https://evil.example" } } as never;
+    const trusted = { sender: { id: 1 }, senderFrame: { url: "file:///app/index.html" } } as never;
+
+    handleTightenCancelIpc(untrusted, "t1", controllers);
+    expect(run.signal.aborted).toBe(false);
+    handleTightenCancelIpc(trusted, "", controllers);
+    handleTightenCancelIpc(trusted, "  ", controllers);
+    handleTightenCancelIpc(trusted, 42, controllers);
+    expect(anon.signal.aborted).toBe(false);
+
+    handleTightenCancelIpc(trusted, "t1", controllers);
+    expect(run.signal.aborted).toBe(true);
   });
 });
 

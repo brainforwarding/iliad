@@ -64,9 +64,16 @@ export function registerTightenIpc({
     handleTightenIpc(event, request, { service, controllers })
   );
 
-  ipcMain.handle("tighten:cancel", (event, requestId: unknown) => {
-    controllers.get(senderControllerKey(event.sender.id, requestId))?.abort();
-  });
+  ipcMain.handle("tighten:cancel", (event, requestId: unknown) => handleTightenCancelIpc(event, requestId, controllers));
+}
+
+/** Same checks as `autocomplete:cancel`: trusted sender and a non-empty request id (never the "anon" slot). */
+export function handleTightenCancelIpc(event: TightenIpcEvent, requestId: unknown, controllers: Map<string, AbortController>) {
+  if (!isTrustedIpcSender(event) || typeof requestId !== "string" || !requestId.trim()) {
+    return;
+  }
+
+  controllers.get(senderControllerKey(event.sender.id, requestId))?.abort();
 }
 
 export async function handleTightenIpc(
