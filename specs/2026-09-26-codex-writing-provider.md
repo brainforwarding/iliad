@@ -241,6 +241,26 @@ accept/reject/undo was not revalidated end-to-end with this runtime. Track the
 new commit's [CI separately](https://github.com/elcomparemaquito/iliad/actions/runs/36249436182)
 from the earlier successful run.
 
+### Completed installed UI follow-up
+
+The installed Windows build of `3c51e33` subsequently passed end-to-end UI
+checks with GPT-6-Luna on synthetic Spanish and English prose: all five
+selection presets, custom instructions, sentence/paragraph/idea continuations,
+acceptance, autosave, byte-exact undo, rejection without a file change,
+cancellation, editing during generation and restart with session/model/content
+preservation. This closes the earlier Windows review/undo validation gaps for
+the tested runtime. The runtime commit's CI also passed on all three platforms,
+including the Windows installer cycle; macOS live/UI gates remain pending.
+
+The prior Rewrite timeout came from a test locator matching the label exactly
+without its visible Enter-key hint. Fixed-delay disk assertions also raced
+autosave. Correcting those checks required no application code changes.
+The [opt-in acceptance script](https://github.com/elcomparemaquito/iliad/blob/5d9fa25/scripts/verifyCodexWriting.mjs)
+and its [instructions](https://github.com/elcomparemaquito/iliad/blob/5d9fa25/docs/codex-writing.md)
+are published separately with the prototype. It consumes a real account's quota
+and creates a private isolated profile; it is not run in secret-free CI, and its
+credential-containing artifact directory must not be uploaded.
+
 Before shipping the upstream implementation:
 
 - Run `npm ci`, type checking, the complete applicable test suites, CSS lint,
