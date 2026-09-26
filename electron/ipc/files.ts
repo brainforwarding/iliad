@@ -224,7 +224,7 @@ export async function trashWithCompanions(
 
 function assertCompanionPath(workspaceRoot: string, filePath: string) {
   if (typeof filePath !== "string" || !isCompanionPath(filePath)) {
-    throw new Error("Only notes and comments files can be used here.");
+    throw new Error("Only comments files can be used here.");
   }
 
   ensureMarkdownFile(workspaceRoot, filePath);
@@ -236,7 +236,7 @@ export async function readCompanionFile(workspaceRoot: string, filePath: string)
   const current = await readDiskPathState(workspaceRoot, workspaceRelativePosix(workspaceRoot, filePath));
 
   if (current.status === "unsafe") {
-    throw new Error("This notes or comments file is not a regular file inside the workspace.");
+    throw new Error("This comments file is not a regular file inside the workspace.");
   }
 
   return current.status === "present"

@@ -244,19 +244,15 @@ function sortDisplayNodes(nodes: FileTreeDisplayNode[]) {
   for (const node of nodes) {
     const children = displayNodeChildren(node);
 
-    // A document's children are its companions, already in Notes, Comments order.
+    // A document's only child is its comments companion.
     if (children && displayNodeKind(node) !== "markdown") {
       sortDisplayNodes(children);
     }
   }
 }
 
-function companionRank(node: FileTreeNode) {
-  return node.companion?.kind === "notes" ? 0 : 1;
-}
-
 /** The companion kind of a tree row attached to its document, or null. */
-export function displayNodeCompanionKind(node: FileTreeDisplayNode): "notes" | "comments" | null {
+export function displayNodeCompanionKind(node: FileTreeDisplayNode): "comments" | null {
   return node.source === "real" && node.node.companion ? node.node.companion.kind : null;
 }
 
@@ -412,7 +408,7 @@ export function buildFileTreeDisplayNodes(
     };
   };
 
-  // Companion files (notes, comments) whose document is a sibling become the
+  // Comments companions whose document is a sibling become the
   // document's children (spec V10/V11); orphans stay ordinary rows.
   const toDisplayNodes = (siblings: FileTreeNode[]): FileTreeDisplayNode[] => {
     const siblingPaths = new Set(siblings.map((sibling) => sibling.path));
@@ -433,9 +429,7 @@ export function buildFileTreeDisplayNodes(
         const companions = companionsByDocument.get(sibling.path);
 
         if (companions && displayNode.source === "real") {
-          displayNode.children = companions
-            .sort((left, right) => companionRank(left) - companionRank(right))
-            .map(toDisplayNode);
+          displayNode.children = companions.map(toDisplayNode);
         }
 
         return displayNode;

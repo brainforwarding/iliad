@@ -71,20 +71,20 @@ describe("agent autocomplete helpers", () => {
       headingPath: ["Notes", "Draft"],
       documentTitle: "memo",
       nearbyHeadings: ["Draft"],
-      trigger: "automatic",
-      suggestionKind: "inline"
+      suggestionKind: "sentence"
     });
 
     expect(input).toContain("<<<PREFIX>>>");
     expect(input).toContain("The core idea is");
     expect(input).toContain("<<<SUFFIX>>>");
     expect(input).toContain("Notes > Draft");
-    expect(input).toContain("Trigger: automatic");
-    expect(input).toContain("Suggestion kind: inline");
+    expect(input).not.toContain("Trigger:");
+    expect(input).not.toContain("writing notes");
+    expect(input).toContain("Suggestion kind: sentence");
   });
 
-  it("uses separate instructions for short inline and explicit paragraph suggestions", () => {
-    expect(autocompleteInstructions("en")).toContain("3 to 15 words");
+  it("uses separate instructions for sentence and paragraph suggestions", () => {
+    expect(autocompleteInstructions("en")).toContain("at most 35 words");
     expect(autocompleteInstructions("en", "paragraph")).toContain("one short paragraph");
     expect(autocompleteInstructions("es", "paragraph")).toContain("un solo párrafo");
   });

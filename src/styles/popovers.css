@@ -26,11 +26,11 @@
 }
 
 .writing-assists-popover {
-  width: min(300px, calc(100vw - 24px));
+  width: min(380px, calc(100vw - 24px));
   max-height: calc(100vh - 90px);
   overflow-y: auto;
-  gap: 4px;
-  padding: 6px;
+  gap: 0;
+  padding: 6px 16px 10px;
 }
 
 .language-popover {
@@ -67,205 +67,172 @@
   color: var(--ink-1);
 }
 
-.writing-assist-switch-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+/*
+ * Writing assists: one row style (spec 2026-09-25, Figma frame 15). Every item
+ * is a row: name left, optional grey note under it, control right, a hairline
+ * under each row except the last. Single-line rows share one height.
+ */
+.writing-assist-row {
+  display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 36px;
-  padding: 5px 7px 5px 9px;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 42px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  border-radius: 0;
   background: transparent;
-  color: var(--ink-2);
-  cursor: pointer;
+  color: var(--ink-1);
   font: inherit;
   text-align: left;
   -webkit-app-region: no-drag;
 }
 
-.writing-assist-switch-row:hover,
-.writing-assist-switch-row:focus-visible {
-  border-color: var(--hairline-strong);
-  background: var(--card);
+.writing-assist-row:last-child {
+  border-bottom: 0;
+}
+
+/* A row with a note under its name grows to two lines (54px in the design). */
+.writing-assist-row:has(.writing-assist-row-note) {
+  padding: 10px 0;
+}
+
+.writing-assist-row.is-button {
+  cursor: pointer;
+}
+
+.writing-assist-row.is-button:disabled {
+  cursor: default;
+}
+
+.writing-assist-row-copy {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.writing-assist-row-label {
+  overflow: hidden;
+  color: var(--ink-1);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.writing-assist-row.is-button:hover:not(:disabled) .writing-assist-row-label {
+  color: var(--accent-deepest);
+}
+
+.writing-assist-row-note {
+  overflow: hidden;
+  color: var(--muted-2);
+  font-size: var(--text-xs);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.writing-assist-key-text {
+  flex: none;
+  color: var(--muted-2);
+  font: inherit;
+  font-size: var(--text-xs);
+}
+
+.writing-assist-key-select {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 14px;
+  padding: 2px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  color: var(--ink-1);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+.writing-assist-key-select svg {
+  color: var(--muted-2);
+}
+
+.writing-assist-key-select:hover {
+  border-color: var(--border-control);
+}
+
+.writing-assist-key-select:has(select:focus-visible) {
+  outline: 2px solid var(--ink-2);
+  outline-offset: 2px;
+}
+
+/* The native select covers the chip: it opens the system list and keeps keyboard access. */
+.writing-assist-key-select select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.writing-assists-popover .writing-assist-key-select select:focus-visible {
   outline: none;
 }
 
-.writing-assist-switch-row:disabled {
-  cursor: default;
-  opacity: 0.62;
-}
-
-.writing-assist-switch-row:disabled:hover {
-  border-color: transparent;
-  background: transparent;
-}
-
-.writing-assist-switch-copy {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
-}
-
-.writing-assist-switch-label {
-  overflow: hidden;
-  font-size: var(--text-sm);
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.writing-assist-switch-note {
-  overflow: hidden;
-  color: var(--muted-3);
-  font-size: var(--text-xs);
-  line-height: 1.15;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.writing-assist-quiet {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 8px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--muted-1);
-  font: inherit;
-  font-size: var(--text-xs);
-  text-align: left;
-  cursor: pointer;
-}
-
-.writing-assist-details > input,
-.writing-assist-details textarea,
-.writing-assist-shortcut-row select {
-  min-width: 0;
-  padding: 8px;
-  border: 1px solid var(--hairline);
-  border-radius: 5px;
-  background: var(--editor);
-  color: var(--ink-1);
-  font: inherit;
-  font-size: var(--text-xs);
-}
-
-.writing-assist-details {
-  padding: 8px;
-  border-top: 1px solid var(--hairline);
-  font-size: var(--text-xs);
-}
-
-.writing-assist-details summary {
-  cursor: pointer;
-  color: var(--muted-1);
-}
-
-.writing-assist-details > input,
-.writing-assist-details textarea {
-  box-sizing: border-box;
-  width: 100%;
-  margin-top: 8px;
-  resize: vertical;
-}
-
-.writing-assist-check,
-.writing-assist-shortcut-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-top: 10px;
-}
-
-.writing-assist-shortcut-row {
-  justify-content: space-between;
-}
-
-.writing-assist-shortcut-hint {
-  margin: 6px 0 0;
-  color: var(--muted-2);
-  line-height: 1.35;
-}
-
-.writing-assist-note-dot {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-left: 7px;
-  border-radius: 50%;
-  background: var(--ink-2);
-}
-
 .writing-assist-key {
-  display: grid;
-  gap: 6px;
-  padding: 7px 9px 9px;
-  border-bottom: 1px solid var(--hairline);
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 11px 0;
 }
 
-.writing-assist-key-label {
-  color: var(--ink-2);
-  font-size: var(--text-sm);
-  font-weight: 500;
+.writing-assist-key .writing-assist-row-label {
+  flex-basis: 100%;
 }
 
 .writing-assist-key input {
   box-sizing: border-box;
-  width: 100%;
+  flex-basis: 100%;
   min-width: 0;
-  padding: 7px 8px;
-  border: 1px solid var(--hairline);
+  padding: 6px 8px;
+  border: 1px solid var(--border-control);
   border-radius: 5px;
   background: var(--editor);
   color: var(--ink-1);
   font: inherit;
+  font-size: var(--text-xs);
+}
+
+.writing-assist-key-error {
+  flex-basis: 100%;
+  color: var(--error);
   font-size: var(--text-xs);
 }
 
 .writing-assist-key-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
-}
-
-.writing-assist-key-save {
-  padding: 4px 11px;
-  border: 1px solid var(--accent-border);
-  border-radius: 5px;
-  background: var(--accent-tint);
-  color: var(--accent-deep);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--text-xs);
-  font-weight: 500;
-}
-
-.writing-assist-key-error {
-  color: var(--error);
-  font-size: var(--text-xs);
-}
-
-.writing-assist-key-summary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 9px 6px;
-  border-top: 1px solid var(--hairline);
-  color: var(--muted-2);
-  font-size: var(--text-xs);
+  gap: 14px;
 }
 
 .writing-assist-link {
+  flex: none;
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--muted-1);
+  color: var(--accent-deep);
   cursor: pointer;
   font: inherit;
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
+  font-weight: 500;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -275,46 +242,52 @@
 }
 
 .writing-assists-popover button:disabled {
-  opacity: 0.4;
   cursor: default;
 }
 
-.writing-assists-popover :is(button, input, textarea, select, summary):focus-visible {
+.writing-assists-popover .writing-assist-link:disabled {
+  opacity: 0.4;
+}
+
+.writing-assists-popover :is(button, input, select):focus-visible {
   outline: 2px solid var(--ink-2);
   outline-offset: 2px;
+}
+
+.writing-assists-popover .writing-assist-row.is-button:focus-visible {
+  outline-offset: -2px;
 }
 
 .writing-assist-switch {
   position: relative;
   display: inline-block;
-  width: 34px;
+  flex: none;
+  box-sizing: border-box;
+  width: 36px;
   height: 20px;
-  border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-pill);
-  background: var(--paper);
+  background: var(--hairline-strong);
+  transition: background 120ms ease;
 }
 
 .writing-assist-switch span {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: var(--muted-2);
-  transition:
-    background 120ms ease,
-    transform 120ms ease;
+  background: var(--editor);
+  box-shadow: var(--shadow-sm);
+  transition: transform 120ms ease;
 }
 
 .writing-assist-switch.is-on {
-  border-color: var(--accent-border);
-  background: var(--accent-tint);
+  background: var(--accent-deep);
 }
 
 .writing-assist-switch.is-on span {
-  background: var(--accent-deep);
-  transform: translateX(14px);
+  transform: translateX(16px);
 }
 
 .typography-row {

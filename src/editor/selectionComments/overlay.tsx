@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { SelectionComment, TightenFailureReason, TightenResult } from "../../types/iliad";
 import { isAnchoredSelectionComment } from "../../app/selectionCommentsAnchor";
+import { aiMenuKeyAction } from "./extension";
 import { anchoredOverlayPosition, type OverlayPosition } from "./positioning";
 import { safeTightenRangeForSelection, type SafeTightenRange, type TightenInlineReview } from "../tightenSafeRange";
 import { normalizeSelectionEditInstruction, selectionEditInstructionIsTooLong } from "../selectionEditScope";
@@ -34,7 +35,7 @@ export interface SelectionCommentsOverlayApi {
   handleEditorUpdate: (update: ViewUpdate) => void;
   handleCommentShortcut: (view: EditorView) => boolean;
   handleTightenShortcut: (view: EditorView) => boolean;
-  /** The single AI key on a selection: open the AI menu. Always consumes the key over a selection. */
+  /** The ✦ AI menu key: opens the menu over a selection, does nothing without one. Always consumes the key. */
   handleAiMenuShortcut: (view: EditorView) => boolean;
   handleEscape: (view: EditorView) => boolean;
 }
@@ -757,10 +758,10 @@ export function SelectionCommentsOverlay({
   };
 
   const handleAiMenuShortcut = (shortcutView: EditorView) => {
-    const selection = shortcutView.state.selection;
-
-    if (selection.ranges.length !== 1 || selection.main.empty) {
-      return false;
+    // The ✦ AI key only opens the menu over a selection. With nothing selected
+    // it does nothing (no suggestion, and no fall-through to insertBlankLine).
+    if (aiMenuKeyAction(shortcutView.state.selection) === "nothing") {
+      return true;
     }
 
     if (!composerRef.current && !editComposerRef.current && tightenStateRef.current.phase !== "working") {

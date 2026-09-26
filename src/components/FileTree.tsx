@@ -122,7 +122,6 @@ interface FileTreeUpdateLabels {
 }
 
 interface FileTreeLabels {
-  companionNotes: string;
   companionComments: (count: number | null) => string;
   newDocument: string;
   newDocumentIn: (target: string) => string;
@@ -782,13 +781,11 @@ function TreeRow({
   const companionKind = displayNodeCompanionKind(node);
   const companionDocumentPath = node.source === "real" ? node.node.companion?.documentPath ?? null : null;
   const displayedName =
-    companionKind === "notes"
-      ? labels.companionNotes
-      : companionKind === "comments"
-        ? labels.companionComments(
-            companionCommentCount && companionCommentCount.documentPath === companionDocumentPath ? companionCommentCount.count : null
-          )
-        : displayTreeName(node);
+    companionKind === "comments"
+      ? labels.companionComments(
+          companionCommentCount && companionCommentCount.documentPath === companionDocumentPath ? companionCommentCount.count : null
+        )
+      : displayTreeName(node);
   // A document's children are its companion files: shown only while the
   // document (or one of them) is open, or when a search reveals them (V11).
   const companionChildren = nodeKind === "markdown" ? children ?? [] : [];

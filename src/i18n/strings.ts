@@ -42,7 +42,6 @@ export const appStrings = {
     },
       sidebar: {
       newDocument: "New document",
-      companionNotes: "Notes",
       companionComments: (count: number | null) => (count === null ? "Comments" : `Comments · ${count}`),
       newDocumentIn: (target: string) => `New document in ${target}`,
       newFolder: "New folder",
@@ -146,16 +145,14 @@ export const appStrings = {
       geminiKeyCancel: "Cancel",
       geminiKeyRemove: "Remove",
       geminiKeyGet: "Get a key",
-      geminiKeySaved: (last4: string) => `Gemini key ••••${last4}`,
+      geminiKeyRow: "Gemini key",
+      geminiKeySaved: (last4: string) => `••••${last4}`,
+      geminiKeyAdd: "Add key",
       geminiKeyChange: "Change",
       geminiKeySaveFailed: "Could not save the key. Try again.",
-      autocompleteNeedsKey: "Add a Gemini API key",
-      suggestWhileTyping: "Suggest while I type", suggestWhileTypingOff: (key: string) => `Off: only when you press ${key}`,
-      snooze: "Pause for 10 min", resume: "Resume suggestions",
-      openNotes: "Open notes", openNotesHint: "Notes for this document (voice, facts, things to remember). Autocomplete reads them.",
-      shortcuts: "Shortcuts & accessibility", continueKey: "AI key", sentenceKey: "Sentence", paragraphKey: "Paragraph", ideaKey: "Full idea",
-      continueKeyHint: "Sentence, Paragraph and Full idea ask for that length at once. The AI key suggests a sentence (press again for longer); with text selected it opens the AI menu.",
-      accept: "Accept", alternatives: "Another", dismiss: "Dismiss", reset: "Reset shortcuts", announce: "Announce suggestions"
+      continueKey: "✦ AI menu", sentenceKey: "Sentence", paragraphKey: "Paragraph", ideaKey: "Full idea",
+      accept: "Accept", alternatives: "Another", dismiss: "Dismiss", reset: "Reset shortcuts",
+      privacy: "Privacy", privacyUrl: "https://iliad.md/privacy/"
     },
     updates: {
       checkForUpdates: "Check for Updates...",
@@ -292,8 +289,7 @@ export const appStrings = {
     },
     documentMessages: {
       saveDocumentFallback: "Unable to save document.",
-      saveCommentsFailed: "Comments could not be saved.",
-      openNotesFailed: "Notes could not be opened."
+      saveCommentsFailed: "Comments could not be saved."
     },
     fileMessages: {
       readImageFallback: "Unable to read image.",
@@ -369,7 +365,6 @@ export const appStrings = {
     },
     sidebar: {
       newDocument: "Nuevo documento",
-      companionNotes: "Notas",
       companionComments: (count: number | null) => (count === null ? "Comentarios" : `Comentarios · ${count}`),
       newDocumentIn: (target: string) => `Nuevo documento en ${target}`,
       newFolder: "Nueva carpeta",
@@ -475,16 +470,14 @@ export const appStrings = {
       geminiKeyCancel: "Cancelar",
       geminiKeyRemove: "Quitar",
       geminiKeyGet: "Obtener una clave",
-      geminiKeySaved: (last4: string) => `Clave Gemini ••••${last4}`,
+      geminiKeyRow: "Clave de Gemini",
+      geminiKeySaved: (last4: string) => `••••${last4}`,
+      geminiKeyAdd: "Agregar clave",
       geminiKeyChange: "Cambiar",
       geminiKeySaveFailed: "No se pudo guardar la clave. Intenta de nuevo.",
-      autocompleteNeedsKey: "Agrega una clave API de Gemini",
-      suggestWhileTyping: "Sugerir mientras escribo", suggestWhileTypingOff: (key: string) => `Desactivado: solo al presionar ${key}`,
-      snooze: "Pausar 10 min", resume: "Reanudar sugerencias",
-      openNotes: "Abrir notas", openNotesHint: "Notas de este documento (voz, hechos, cosas que recordar). El autocompletado las lee.",
-      shortcuts: "Atajos y accesibilidad", continueKey: "Tecla de IA", sentenceKey: "Oración", paragraphKey: "Párrafo", ideaKey: "Idea completa",
-      continueKeyHint: "Oración, Párrafo e Idea completa piden ese largo de una vez. La tecla de IA sugiere una oración (presiona de nuevo para alargar); con texto seleccionado abre el menú de IA.",
-      accept: "Aceptar", alternatives: "Otra", dismiss: "Descartar", reset: "Restablecer atajos", announce: "Anunciar sugerencias"
+      continueKey: "Menú ✦ IA", sentenceKey: "Oración", paragraphKey: "Párrafo", ideaKey: "Idea completa",
+      accept: "Aceptar", alternatives: "Otra", dismiss: "Descartar", reset: "Restablecer atajos",
+      privacy: "Privacidad", privacyUrl: "https://iliad.md/es/privacidad/"
     },
     updates: {
       checkForUpdates: "Buscar actualizaciones...",
@@ -621,8 +614,7 @@ export const appStrings = {
     },
     documentMessages: {
       saveDocumentFallback: "No se pudo guardar el documento.",
-      saveCommentsFailed: "No se pudieron guardar los comentarios.",
-      openNotesFailed: "No se pudieron abrir las notas."
+      saveCommentsFailed: "No se pudieron guardar los comentarios."
     },
     fileMessages: {
       readImageFallback: "No se pudo leer la imagen.",

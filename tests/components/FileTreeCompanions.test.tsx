@@ -15,8 +15,9 @@ function file(name: string, companion?: FileTreeNode["companion"]): FileTreeNode
 const nodes: FileTreeNode[] = [
   file("chapter.comments.md", { kind: "comments", documentPath: "/ws/chapter.md" }),
   file("chapter.md"),
-  file("chapter.notes.md", { kind: "notes", documentPath: "/ws/chapter.md" }),
-  file("lonely.notes.md"),
+  // Since 2026-09-25 `name.notes.md` is an ordinary document (main never marks it).
+  file("chapter.notes.md"),
+  file("lonely.comments.md"),
   file("other.md")
 ];
 
@@ -37,27 +38,28 @@ function renderTree(overrides: Partial<Parameters<typeof FileTree>[0]> = {}) {
 }
 
 describe("companion rows in the file tree", () => {
-  it("groups attached companions under their document, notes first; orphans stay in place", () => {
+  it("groups the comments companion under its document; notes files and orphans stay ordinary rows", () => {
     const display = buildFileTreeDisplayNodes(nodes, []);
 
-    expect(display.map(displayNodePath)).toEqual(["/ws/chapter.md", "/ws/lonely.notes.md", "/ws/other.md"]);
+    expect(display.map(displayNodePath)).toEqual(["/ws/chapter.md", "/ws/chapter.notes.md", "/ws/lonely.comments.md", "/ws/other.md"]);
     const chapter = display[0];
-    expect(displayNodeChildren(chapter)?.map(displayNodeCompanionKind)).toEqual(["notes", "comments"]);
+    expect(displayNodeChildren(chapter)?.map(displayNodeCompanionKind)).toEqual(["comments"]);
     expect(displayNodeCompanionKind(display[1])).toBeNull();
+    expect(displayNodeChildren(display[1])).toBeUndefined();
+    expect(displayNodeCompanionKind(display[2])).toBeNull();
   });
 
   it("shows companion rows only under the active document", () => {
     const hidden = renderTree({ activePath: "/ws/other.md" });
-    expect(hidden).not.toContain(">Notes<");
     expect(hidden).not.toContain("Comments");
+    expect(hidden).toContain("chapter.notes");
 
     const shown = renderTree({ activePath: "/ws/chapter.md", companionCommentCount: { documentPath: "/ws/chapter.md", count: 3 } });
-    expect(shown).toContain(">Notes<");
+    expect(shown).not.toContain(">Notes<");
     expect(shown).toContain(">Comments · 3<");
     expect(shown).toContain("is-companion");
 
-    const unknownCount = renderTree({ activePath: "/ws/chapter.notes.md" });
-    expect(unknownCount).toContain(">Notes<");
+    const unknownCount = renderTree({ activePath: "/ws/chapter.comments.md" });
     expect(unknownCount).toContain(">Comments<");
   });
 
@@ -67,7 +69,7 @@ describe("companion rows in the file tree", () => {
     const noop = () => undefined;
     const html = renderToStaticMarkup(
       <TreeContextMenu
-        labels={labels} menu={{ node: nodes[2], x: 0, y: 0 }} menuRef={{ current: null }}
+        labels={labels} menu={{ node: nodes[0], x: 0, y: 0 }} menuRef={{ current: null }}
         onCopyPath={noop} onOpen={noop} onDuplicate={noop} onMoveToTrash={noop} onRename={noop} onRevealInFinder={noop}
       />
     );

@@ -21,7 +21,7 @@ interface TreeContextMenuProps {
   menuRef: RefObject<HTMLDivElement>;
   canMoveToRoot?: (node: FileTreeNode) => boolean;
   onCopyPath: (node: FileTreeNode) => void | Promise<void>;
-  /** Opens a companion file (notes, comments); companions have no other file actions. */
+  /** Opens a companion file (comments); companions have no other file actions. */
   onOpen?: (node: FileTreeNode) => void | Promise<unknown>;
   onDuplicate: (node: FileTreeNode) => void | Promise<void>;
   onMoveToRoot?: (node: FileTreeNode) => void | Promise<unknown>;

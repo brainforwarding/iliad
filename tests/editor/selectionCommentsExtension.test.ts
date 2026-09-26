@@ -1,7 +1,9 @@
-import { EditorState } from "@codemirror/state";
-import { EditorView, type Decoration, type DecorationSet } from "@codemirror/view";
-import { describe, expect, it } from "vitest";
+import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorView, keymap, type Decoration, type DecorationSet } from "@codemirror/view";
+import { describe, expect, it, vi } from "vitest";
+import { ideaAutocompleteExtension } from "../../src/editor/ideaAutocomplete/extension";
 import {
+  aiMenuKeyAction,
   buildSelectionCommentDecorations,
   mergeWashSpans,
   selectionCommentMappingForChanges,
@@ -202,5 +204,34 @@ describe("selectionCommentMappingForChanges", () => {
     const mapping = selectionCommentMappingForChanges(transaction.changes, doc.length, [range]);
 
     expect(mapping).toEqual({ type: "full-replacement" });
+  });
+});
+
+describe("the ✦ AI menu key (⌘↵)", () => {
+  it("opens the menu over a selection and does nothing without one", () => {
+    expect(aiMenuKeyAction(EditorSelection.create([EditorSelection.range(2, 8)]))).toBe("open-menu");
+    expect(aiMenuKeyAction(EditorSelection.create([EditorSelection.cursor(4)]))).toBe("nothing");
+    expect(aiMenuKeyAction(EditorSelection.create([EditorSelection.range(0, 2), EditorSelection.range(4, 6)]))).toBe("nothing");
+  });
+
+  it("is bound only by the selection menu, never by autocomplete, so it never asks for a suggestion", () => {
+    const onAiMenuShortcut = vi.fn(() => true);
+    const requestAutocomplete = vi.fn(async () => ({ ok: false as const, reason: "disabled" as const }));
+    const state = EditorState.create({
+      doc: "She walked into the room.",
+      extensions: [
+        selectionCommentsExtension({ documentPath: "/ws/doc.md", ranges: [], provisionalRange: null, aiMenuKey: "Mod-Enter", onAiMenuShortcut }),
+        ideaAutocompleteExtension({
+          enabled: true, language: "en", workspaceSessionId: "s", documentRelativePath: "doc.md", documentTitle: "doc",
+          requestAutocomplete, cancelAutocomplete: () => undefined
+        })
+      ]
+    });
+    const bindings = state.facet(keymap).flat().filter((binding) => binding.key === "Mod-Enter");
+
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0].run?.({ state } as unknown as EditorView)).toBe(true);
+    expect(onAiMenuShortcut).toHaveBeenCalledOnce();
+    expect(requestAutocomplete).not.toHaveBeenCalled();
   });
 });

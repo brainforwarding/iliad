@@ -259,7 +259,7 @@ export class WorkspaceBaselineService {
       return;
     }
 
-    // Companion files (notes, comments) never enter outside review (spec V9).
+    // Companion files (comments) never enter outside review (spec V9).
     if (hint.relativePath && isCompanionPath(hint.relativePath)) {
       return;
     }
@@ -1281,7 +1281,7 @@ export class WorkspaceBaselineService {
   }
 
   /**
-   * Compare-and-swap for companion files (notes, comments), which outside
+   * Compare-and-swap for companion files (comments), which outside
    * agents edit while Iliad writes them. The current file is renamed to a
    * hidden holding path and its bytes verified against `expectedHash`; on a
    * mismatch it is put back no-clobber and the caller reports `disk_changed`

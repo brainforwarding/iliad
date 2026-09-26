@@ -168,10 +168,9 @@ const api = {
     headingPath: string[];
     documentTitle: string;
     nearbyHeadings: string[];
-    trigger?: "automatic" | "manual";
-    suggestionKind?: "inline" | "sentence" | "paragraph";
+    suggestionKind?: "sentence" | "paragraph" | "idea";
+    extend?: boolean;
     direction?: string;
-    guidance?: string;
     avoid?: string[];
   }) => invoke("autocomplete:run", request),
   onAutocompletePartial: (listener: (event: { requestId: string; insert: string }) => void) => {

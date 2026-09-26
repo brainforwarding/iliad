@@ -39,18 +39,31 @@ describe("companion files never enter outside review (V9)", () => {
   it("skips companions when scanning and refreshing", async () => {
     const root = await workspace();
     await writeFile(path.join(root, "doc.md"), "doc\n");
-    await writeFile(path.join(root, "doc.notes.md"), "notes\n");
+    await writeFile(path.join(root, "doc.comments.md"), "> doc\n\nfirst\n");
     const baseline = service();
     await baseline.attach(root, subscriber);
 
-    // An outside tool edits the notes, adds comments, and edits the document.
-    await writeFile(path.join(root, "doc.notes.md"), "notes changed\n");
+    // An outside tool edits the comments and the document.
     await writeFile(path.join(root, "doc.comments.md"), "> doc\n\nhandled?\n");
     await writeFile(path.join(root, "doc.md"), "doc changed\n");
     await baseline.refreshNow(root);
 
     expect(reviewPaths(baseline.currentReview(root))).toEqual(["edit_file:doc.md"]);
-    expect(baseline.hasPendingReview(root, "doc.notes.md")).toBe(false);
+    expect(baseline.hasPendingReview(root, "doc.comments.md")).toBe(false);
+  });
+
+  it("reviews a name.notes.md file like any document (notes removed 2026-09-25)", async () => {
+    const root = await workspace();
+    await writeFile(path.join(root, "doc.md"), "doc\n");
+    await writeFile(path.join(root, "doc.notes.md"), "notes\n");
+    const baseline = service();
+    await baseline.attach(root, subscriber);
+
+    await writeFile(path.join(root, "doc.notes.md"), "notes changed\n");
+    await baseline.refreshNow(root);
+
+    expect(reviewPaths(baseline.currentReview(root))).toEqual(["edit_file:doc.notes.md"]);
+    expect(baseline.hasPendingReview(root, "doc.notes.md")).toBe(true);
   });
 
   it("writes companions only through compare-and-swap, without joining the baseline", async () => {
@@ -87,7 +100,7 @@ describe("companion files never enter outside review (V9)", () => {
 
     await writeFile(path.join(root, "doc.md"), "doc changed\n");
     baseline.noteDiskChange(root, { relativePath: "doc.comments.md", eventType: "change" });
-    baseline.noteDiskChange(root, { relativePath: "doc.notes.md", eventType: "rename" });
+    baseline.noteDiskChange(root, { relativePath: "other.comments.md", eventType: "rename" });
     await sleep(60);
     expect(reviewPaths(baseline.currentReview(root))).toEqual([]);
 
@@ -102,20 +115,20 @@ describe("companion files never enter outside review (V9)", () => {
   it("does not carry companions through baseline records", async () => {
     const root = await workspace();
     await writeFile(path.join(root, "doc.md"), "doc\n");
-    await writeFile(path.join(root, "doc.notes.md"), "notes\n");
+    await writeFile(path.join(root, "doc.comments.md"), "comments\n");
     const baseline = service();
     await baseline.attach(root, subscriber);
 
     await baseline.runIliadMutation(root, {
-      paths: ["doc.notes.md"],
+      paths: ["doc.comments.md"],
       operation: async () => {
-        await writeFile(path.join(root, "renamed.notes.md"), "notes\n");
-        await rm(path.join(root, "doc.notes.md"));
+        await writeFile(path.join(root, "renamed.comments.md"), "comments\n");
+        await rm(path.join(root, "doc.comments.md"));
       },
       record: () => [
-        { op: "move", fromRelativePath: "doc.notes.md", toRelativePath: "renamed.notes.md", directory: false },
+        { op: "move", fromRelativePath: "doc.comments.md", toRelativePath: "renamed.comments.md", directory: false },
         { op: "set", relativePath: "x.comments.md", content: "x" },
-        { op: "reconcile", relativePath: "renamed.notes.md" }
+        { op: "reconcile", relativePath: "renamed.comments.md" }
       ]
     });
     await baseline.refreshNow(root);
@@ -172,19 +185,19 @@ describe("guarded companion writes", () => {
 
   it("writes through the hold when the hash matches, leaving no holding files", async () => {
     const root = await workspace();
-    await writeFile(path.join(root, "doc.notes.md"), "one\n");
+    await writeFile(path.join(root, "doc.comments.md"), "one\n");
     const baseline = service();
     const { readFile, readdir } = await import("node:fs/promises");
 
     await expect(
       baseline.writeMarkdownIfUnchanged(root, {
-        relativePath: "doc.notes.md",
+        relativePath: "doc.comments.md",
         content: "two\n",
         expected: { kind: "hash", hash: hashMarkdown("one\n") }
       })
     ).resolves.toMatchObject({ status: "written" });
-    await expect(readFile(path.join(root, "doc.notes.md"), "utf8")).resolves.toBe("two\n");
-    expect(await readdir(root)).toEqual(["doc.notes.md"]);
+    await expect(readFile(path.join(root, "doc.comments.md"), "utf8")).resolves.toBe("two\n");
+    expect(await readdir(root)).toEqual(["doc.comments.md"]);
   });
 
   it("removes a companion by moving the verified held file to the Trash", async () => {

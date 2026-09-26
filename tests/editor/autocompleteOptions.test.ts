@@ -1,11 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { defaultAutocompletePreferences, normalizeAutocompletePreferences, selectWritingGuidance, writingGuidanceStorageKey } from "../../src/editor/ideaAutocomplete/options";
+import { compactShortcutLabel, defaultAutocompletePreferences, normalizeAutocompletePreferences } from "../../src/editor/ideaAutocomplete/options";
 
-describe("autocomplete preferences and writing memory", () => {
-  it("keeps document notes distinct across workspaces and file names", () => {
-    expect(writingGuidanceStorageKey("/a", "chapter.md")).not.toBe(writingGuidanceStorageKey("/b", "chapter.md"));
-    expect(writingGuidanceStorageKey("/a", "chapter.md")).not.toBe(writingGuidanceStorageKey("/a", "other.md"));
+describe("autocomplete preferences", () => {
+  it("loads old stored preferences with manualOnly and announce without error", () => {
+    const stored = JSON.parse(JSON.stringify({
+      manualOnly: true, announce: true,
+      shortcuts: { continue: "Mod-Alt-Enter", sentence: "Mod-1", paragraph: "Mod-2", idea: "Mod-3" }
+    }));
+    const loaded = normalizeAutocompletePreferences(stored);
+    expect(loaded).toEqual({ shortcuts: { continue: "Mod-Alt-Enter", sentence: "Mod-1", paragraph: "Mod-2", idea: "Mod-3" } });
+    expect(loaded).not.toHaveProperty("manualOnly");
+    expect(loaded).not.toHaveProperty("announce");
+    expect(normalizeAutocompletePreferences({ manualOnly: false, announce: false })).toEqual(defaultAutocompletePreferences);
+    expect(normalizeAutocompletePreferences("not an object")).toEqual(defaultAutocompletePreferences);
   });
+
   it("defaults to the AI key plus three neighbouring length keys", () => {
     expect(defaultAutocompletePreferences.shortcuts).toEqual({ continue: "Mod-Enter", sentence: "Mod-,", paragraph: "Mod-.", idea: "Mod-/" });
     expect(normalizeAutocompletePreferences(null).shortcuts).toEqual(defaultAutocompletePreferences.shortcuts);
@@ -27,21 +36,11 @@ describe("autocomplete preferences and writing memory", () => {
     expect(taken.continue).toBe("Mod-,");
   });
 
-  it("uses short notes whole and ranks long notes by relevance within a budget", () => {
-    const short = "Close third person, past tense.\n\nMara has an injured hand.\n";
-    expect(selectWritingGuidance(short, "anything")).toBe("Close third person, past tense.\nMara has an injured hand.");
-
-    const long = [
-      "Close third person, past tense.",
-      ...Array.from({ length: 40 }, (_, i) => `Detail ${i} ${"filler ".repeat(12)}`),
-      "Mara has an injured hand."
-    ].join("\n");
-    const selected = selectWritingGuidance(long, "Mara opened the door.");
-    expect(selected).toContain("Mara has an injured hand.");
-    expect(selected.length).toBeLessThanOrEqual(1800);
-    expect(selected).not.toContain("Detail 39");
-    expect(selectWritingGuidance("", "Mara")).toBe("");
-    expect(selectWritingGuidance(undefined, "Mara")).toBe("");
-    expect(selectWritingGuidance("x".repeat(8000), "").length).toBeLessThanOrEqual(1800);
+  it("shows compact key chips in the menu", () => {
+    expect(compactShortcutLabel("Mod-Enter", true)).toBe("⌘↵");
+    expect(compactShortcutLabel("Mod-,", true)).toBe("⌘,");
+    expect(compactShortcutLabel("Mod-Alt-1", true)).toBe("⌘⌥1");
+    expect(compactShortcutLabel("Mod-Enter", false)).toBe("Ctrl+Enter");
+    expect(compactShortcutLabel("Alt", true)).toBe("⌥");
   });
 });

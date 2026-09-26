@@ -29,7 +29,7 @@ export interface FileTreeNode {
   relativePath: string;
   kind: FileKind;
   children?: FileTreeNode[];
-  /** Set on `stem.notes.md` / `stem.comments.md` when the sibling document exists (spec V10). */
+  /** Set on `stem.comments.md` when the sibling document exists (spec V10). */
   companion?: { kind: CompanionKind; documentPath: string };
 }
 
@@ -275,7 +275,7 @@ export async function existingCompanions(documentPath: string): Promise<Array<{ 
 
   const existing: Array<{ kind: CompanionKind; path: string }> = [];
 
-  for (const kind of ["notes", "comments"] as const) {
+  for (const kind of ["comments"] as const) {
     if (await regularFileExists(paths[kind])) {
       existing.push({ kind, path: paths[kind] });
     }
@@ -284,10 +284,10 @@ export async function existingCompanions(documentPath: string): Promise<Array<{ 
   return existing;
 }
 
-/** Every path a document's group can occupy: the document plus both companion names. */
+/** Every path a document's group can occupy: the document plus its companion name. */
 export function documentGroupPaths(documentPath: string) {
   const paths = companionPathsFor(documentPath);
-  return paths ? [documentPath, paths.notes, paths.comments] : [documentPath];
+  return paths ? [documentPath, paths.comments] : [documentPath];
 }
 
 /** Rejects acting on a companion whose document exists: it follows its document. */
@@ -300,7 +300,7 @@ async function assertNotAttachedCompanion(filePath: string) {
 
   for (const name of documentNamesForCompanion(path.basename(filePath))) {
     if (await regularFileExists(path.join(directory, name))) {
-      throw new Error("Notes and comments files move with their document.");
+      throw new Error("Comments files move with their document.");
     }
   }
 }
@@ -337,9 +337,9 @@ function samePath(left: string, right: string) {
 
 /**
  * Moves a Markdown document and its existing companions as one group (spec
- * V13). Both companion names at the destination are checked first, even when
- * the document has no companions yet, so an unrelated `name.notes.md` or
- * `name.comments.md` there is never silently attached. The document and each
+ * V13). The companion name at the destination is checked first, even when
+ * the document has no companions yet, so an unrelated `name.comments.md`
+ * there is never silently attached. The document and each
  * companion then move without overwriting (hard link, then remove the
  * source); any failure puts back what moved.
  */
@@ -349,10 +349,10 @@ async function moveDocumentGroup(workspaceRoot: string, documentPath: string, ta
   const targets = companionPathsFor(targetPath);
 
   if (!targets) {
-    throw new Error("This document's notes and comments cannot follow that name.");
+    throw new Error("This document's comments cannot follow that name.");
   }
 
-  for (const kind of ["notes", "comments"] as const) {
+  for (const kind of ["comments"] as const) {
     const target = targets[kind];
     ensureVisibleWorkspacePath(workspaceRoot, target);
 
@@ -363,7 +363,7 @@ async function moveDocumentGroup(workspaceRoot: string, documentPath: string, ta
 
     if (await pathExists(target)) {
       throw new Error(
-        `A ${kind === "notes" ? "notes" : "comments"} file named "${path.basename(target)}" already exists there. Rename or remove it first.`
+        `A comments file named "${path.basename(target)}" already exists there. Rename or remove it first.`
       );
     }
   }
@@ -397,7 +397,7 @@ async function moveDocumentGroup(workspaceRoot: string, documentPath: string, ta
 
     await moveFileNoClobber(targetPath, documentPath).catch(() => undefined);
     const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`The document's notes or comments could not be moved with it, so nothing was moved. (${reason})`);
+    throw new Error(`The document's comments could not be moved with it, so nothing was moved. (${reason})`);
   }
 }
 

@@ -11,8 +11,8 @@ import { acceptReviewShortcutApplies, nextChunkFocusIndex } from "../editor/aiRe
 import type { EditorReviewState } from "../editor/aiReview/types";
 import { CodeMirrorHost } from "../editor/CodeMirrorHost";
 import { imageDropPasteExtension } from "../editor/imageDropPaste";
-import { ideaAutocompleteExtension, ideaAutocompleteManualKey, runAutocompleteAction, type IdeaAutocompleteStatus, type IdeaAutocompleteSuggestionKind } from "../editor/ideaAutocomplete/extension";
-import { defaultAutocompletePreferences, shortcutLabel, type AutocompletePreferences, type WritingGuidance } from "../editor/ideaAutocomplete/options";
+import { ideaAutocompleteExtension, runAutocompleteAction, type IdeaAutocompleteStatus, type IdeaAutocompleteSuggestionKind } from "../editor/ideaAutocomplete/extension";
+import { defaultAutocompletePreferences, shortcutLabel, type AutocompletePreferences } from "../editor/ideaAutocomplete/options";
 import { Check, ChevronLeft, ChevronRight, RotateCw, X } from "lucide-react";
 import {
   selectionCommentsExtension,
@@ -75,12 +75,10 @@ export interface EditorTightenProps {
 
 export interface EditorWritingAssistsProps {
   preferences?: AutocompletePreferences;
-  guidance?: WritingGuidance;
-  snoozedUntil?: number;
   onPartial?: (listener: (event: { requestId: string; insert: string }) => void) => () => void;
   correctorEnabled: boolean;
   autocompleteEnabled: boolean;
-  /** A Gemini key is set; without one only explicit requests run (and show the add-key hint). */
+  /** A Gemini key is set; without one a request reports the missing key. */
   hasAiKey?: boolean;
   language: "en" | "es";
   workspaceSessionId?: string;
@@ -367,7 +365,8 @@ export function EditorPane({
     (view: EditorView) => overlayApiRef.current?.handleAiMenuShortcut(view) ?? false,
     []
   );
-  const aiKey = writingAssists?.preferences?.shortcuts.continue ?? ideaAutocompleteManualKey;
+  // The ✦ AI menu key (stored as `continue`): opens the menu over a selection, nothing otherwise.
+  const aiKey = writingAssists?.preferences?.shortcuts.continue ?? defaultAutocompletePreferences.shortcuts.continue;
   const handleRejectTightenReview = useCallback(() => {
     setTightenReview(null);
     setProvisionalTightenRange(null);
@@ -885,9 +884,8 @@ export function EditorPane({
     if (!file || !writingAssists?.autocompleteEnabled || !writingAssists.workspaceSessionId ||
         !writingAssists.documentRelativePath || activeWritingIssue || review || readOnly) return [];
     return ideaAutocompleteExtension({
-      preferences: writingAssists.preferences, guidance: writingAssists.guidance,
-      snoozedUntil: writingAssists.snoozedUntil, onPartial: writingAssists.onPartial,
-      enabled: true, automaticEnabled: writingAssists.hasAiKey !== false, language: writingAssists.language,
+      preferences: writingAssists.preferences, onPartial: writingAssists.onPartial,
+      enabled: true, language: writingAssists.language,
       workspaceSessionId: writingAssists.workspaceSessionId, documentRelativePath: writingAssists.documentRelativePath,
       documentTitle: file.name.replace(/\.(md|markdown|mdown|mkd)$/i, ""),
       blockedLineRanges, requestAutocomplete: writingAssists.autocompleteIdea,
@@ -1301,7 +1299,7 @@ export function EditorPane({
             {autocompleteStatus.kind !== "idea" ? (
               <button type="button" onClick={() => editorView && runAutocompleteAction(editorView, "longer")}>
                 {writingAssists.labels.autocomplete.longer}
-                <kbd>{shortcutLabel(writingAssists.preferences?.shortcuts[autocompleteStatus.kind === "paragraph" ? "idea" : autocompleteStatus.kind === "sentence" ? "paragraph" : "sentence"] ?? aiKey)}</kbd>
+                <kbd>{shortcutLabel((writingAssists.preferences?.shortcuts ?? defaultAutocompletePreferences.shortcuts)[autocompleteStatus.kind === "paragraph" ? "idea" : "paragraph"])}</kbd>
               </button>
             ) : null}
             <button type="button" onClick={() => editorView && runAutocompleteAction(editorView, "new")}>
@@ -1348,7 +1346,8 @@ export function EditorPane({
           </form>
         ) : null}
         <span className="autocomplete-announcement" role="status" aria-live="polite" aria-atomic="true">
-          {writingAssists?.preferences?.announce && autocompleteStatus.state === "shown" && !autocompleteStatus.streaming
+          {/* Always on: a shown, finished suggestion is read by screen readers (no setting). */}
+          {writingAssists && autocompleteStatus.state === "shown" && !autocompleteStatus.streaming
             ? `${writingAssists.labels.autocomplete.suggestion}: ${autocompleteStatus.insert ?? ""}` : ""}
         </span>
         {lengthKeyHint && !autocompleteStatusMessage && writingAssists ? (

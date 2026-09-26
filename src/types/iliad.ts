@@ -6,8 +6,8 @@ export interface FileTreeNode {
   relativePath: string;
   kind: FileKind;
   children?: FileTreeNode[];
-  /** Set by main on `stem.notes.md` / `stem.comments.md` when the sibling document exists. */
-  companion?: { kind: "notes" | "comments"; documentPath: string };
+  /** Set by main on `stem.comments.md` when the sibling document exists. */
+  companion?: { kind: "comments"; documentPath: string };
 }
 
 export interface WorkspaceInfo {
@@ -267,7 +267,6 @@ export type TightenResult =
 
 export interface IdeaAutocompleteRequest {
   direction?: string;
-  guidance?: string;
   avoid?: string[];
   requestId: string;
   workspaceSessionId: string;
@@ -279,8 +278,7 @@ export interface IdeaAutocompleteRequest {
   headingPath: string[];
   documentTitle: string;
   nearbyHeadings: string[];
-  trigger?: "automatic" | "manual";
-  suggestionKind?: "inline" | "sentence" | "paragraph" | "idea";
+  suggestionKind?: "sentence" | "paragraph" | "idea";
   /** The prefix ends with the visible, unaccepted suggestion being extended. */
   extend?: boolean;
 }
@@ -340,7 +338,7 @@ export interface SelectionComment {
 
 export type CompanionReadResult = { status: "present"; content: string; hash: string } | { status: "absent" };
 
-/** Companion files (`stem.notes.md`, `stem.comments.md`); writes go through `writeMarkdown`. */
+/** Companion files (`stem.comments.md`); writes go through `writeMarkdown`. */
 export interface CompanionsApi {
   read: (workspaceRoot: string, filePath: string) => Promise<CompanionReadResult>;
   /** Removes a companion only if it still hashes to `expectedHash`. */

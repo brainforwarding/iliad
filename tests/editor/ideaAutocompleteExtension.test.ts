@@ -1,13 +1,11 @@
+import { EditorState } from "@codemirror/state";
+import { keymap } from "@codemirror/view";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   applySharedAutocompleteCooldown,
   consumeAutocompleteSuggestion,
-  autocompleteSuggestionKindForTrigger,
   autocompleteCooldownMsForFailure,
-  hasMeaningfulAutocompleteEdit,
-  ideaAutocompleteDebounceMs,
-  ideaAutocompleteManualKey,
-  isAutocompleteParagraphBoundary,
+  ideaAutocompleteExtension,
   nextAutocompleteKind,
   resetSharedAutocompleteCooldownForTests,
   sharedAutocompleteCooldownActive
@@ -18,12 +16,7 @@ describe("idea autocomplete extension helpers", () => {
     resetSharedAutocompleteCooldownForTests();
   });
 
-  it("uses a writing-friendly idle delay before requesting completions", () => {
-    expect(ideaAutocompleteDebounceMs).toBe(450);
-  });
-
   it("grows a visible suggestion one length per press and stops at the full idea", () => {
-    expect(nextAutocompleteKind("inline")).toBe("sentence");
     expect(nextAutocompleteKind("sentence")).toBe("paragraph");
     expect(nextAutocompleteKind("paragraph")).toBe("idea");
     expect(nextAutocompleteKind("idea")).toBeNull();
@@ -53,56 +46,14 @@ describe("idea autocomplete extension helpers", () => {
     expect(sharedAutocompleteCooldownActive(61_000)).toBe(false);
   });
 
-  it("uses a manual trigger shortcut separate from Tab acceptance", () => {
-    expect(ideaAutocompleteManualKey).toBe("Mod-Enter");
-  });
-
-  it("treats typing, paste, and drop as autocomplete intent", () => {
-    expect(
-      hasMeaningfulAutocompleteEdit([
-        { docChanged: true, isUserEvent: (event) => event === "input.type" }
-      ])
-    ).toBe(true);
-    expect(
-      hasMeaningfulAutocompleteEdit([
-        { docChanged: true, isUserEvent: (event) => event === "input.paste" }
-      ])
-    ).toBe(true);
-    expect(
-      hasMeaningfulAutocompleteEdit([
-        { docChanged: true, isUserEvent: (event) => event === "input.drop" }
-      ])
-    ).toBe(true);
-  });
-
-  it("does not treat navigation, focus, undo, or programmatic changes as autocomplete intent", () => {
-    expect(
-      hasMeaningfulAutocompleteEdit([
-        { docChanged: false, isUserEvent: (event) => event === "select.pointer" }
-      ])
-    ).toBe(false);
-    expect(
-      hasMeaningfulAutocompleteEdit([
-        { docChanged: true, isUserEvent: (event) => event === "undo" }
-      ])
-    ).toBe(false);
-    expect(
-      hasMeaningfulAutocompleteEdit([
-        { docChanged: true, isUserEvent: () => false }
-      ])
-    ).toBe(false);
-  });
-
-  it("keeps the manual sentence trigger predictable regardless of punctuation", () => {
-    const paragraphEnd = "This paragraph has a complete idea.";
-    const blankLine = "This paragraph has a complete idea.\n\n";
-    const midSentence = "This paragraph has a complete";
-
-    expect(isAutocompleteParagraphBoundary(paragraphEnd, paragraphEnd.length)).toBe(true);
-    expect(isAutocompleteParagraphBoundary(blankLine, blankLine.length)).toBe(true);
-    expect(isAutocompleteParagraphBoundary(midSentence, midSentence.length)).toBe(false);
-    expect(autocompleteSuggestionKindForTrigger("automatic", paragraphEnd, paragraphEnd.length)).toBe("inline");
-    expect(autocompleteSuggestionKindForTrigger("manual", paragraphEnd, paragraphEnd.length)).toBe("sentence");
-    expect(autocompleteSuggestionKindForTrigger("manual", midSentence, midSentence.length)).toBe("sentence");
+  it("binds only the length keys, never the ✦ AI menu key", () => {
+    const extensions = ideaAutocompleteExtension({
+      enabled: true, language: "en", documentTitle: "Draft",
+      preferences: { shortcuts: { continue: "Mod-Enter", sentence: "Mod-,", paragraph: "Mod-.", idea: "Mod-/" } },
+      requestAutocomplete: async () => ({ ok: false, reason: "disabled" }), cancelAutocomplete: () => undefined
+    });
+    const keys = EditorState.create({ extensions }).facet(keymap).flat().map((binding) => binding.key);
+    expect(keys).toEqual(expect.arrayContaining(["Mod-,", "Mod-.", "Mod-/", "Tab", "Escape"]));
+    expect(keys).not.toContain("Mod-Enter");
   });
 });

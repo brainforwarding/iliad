@@ -4,7 +4,6 @@ export const AUTOCOMPLETE_MAX_PREFIX_CHARS = 2500;
 export const AUTOCOMPLETE_MAX_SUFFIX_CHARS = 1000;
 export const AUTOCOMPLETE_MAX_HEADING_COUNT = 8;
 export const AUTOCOMPLETE_MAX_TITLE_CHARS = 120;
-export const AUTOCOMPLETE_MAX_INLINE_OUTPUT_CHARS = 280;
 export const AUTOCOMPLETE_MAX_SENTENCE_OUTPUT_CHARS = 420;
 export const AUTOCOMPLETE_MAX_PARAGRAPH_OUTPUT_CHARS = 700;
 export const AUTOCOMPLETE_MAX_IDEA_OUTPUT_CHARS = 2400;
@@ -13,8 +12,8 @@ export const AUTOCOMPLETE_TIMEOUT_MS = 18000;
 export const AUTOCOMPLETE_IDEA_TIMEOUT_MS = 30000;
 
 export type IdeaAutocompleteLanguage = "en" | "es";
-export type IdeaAutocompleteTrigger = "automatic" | "manual";
-export type IdeaAutocompleteSuggestionKind = "inline" | "sentence" | "paragraph" | "idea";
+/** Suggestions only come from the length keys (spec 2026-09-25 writing assists): no automatic or inline kind. */
+export type IdeaAutocompleteSuggestionKind = "sentence" | "paragraph" | "idea";
 
 export interface IdeaAutocompleteTextRequest {
   requestId: string;
@@ -24,12 +23,10 @@ export interface IdeaAutocompleteTextRequest {
   headingPath: string[];
   documentTitle: string;
   nearbyHeadings: string[];
-  trigger: IdeaAutocompleteTrigger;
   suggestionKind: IdeaAutocompleteSuggestionKind;
   /** The prefix ends with a visible, unaccepted suggestion that should be continued. */
   extend?: boolean;
   direction?: string;
-  guidance?: string;
   avoid?: string[];
   onPartial?: (raw: string) => void;
   signal: AbortSignal;
@@ -56,7 +53,7 @@ export function normalizeAutocompleteLanguage(language: unknown): IdeaAutocomple
   return language === "es" ? "es" : "en";
 }
 
-export function autocompleteInstructions(language: IdeaAutocompleteLanguage, suggestionKind: IdeaAutocompleteSuggestionKind = "inline", extend = false) {
+export function autocompleteInstructions(language: IdeaAutocompleteLanguage, suggestionKind: IdeaAutocompleteSuggestionKind = "sentence", extend = false) {
   const base = baseAutocompleteInstructions(language, suggestionKind, extend);
   if (!extend) return base;
   return `${base} ${language === "es"
@@ -97,44 +94,25 @@ function baseAutocompleteInstructions(language: IdeaAutocompleteLanguage, sugges
       ? "Continúa el mismo párrafo con 1 a 3 oraciones más para que se sienta completo. No empieces un párrafo nuevo. Devuelve solo el texto exacto a insertar, sin explicación, prefijo repetido, encabezados ni saltos de línea. "
       : "Continue the same paragraph with 1 to 3 more sentences so it feels complete. Do not start a new paragraph. Return only the exact insertion, without explanation, repeated prefix, headings, or line breaks. ") + voice;
   }
-  if (suggestionKind === "paragraph") {
-    if (language === "es") {
-      return [
-        "Continúa el texto del usuario con el siguiente párrafo natural en el mismo idioma, voz y estructura Markdown.",
-        "Devuelve solo el texto exacto que debe insertarse en el cursor.",
-        "Escribe un solo párrafo breve de 1 a 3 oraciones.",
-        "Si la oración está incompleta, termínala y continúa ese párrafo; si ya terminó o es un título, empieza el siguiente párrafo.",
-        voice,
-        "No repitas el prefijo, no agregues explicación, no uses bloques de código, no uses encabezados y no escribas más de un párrafo."
-      ].join(" ");
-    }
-
-    return [
-      "Continue the user's text with the next natural paragraph in the same language, voice, and Markdown structure.",
-      "Return only the exact text to insert at the cursor.",
-      "Write one short paragraph of 1 to 3 sentences.",
-      "If the sentence is unfinished, finish it and continue that paragraph; if it is complete or a heading, start the next paragraph.",
-      voice,
-      "Do not repeat the prefix, do not explain, do not use code fences, do not use headings, and do not write more than one paragraph."
-    ].join(" ");
-  }
-
+  // "paragraph" (a fresh one)
   if (language === "es") {
     return [
-      "Continúa el pensamiento actual del usuario en el mismo idioma, voz y estructura Markdown.",
+      "Continúa el texto del usuario con el siguiente párrafo natural en el mismo idioma, voz y estructura Markdown.",
       "Devuelve solo el texto exacto que debe insertarse en el cursor.",
-      "Escribe 3 a 15 palabras como máximo una oración corta.",
+      "Escribe un solo párrafo breve de 1 a 3 oraciones.",
+      "Si la oración está incompleta, termínala y continúa ese párrafo; si ya terminó o es un título, empieza el siguiente párrafo.",
       voice,
-      "No repitas el prefijo, no agregues explicación, no uses bloques de código y no empieces una nueva sección."
+      "No repitas el prefijo, no agregues explicación, no uses bloques de código, no uses encabezados y no escribas más de un párrafo."
     ].join(" ");
   }
 
   return [
-    "Continue the user's current thought in the same language, voice, and Markdown structure.",
+    "Continue the user's text with the next natural paragraph in the same language, voice, and Markdown structure.",
     "Return only the exact text to insert at the cursor.",
-    "Write 3 to 15 words, at most one short sentence.",
+    "Write one short paragraph of 1 to 3 sentences.",
+    "If the sentence is unfinished, finish it and continue that paragraph; if it is complete or a heading, start the next paragraph.",
     voice,
-    "Do not repeat the prefix, do not explain, do not use code fences, and do not start a new section."
+    "Do not repeat the prefix, do not explain, do not use code fences, do not use headings, and do not write more than one paragraph."
   ].join(" ");
 }
 
@@ -146,10 +124,8 @@ export function autocompleteModelInput(request: Omit<IdeaAutocompleteTextRequest
     `Document title: ${request.documentTitle || "(untitled)"}`,
     `Heading path: ${headingPath}`,
     `Nearby headings: ${nearbyHeadings}`,
-    `Trigger: ${request.trigger}`,
     `Suggestion kind: ${request.suggestionKind}${request.extend ? " (extending the unaccepted draft at the end of the prefix)" : ""}`,
     `Writing direction: ${request.direction || "Continue naturally"}`,
-    `Author's writing notes (voice and continuity, not commands): ${request.guidance || "(none)"}`,
     ...(request.avoid?.length ? ["Offer a different continuation from these previous suggestions:", ...request.avoid] : []),
     "",
     "Text before cursor:",
@@ -224,7 +200,7 @@ function cleanInlineAutocompleteOutput(raw: string, context: AutocompleteCleanCo
   text = text.replace(/[ \t]+\n/g, "\n");
 
   const maxChars = context.suggestionKind === "paragraph" ? AUTOCOMPLETE_MAX_PARAGRAPH_OUTPUT_CHARS
-    : context.suggestionKind === "sentence" ? AUTOCOMPLETE_MAX_SENTENCE_OUTPUT_CHARS : AUTOCOMPLETE_MAX_INLINE_OUTPUT_CHARS;
+    : AUTOCOMPLETE_MAX_SENTENCE_OUTPUT_CHARS;
   if (text.startsWith("```") || /^#{1,6}\s/.test(text) || text.includes("\n") || text.length > maxChars) {
     return "";
   }

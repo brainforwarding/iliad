@@ -3,15 +3,19 @@ import { isolateHistory } from "@codemirror/commands";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { buildAutocompleteContext, type BlockedLineRange } from "../writingAssistContext";
 import type { IdeaAutocompleteFailureReason, IdeaAutocompleteResult } from "../../types/iliad";
-import { defaultAutocompletePreferences, selectWritingGuidance, type AutocompletePreferences, type WritingGuidance } from "./options";
+import { defaultAutocompletePreferences, type AutocompletePreferences } from "./options";
 import { recordAutocompleteMetric } from "./metrics";
 
-export type IdeaAutocompleteTrigger = "automatic" | "manual";
-export type IdeaAutocompleteSuggestionKind = "inline" | "sentence" | "paragraph" | "idea";
+/**
+ * Suggestions come only on request: the length keys (sentence, paragraph,
+ * full idea), Longer, Another and Steer. Typing never sends a request
+ * (spec 2026-09-25 writing assists one row).
+ */
+export type IdeaAutocompleteSuggestionKind = "sentence" | "paragraph" | "idea";
 
-/** Pressing the continue key on a visible suggestion grows it one step. */
+/** "Longer" on a visible suggestion grows it one step. */
 export function nextAutocompleteKind(kind: IdeaAutocompleteSuggestionKind): IdeaAutocompleteSuggestionKind | null {
-  return kind === "inline" ? "sentence" : kind === "sentence" ? "paragraph" : kind === "paragraph" ? "idea" : null;
+  return kind === "sentence" ? "paragraph" : kind === "paragraph" ? "idea" : null;
 }
 
 /** Mirrors the main-process prefix cap; the visible draft is appended to the document prefix. */
@@ -19,7 +23,6 @@ export const AUTOCOMPLETE_MODEL_PREFIX_MAX_CHARS = 2500;
 
 export interface IdeaAutocompleteRequestPayload {
   direction?: string;
-  guidance?: string;
   avoid?: string[];
   requestId: string;
   workspaceSessionId: string;
@@ -31,7 +34,6 @@ export interface IdeaAutocompleteRequestPayload {
   headingPath: string[];
   documentTitle: string;
   nearbyHeadings: string[];
-  trigger: IdeaAutocompleteTrigger;
   suggestionKind: IdeaAutocompleteSuggestionKind;
   /** The prefix ends with the visible, unaccepted suggestion, which the model continues. */
   extend?: boolean;
@@ -39,12 +41,8 @@ export interface IdeaAutocompleteRequestPayload {
 
 export interface IdeaAutocompleteExtensionOptions {
   preferences?: AutocompletePreferences;
-  guidance?: WritingGuidance;
-  snoozedUntil?: number;
   onPartial?: (listener: (event: { requestId: string; insert: string }) => void) => () => void;
   enabled: boolean;
-  /** False when no AI key is set: only explicit (manual) requests run, and they report the missing key. */
-  automaticEnabled?: boolean;
   language: "en" | "es";
   workspaceSessionId?: string;
   documentRelativePath?: string;
@@ -75,17 +73,10 @@ const controllers = new WeakMap<EditorView, { action(action: AutocompleteAction)
 export function runAutocompleteAction(view: EditorView, action: AutocompleteAction) {
   return controllers.get(view)?.action(action) ?? false;
 }
-export const ideaAutocompleteDebounceMs = 450;
-export const ideaAutocompleteManualKey = "Mod-Enter";
 const transientProviderCooldownMs = 15_000;
 const rateLimitCooldownMs = 60_000;
 let requestSequence = 0;
 let sharedCooldownUntil = 0;
-
-interface AutocompleteTransactionLike {
-  docChanged: boolean;
-  isUserEvent: (event: string) => boolean;
-}
 
 export function autocompleteCooldownMsForFailure(reason: IdeaAutocompleteFailureReason) {
   switch (reason) {
@@ -116,86 +107,6 @@ export function sharedAutocompleteCooldownActive(now = Date.now()) {
 
 export function resetSharedAutocompleteCooldownForTests() {
   sharedCooldownUntil = 0;
-}
-
-export function isMeaningfulAutocompleteEditTransaction(transaction: AutocompleteTransactionLike) {
-  return (
-    transaction.docChanged &&
-    (transaction.isUserEvent("input.type") ||
-      transaction.isUserEvent("input.paste") ||
-      transaction.isUserEvent("input.drop"))
-  );
-}
-
-export function hasMeaningfulAutocompleteEdit(transactions: readonly AutocompleteTransactionLike[]) {
-  return transactions.some((transaction) => isMeaningfulAutocompleteEditTransaction(transaction));
-}
-
-function lineBounds(text: string, cursor: number) {
-  const position = Math.max(0, Math.min(text.length, Math.floor(cursor)));
-  const lineStart = text.lastIndexOf("\n", Math.max(0, position - 1)) + 1;
-  const nextBreak = text.indexOf("\n", position);
-  const lineEnd = nextBreak >= 0 ? nextBreak : text.length;
-
-  return {
-    position,
-    lineStart,
-    lineEnd,
-    before: text.slice(lineStart, position),
-    after: text.slice(position, lineEnd)
-  };
-}
-
-function previousNonEmptyLine(text: string, cursor: number) {
-  const before = text.slice(0, Math.max(0, Math.min(text.length, Math.floor(cursor)))).replace(/[ \t]+$/g, "");
-  const lines = before.split("\n");
-
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index]?.trim();
-
-    if (line) {
-      return line;
-    }
-  }
-
-  return "";
-}
-
-function endsAtProseBoundary(text: string) {
-  return /[.!?:;…]["')\]]?$/.test(text.trim());
-}
-
-export function isAutocompleteParagraphBoundary(text: string, cursor: number) {
-  const { before, after } = lineBounds(text, cursor);
-
-  if (after.trim()) {
-    return false;
-  }
-
-  const line = before.trim();
-
-  if (!line) {
-    const previousLine = previousNonEmptyLine(text, cursor);
-    return Boolean(previousLine) && (/^#{1,6}\s+\S/.test(previousLine) || endsAtProseBoundary(previousLine));
-  }
-
-  if (/^#{1,6}\s+\S/.test(line)) {
-    return true;
-  }
-
-  if (/^(?:[-*+]|\d+[.)])\s+\S/.test(line)) {
-    return endsAtProseBoundary(line);
-  }
-
-  return endsAtProseBoundary(line);
-}
-
-export function autocompleteSuggestionKindForTrigger(
-  trigger: IdeaAutocompleteTrigger,
-  _text: string,
-  _cursor: number
-): IdeaAutocompleteSuggestionKind {
-  return trigger === "manual" ? "sentence" : "inline";
 }
 
 /** Only a pure insertion matching the ghost may consume it; edits elsewhere invalidate it. */
@@ -258,15 +169,10 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
     class IdeaAutocompletePlugin {
       suggestion: ActiveSuggestion | null = null;
       decorations = Decoration.none;
-      private timer: number | null = null;
       private inFlightRequestId: string | null = null;
-      private dismissedUntilEdit = false;
       private acceptedSuggestionChange = false;
-      private pendingAutomaticTrigger = false;
       private composing = false;
       private cooldownUntil = 0;
-      private automaticPausedUntil = 0;
-      private dismissals: number[] = [];
       private unsubscribePartial?: () => void;
       private variants: string[] = [];
       private variantIndex = 0;
@@ -276,9 +182,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
       private requestContext: { from: number; prefix: string; suffix: string } | null = null;
       private requestBase = "";
       private requestKind: IdeaAutocompleteSuggestionKind = "sentence";
-      private inFlightTrigger: IdeaAutocompleteTrigger | null = null;
       private requestStartedAt = 0;
-      private lastEditAt = 0;
       private measuredVisible = false;
       private lastEditAccepted = false;
 
@@ -327,11 +231,10 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           return;
         }
 
-        const meaningfulEdit = hasMeaningfulAutocompleteEdit(update.transactions);
         if (update.docChanged) {
           if (this.lastEditAccepted && update.transactions.some((transaction) => transaction.isUserEvent("undo"))) recordAutocompleteMetric("undone");
           this.lastEditAccepted = this.acceptedSuggestionChange;
-          if (meaningfulEdit) this.lastEditAt = Date.now();
+          this.acceptedSuggestionChange = false;
         }
         if (update.docChanged || update.selectionSet) {
           this.variants = [];
@@ -353,45 +256,23 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           }
         }
 
-        const lostFocus = update.focusChanged && !this.view.hasFocus;
-        if (update.docChanged || update.selectionSet || lostFocus) {
-          this.clearTimer();
+        // Editing, moving the cursor or leaving the editor clears a suggestion;
+        // nothing here ever starts a request.
+        if (update.docChanged || update.selectionSet || (update.focusChanged && !this.view.hasFocus)) {
           this.clearSuggestion();
-        }
-
-        if (update.docChanged) {
-          if (this.acceptedSuggestionChange) {
-            this.acceptedSuggestionChange = false;
-            this.pendingAutomaticTrigger = false;
-          } else if (meaningfulEdit) {
-            this.dismissedUntilEdit = false;
-            this.pendingAutomaticTrigger = true;
-            this.schedule("automatic");
-            return;
-          } else {
-            this.pendingAutomaticTrigger = false;
-          }
-        }
-
-        if (update.selectionSet || lostFocus) {
-          this.pendingAutomaticTrigger = false;
-          this.dismissedUntilEdit = true;
         }
       }
 
       destroy() {
         controllers.delete(this.view);
         this.unsubscribePartial?.();
-        this.clearTimer();
         this.cancelInFlight();
         this.setStatus({ state: "idle" });
       }
 
       setComposing(composing: boolean) {
         this.composing = composing;
-        this.clearTimer();
         this.clearSuggestion();
-        this.pendingAutomaticTrigger = false;
         this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
       }
 
@@ -405,9 +286,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         const original = this.suggestion;
         recordAutocompleteMetric("accepted");
         const insert = original.insert;
-        this.clearTimer();
         this.clearSuggestion();
-        this.dismissedUntilEdit = true;
         this.acceptedSuggestionChange = true;
         this.view.dispatch({
           changes: { from: selection.from, insert },
@@ -420,15 +299,12 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
       }
 
       dismiss() {
-        if (!this.suggestion && !this.inFlightRequestId && this.timer === null) {
+        if (!this.suggestion && !this.inFlightRequestId) {
           return false;
         }
 
-        this.registerDismissal();
-        this.clearTimer();
         this.clearSuggestion();
         this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
-        this.dismissedUntilEdit = true;
         this.setStatus({ state: "idle" });
         return true;
       }
@@ -436,41 +312,21 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
       triggerManual(kind: IdeaAutocompleteSuggestionKind = "sentence", direction = "") {
         this.lastKind = kind;
         this.direction = direction;
-        this.clearTimer();
         this.clearSuggestion();
         this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
-        this.pendingAutomaticTrigger = false;
 
-        if (!this.canRequest("manual")) {
+        if (!this.canRequest()) {
           return false;
         }
 
-        void this.requestSuggestion("manual", kind);
+        void this.requestSuggestion(kind);
         return true;
       }
 
       /**
-       * The single AI key with nothing selected: suggest a sentence, or grow the
-       * visible suggestion. With a selection it falls through to the selection AI menu.
-       */
-      continueKey() {
-        const selection = this.view.state.selection;
-        // A selection belongs to the selection AI menu (registered first). If it
-        // could not take the key, still never let the AI key edit the document.
-        if (selection.ranges.length !== 1 || !selection.main.empty) return true;
-        if (this.composing) return false;
-        if (this.suggestion && selection.main.from === this.suggestion.from) return this.extend() || true;
-        if (this.inFlightRequestId && this.inFlightTrigger === "manual") return true;
-        this.triggerManual("sentence", "");
-        // Swallow the key while autocomplete is on so a busy or cooling-down
-        // provider never turns the AI key into an unexpected blank line.
-        return true;
-      }
-
-      /**
-       * A direct length key: one request for exactly that length. A visible,
-       * shorter suggestion is extended (only the missing part is generated);
-       * otherwise a fresh suggestion of that length is requested.
+       * A length key: one request for exactly that length. A visible, shorter
+       * suggestion is extended (only the missing part is generated); otherwise
+       * a fresh suggestion of that length is requested.
        */
       lengthKey(kind: IdeaAutocompleteSuggestionKind) {
         const selection = this.view.state.selection;
@@ -478,7 +334,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         // (and never fall through to defaults such as toggleComment on Mod-/).
         if (selection.ranges.length !== 1 || !selection.main.empty) return true;
         if (this.composing) return false;
-        if (this.inFlightRequestId && this.inFlightTrigger === "manual") {
+        if (this.inFlightRequestId) {
           if (this.requestKind === kind) return true;
           // Switch lengths mid-request: keep an accepted-looking base draft, drop a partial fresh one.
           const base = this.requestBase;
@@ -486,7 +342,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           this.suggestion = base && this.suggestion ? { ...this.suggestion, insert: base } : null;
           this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
         }
-        const order: IdeaAutocompleteSuggestionKind[] = ["inline", "sentence", "paragraph", "idea"];
+        const order: IdeaAutocompleteSuggestionKind[] = ["sentence", "paragraph", "idea"];
         if (this.suggestion && selection.main.from === this.suggestion.from && order.indexOf(kind) > order.indexOf(this.lastKind)) {
           return this.extend(kind) || true;
         }
@@ -500,27 +356,12 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         const selection = this.view.state.selection;
         const next = target ?? nextAutocompleteKind(this.lastKind);
         if (!current || !next || this.composing || this.inFlightRequestId || selection.ranges.length !== 1 ||
-            !selection.main.empty || selection.main.from !== current.from || !this.canRequest("manual", true)) return false;
-        this.clearTimer();
-        this.pendingAutomaticTrigger = false;
-        void this.requestSuggestion("manual", next, current.insert);
+            !selection.main.empty || selection.main.from !== current.from || !this.canRequest(true)) return false;
+        void this.requestSuggestion(next, current.insert);
         return true;
       }
 
-      private schedule(trigger: IdeaAutocompleteTrigger) {
-        this.clearTimer();
-
-        if (!this.canRequest(trigger)) {
-          return;
-        }
-
-        this.timer = window.setTimeout(() => {
-          this.timer = null;
-          if (this.canRequest(trigger)) void this.requestSuggestion(trigger);
-        }, ideaAutocompleteDebounceMs);
-      }
-
-      private canRequest(trigger: IdeaAutocompleteTrigger, extending = false) {
+      private canRequest(extending = false) {
         if (
           !options.enabled ||
           !options.workspaceSessionId ||
@@ -533,10 +374,6 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           return false;
         }
 
-        if (trigger === "automatic" && (options.automaticEnabled === false || options.preferences?.manualOnly || Date.now() < (options.snoozedUntil ?? 0) || !this.pendingAutomaticTrigger || this.dismissedUntilEdit || Date.now() < this.automaticPausedUntil)) {
-          return false;
-        }
-
         const selection = this.view.state.selection.main;
 
         if (this.view.state.selection.ranges.length !== 1 || !selection.empty || this.inFlightRequestId || (this.suggestion && !extending)) {
@@ -546,23 +383,20 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         return true;
       }
 
-      private async requestSuggestion(trigger: IdeaAutocompleteTrigger, requestedKind?: IdeaAutocompleteSuggestionKind, base = "") {
+      private async requestSuggestion(suggestionKind: IdeaAutocompleteSuggestionKind, base = "") {
         const selection = this.view.state.selection.main;
 
         if (!selection.empty || !options.workspaceSessionId || !options.documentRelativePath) {
           return;
         }
 
-        const text = this.view.state.doc.toString();
-        const suggestionKind = requestedKind ?? autocompleteSuggestionKindForTrigger(trigger, text, selection.from);
-        // Pause at word boundaries so a suggestion cannot split a word being typed.
-        if (trigger === "automatic" && /[\p{L}\p{N}]$/u.test(text.slice(0, selection.from))) return;
-        const context = buildAutocompleteContext(text, selection.from, {
-          minPrefixChars: trigger === "manual" ? 8 : 20,
-          includePreviousBlockOnEmptyPrefix: trigger === "manual",
+        const contextOptions = {
+          minPrefixChars: 8,
+          includePreviousBlockOnEmptyPrefix: true,
           includePreviousBlockOnShortPrefix: true,
           blockedLineRanges: options.blockedLineRanges
-        });
+        };
+        const context = buildAutocompleteContext(this.view.state.doc.toString(), selection.from, contextOptions);
 
         if (!context) {
           this.setStatus({ state: "idle" });
@@ -570,11 +404,9 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         }
 
         const requestId = `idea-autocomplete-${Date.now()}-${++requestSequence}`;
-        const direction = trigger === "manual" ? this.direction : "";
-        this.direction = direction;
-        const guidance = selectWritingGuidance(options.guidance, `${context.prefix.slice(-700)} ${context.headingPath.join(" ")}`);
+        const direction = this.direction;
         // Extended drafts and fresh suggestions are not comparable alternatives.
-        const variantKey = JSON.stringify([selection.from, context, suggestionKind, direction, guidance, base]);
+        const variantKey = JSON.stringify([selection.from, context, suggestionKind, direction, base]);
         const previousVariants = variantKey === this.variantKey ? this.variants : [];
         if (variantKey !== this.variantKey) {
           this.variants = [];
@@ -586,12 +418,10 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         this.requestBase = base;
         this.requestKind = suggestionKind;
         const modelPrefix = base ? (context.prefix + base).slice(-AUTOCOMPLETE_MODEL_PREFIX_MAX_CHARS) : context.prefix;
-        this.requestStartedAt = trigger === "automatic" && this.lastEditAt ? this.lastEditAt : Date.now();
+        this.requestStartedAt = Date.now();
         this.measuredVisible = false;
         recordAutocompleteMetric("requested");
         this.inFlightRequestId = requestId;
-        this.inFlightTrigger = trigger;
-        this.pendingAutomaticTrigger = false;
         this.setStatus({ state: "requesting" });
 
         try {
@@ -606,12 +436,10 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
             headingPath: context.headingPath,
             documentTitle: options.documentTitle,
             nearbyHeadings: context.nearbyHeadings,
-            trigger,
             suggestionKind,
             extend: Boolean(base),
             direction,
-            guidance,
-            avoid: trigger === "manual" && !base ? previousVariants : []
+            avoid: base ? [] : previousVariants
           });
 
           if (this.inFlightRequestId !== requestId) {
@@ -625,15 +453,11 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
             // A failed extension leaves the visible draft, and its controls, exactly as they were.
             this.suggestion = base && this.suggestion ? { ...this.suggestion, insert: base } : null;
             this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
+            const cooldownMs = autocompleteCooldownMsForFailure(result.reason);
+            if (cooldownMs > 0) this.cooldownUntil = applySharedAutocompleteCooldown(result.reason);
             if (this.suggestion) {
-              const cooldownMs = autocompleteCooldownMsForFailure(result.reason);
-              if (cooldownMs > 0) this.cooldownUntil = applySharedAutocompleteCooldown(result.reason);
               this.renderSuggestion();
               return;
-            }
-            const cooldownMs = autocompleteCooldownMsForFailure(result.reason);
-            if (cooldownMs > 0) {
-              this.cooldownUntil = applySharedAutocompleteCooldown(result.reason);
             }
 
             if (result.reason !== "aborted") {
@@ -644,12 +468,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           }
 
           const latestSelection = this.view.state.selection.main;
-          const latestContext = buildAutocompleteContext(this.view.state.doc.toString(), latestSelection.from, {
-            minPrefixChars: trigger === "manual" ? 8 : 20,
-            includePreviousBlockOnEmptyPrefix: trigger === "manual",
-            includePreviousBlockOnShortPrefix: true,
-            blockedLineRanges: options.blockedLineRanges
-          });
+          const latestContext = buildAutocompleteContext(this.view.state.doc.toString(), latestSelection.from, contextOptions);
 
           if (
             !latestSelection.empty ||
@@ -696,14 +515,11 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
       }
 
       private clearSuggestion() {
-        if (!this.suggestion) {
-          this.cancelInFlight();
-          this.setStatus({ state: "idle" });
-          return;
+        if (this.suggestion) {
+          this.suggestion = null;
+          this.decorations = buildDecorations(null);
         }
 
-        this.suggestion = null;
-        this.decorations = buildDecorations(null);
         this.cancelInFlight();
         this.setStatus({ state: "idle" });
       }
@@ -715,27 +531,6 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
 
         options.cancelAutocomplete(this.inFlightRequestId);
         this.inFlightRequestId = null;
-        this.inFlightTrigger = null;
-      }
-
-      private clearTimer() {
-        if (this.timer === null) {
-          return;
-        }
-
-        window.clearTimeout(this.timer);
-        this.timer = null;
-      }
-
-      private registerDismissal() {
-        const now = Date.now();
-        this.dismissals = this.dismissals.filter((timestamp) => now - timestamp < 60_000);
-        this.dismissals.push(now);
-
-        if (this.dismissals.length >= 3) {
-          this.automaticPausedUntil = now + 5 * 60_000;
-          this.dismissals = [];
-        }
       }
 
       private setStatus(status: IdeaAutocompleteStatus) {
@@ -759,8 +554,9 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
   const lengthKeys = { ...defaultAutocompletePreferences.shortcuts, ...options.preferences?.shortcuts };
   return [
     plugin,
-    // Direct length keys outrank other editor bindings on the same keys (e.g. the
+    // Length keys outrank other editor bindings on the same keys (e.g. the
     // corrector's Mod-. or CodeMirror's Mod-/ comment toggle); users can remap them.
+    // The `continue` key only opens the ✦ AI menu (selection comments extension).
     Prec.highest(
       keymap.of((["sentence", "paragraph", "idea"] as const).map((kind) => ({
         key: lengthKeys[kind],
@@ -776,10 +572,6 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         {
           key: "Escape",
           run: (view) => view.plugin(plugin)?.dismiss() ?? false
-        },
-        {
-          key: options.preferences?.shortcuts.continue ?? ideaAutocompleteManualKey,
-          run: (view) => view.plugin(plugin)?.continueKey() ?? false
         },
         {
           key: "Alt-ArrowUp",

@@ -1,4 +1,4 @@
-import { Prec, StateField, type ChangeDesc, type EditorState, type Range } from "@codemirror/state";
+import { Prec, StateField, type ChangeDesc, type EditorSelection, type EditorState, type Range } from "@codemirror/state";
 import { Decoration, EditorView, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 
 export interface SelectionCommentWashRange {
@@ -33,12 +33,22 @@ export interface SelectionCommentsExtensionOptions {
   onEditorUpdate?: (update: ViewUpdate) => void;
   onCommentShortcut?: (view: EditorView) => boolean;
   onTightenShortcut?: (view: EditorView) => boolean;
-  /** The single AI key (shared with continuation); handled here first when text is selected. */
+  /** The ✦ AI menu key (default ⌘↵): opens the menu over a selection, does nothing otherwise. */
   aiMenuKey?: string;
   onAiMenuShortcut?: (view: EditorView) => boolean;
   /** Tab accepts a pending inline selection rewrite before any ghost or indentation. */
   onAcceptReviewShortcut?: (view: EditorView) => boolean;
   onEscape?: (view: EditorView) => boolean;
+}
+
+/**
+ * What the ✦ AI menu key does for a selection: open the menu over exactly one
+ * non-empty range; otherwise nothing. It never asks for a suggestion (spec
+ * 2026-09-25 writing assists) and is always consumed, so it cannot fall
+ * through to CodeMirror's insertBlankLine.
+ */
+export function aiMenuKeyAction(selection: EditorSelection): "open-menu" | "nothing" {
+  return selection.ranges.length === 1 && !selection.main.empty ? "open-menu" : "nothing";
 }
 
 interface WashSpan {

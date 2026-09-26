@@ -572,7 +572,7 @@
   font-weight: 400;
 }
 
-/* Companion rows (Notes, Comments) under their document: quieter, smaller. */
+/* Companion rows (Comments) under their document: quieter, smaller. */
 .tree-item.is-companion {
   min-height: 26px;
 }

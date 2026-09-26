@@ -20,7 +20,6 @@ import {
 import { externalReviewTargetForActiveFile, useOutsideReview } from "./app/useOutsideReview";
 import { useSelectionComments } from "./app/useSelectionComments";
 import { useWorkspace } from "./app/useWorkspace";
-import { useWritingNotes } from "./app/useWritingNotes";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
 import {
   EditorPane,
@@ -268,16 +267,6 @@ export default function App() {
     stateRef,
     tree,
     workspace
-  });
-  const { notesText, notesAvailable, openNotes } = useWritingNotes({
-    activeFile,
-    workspace,
-    lastWorkspaceChange,
-    tree,
-    openNode,
-    refreshTree,
-    onError: setError,
-    messages: strings.documentMessages
   });
 
   const reloadActiveDocumentRef = useRef<(options?: { mayReplace?: () => boolean }) => Promise<void>>(
@@ -1313,7 +1302,7 @@ export default function App() {
   const shouldShowStatus = saveStatus !== "saved";
   const editorFile = virtualReviewFile ?? activeFile;
   const editorSelectionComments = useMemo<EditorSelectionCommentsProps | undefined>(() => {
-    // No comments on a notes or comments file itself (spec V12).
+    // No comments on a comments file itself (spec V12).
     if (!activeFile || activeFile.kind !== "markdown" || editorFile !== activeFile || !commentsEnabled) {
       return undefined;
     }
@@ -1388,8 +1377,6 @@ export default function App() {
       autocompleteEnabled,
       hasAiKey: hasGeminiKey,
       preferences: autocompleteOptions.preferences,
-      guidance: notesText,
-      snoozedUntil: autocompleteOptions.snoozedUntil,
       onPartial: window.iliad.onAutocompletePartial,
       language,
       workspaceSessionId,
@@ -1426,8 +1413,6 @@ export default function App() {
     correctorEnabled,
     hasGeminiKey,
     autocompleteOptions.preferences,
-    notesText,
-    autocompleteOptions.snoozedUntil,
     editorFile,
     language,
     strings.editor.ideaAutocomplete,
@@ -1451,10 +1436,6 @@ export default function App() {
     ? strings.topbar.forwardTo(markdownDisplayName(forwardTarget.node, strings.appName))
     : strings.topbar.noNextDocument;
   const focusModeLabel = focusMode ? strings.topbar.exitFocusMode : strings.topbar.focusMode;
-  const autocompleteStatusNote =
-    autocompleteEnabled && writingAssistStatus && !writingAssistStatus.geminiKey.hasKey
-      ? strings.writingAssists.autocompleteNeedsKey
-      : undefined;
 
   if (!workspace) {
     return (
@@ -1574,14 +1555,6 @@ export default function App() {
             <WritingAssistsMenu
               preferences={autocompleteOptions.preferences}
               onPreferencesChange={autocompleteOptions.setPreferences}
-              onOpenNotes={() => {
-                setWritingAssistsOpen(false);
-                void openNotes();
-              }}
-              notesAvailable={notesAvailable}
-              hasNotes={Boolean(notesText.trim())}
-              snoozed={autocompleteOptions.snoozedUntil > Date.now()}
-              onToggleSnooze={autocompleteOptions.toggleSnooze}
               onResetShortcuts={autocompleteOptions.resetShortcuts}
               labels={strings.writingAssists}
               menuRef={writingAssistsMenuRef}
@@ -1589,10 +1562,10 @@ export default function App() {
               correctorEnabled={correctorEnabled}
               autocompleteEnabled={autocompleteEnabled}
               correctorAvailable={language === "en"}
-              autocompleteNote={autocompleteStatusNote}
               geminiKey={writingAssistStatus?.geminiKey ?? null}
               onSaveGeminiKey={saveGeminiKey}
               onGetGeminiKey={openGeminiKeyPage}
+              onOpenPrivacy={() => void window.iliad.openUrl(strings.writingAssists.privacyUrl)}
               keyFieldFocusRequest={keyFieldFocusRequest}
               onToggleOpen={() => {
                 setWritingAssistsOpen((open) => {

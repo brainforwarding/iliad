@@ -58,19 +58,19 @@ function Preview() {
   const writingAssists = useMemo(() => ({
     correctorEnabled: false, autocompleteEnabled: enabled,
     workspaceSessionId: "preview", documentRelativePath: files[chapter].relativePath, language,
-    preferences: options.preferences, guidance: "", snoozedUntil: options.snoozedUntil,
+    preferences: options.preferences,
     labels: { corrector: strings.editor.writingCorrector, autocomplete: strings.editor.ideaAutocomplete },
     autocompleteIdea: requestAutocomplete, cancelAutocompleteIdea: cancel, onPartial
-  }), [enabled, chapter, language, options.preferences, options.snoozedUntil, strings]);
+  }), [enabled, chapter, language, options.preferences, strings]);
   return <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "var(--editor)" }}>
     <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 24px", borderBottom: "1px solid var(--hairline)", fontFamily: "var(--font-ui)" }}>
       <div><button onClick={() => setChapter((n) => 1 - n)}>{files[chapter].name}</button> <button onClick={() => setLanguage(language === "en" ? "es" : "en")}>{language.toUpperCase()}</button></div>
       <WritingAssistsMenu labels={strings.writingAssists} menuRef={menuRef} open={open} onToggleOpen={() => setOpen(!open)}
         correctorEnabled={corrector} onSetCorrectorEnabled={setCorrector} correctorAvailable={true}
         autocompleteEnabled={enabled} onSetAutocompleteEnabled={setEnabled}
-        geminiKey={{ hasKey: true, last4: "demo" }} onSaveGeminiKey={async () => undefined} onGetGeminiKey={() => undefined} notesAvailable={false} hasNotes={false} onOpenNotes={() => undefined}
+        geminiKey={{ hasKey: true, last4: "demo" }} onSaveGeminiKey={async () => undefined} onGetGeminiKey={() => undefined} onOpenPrivacy={() => undefined}
         preferences={options.preferences} onPreferencesChange={options.setPreferences}
-        snoozed={options.snoozedUntil > Date.now()} onToggleSnooze={options.toggleSnooze} onResetShortcuts={options.resetShortcuts} />
+        onResetShortcuts={options.resetShortcuts} />
     </header>
     <EditorPane file={files[chapter]} value={text[chapter]} editorFontSize={19} editorFontPreset="serif" labels={strings.editor} review={null}
       selectionComments={selectionComments}
