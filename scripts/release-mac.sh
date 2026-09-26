@@ -632,7 +632,18 @@ if wants homebrew; then
   mkdir -p "$tap_dir/Casks"
   cp packaging/homebrew/iliad-md.rb "$tap_dir/Casks/iliad-md.rb"
   if command -v brew >/dev/null 2>&1; then
-    run brew style --cask "$tap_dir/Casks/iliad-md.rb" || die "brew style failed for the cask"
+    # Homebrew only lints casks that live in a tap, so check it from a
+    # throwaway local tap and untap it afterwards.
+    style_tap="iliad-release/check"
+    style_dir="$(brew --repository)/Library/Taps/iliad-release/homebrew-check"
+    brew untap "$style_tap" >/dev/null 2>&1 || true
+    mkdir -p "$style_dir/Casks"
+    cp packaging/homebrew/iliad-md.rb "$style_dir/Casks/iliad-md.rb"
+    git -C "$style_dir" init --quiet
+    style_ok=1
+    HOMEBREW_NO_INSTALL_FROM_API=1 run brew style --cask "$style_tap/iliad-md" || style_ok=0
+    brew untap "$style_tap" >/dev/null 2>&1 || warn "could not untap $style_tap; run: brew untap $style_tap"
+    [ "$style_ok" -eq 1 ] || die "brew style failed for the cask"
   else
     warn "brew not installed; skipping brew style (run it on a Mac with Homebrew)"
   fi
