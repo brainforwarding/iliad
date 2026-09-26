@@ -553,7 +553,7 @@ export default function App() {
       if (result.status === "current") {
         setNotice(strings.updates.current(result.latestVersion));
       } else if (result.status === "error") {
-        setNotice(strings.updates.checkFailed);
+        setNotice(result.detail || result.message || strings.updates.checkFailed);
       } else {
         setNotice(null);
       }

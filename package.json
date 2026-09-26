@@ -5,7 +5,7 @@
   "private": true,
   "description": "A local-first Markdown writing workspace.",
   "license": "MIT",
-  "author": "Sebastián Marambio",
+  "author": "Sebasti\u00c3\u00a1n Marambio",
   "repository": {
     "type": "git",
     "url": "https://github.com/brainforwarding/iliad.git"
@@ -22,7 +22,7 @@
     "package": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir",
     "dist": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder",
     "dist:mac": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
-    "dist:win": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
+    "dist:win": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --x64 --publish never --config.extraMetadata.iliadDistribution=local",
     "dist:linux": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --linux",
     "dist:mac:signed": "npm run build && electron-builder --mac",
     "preview": "vite preview --host 127.0.0.1",
@@ -30,6 +30,7 @@
     "release:verify-update-metadata": "node scripts/verifyUpdateMetadata.mjs",
     "release:update-homebrew-cask": "node scripts/updateHomebrewCask.mjs",
     "test": "vitest run",
+    "test:windows:app": "node scripts/smokeWindows.mjs",
     "typecheck": "tsc -b && tsc -p electron/tsconfig.json --noEmit",
     "lint:css": "stylelint \"src/styles/**/*.css\""
   },
@@ -56,6 +57,7 @@
     "cross-env": "^7.0.3",
     "electron": "^42.2.0",
     "electron-builder": "^26.8.1",
+    "playwright": "^1.63.0",
     "stylelint": "^17.12.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.3",
@@ -73,7 +75,8 @@
       "dist/**",
       "dist-electron/**",
       "build/**",
-      "package.json"
+      "package.json",
+      "bin/lib/endpoint.cjs"
     ],
     "extraResources": [
       {
@@ -103,6 +106,14 @@
       "target": [
         "nsis"
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh"
     },
     "linux": {
       "icon": "build/icon.png",
