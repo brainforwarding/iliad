@@ -54,6 +54,7 @@ writer talks to the AI; notes duplicate that.
 | Dismiss / Descartar | none | fixed key text `Esc` |
 | Reset shortcuts / Restablecer atajos | none | whole row is the button |
 | AI key row (see below) | per state | text link |
+| Privacy / Privacidad | none | whole row opens the privacy page |
 
 Key rows are shown only while Autocomplete is on, as today. Key selects keep
 the existing duplicate-key blocking. Hairline under every row except the last.
@@ -111,6 +112,8 @@ finished suggestion regardless of preferences.
   line and the `guidance` request field; `src/types/iliad.ts` loses the
   `notes` kind and field.
 - Leave the old localStorage guidance keys alone (unused, harmless).
+- The owner's machine has no `.notes.md` files (checked 2026-09-25), so no
+  local cleanup is needed.
 - `resources/skill/iliad/SKILL.md`: the companion section describes only
   `name.comments.md`. `docs/product-vision.md`, `docs/architecture.md` and
   `docs/decisions.md` say notes were removed on 2026-09-25 and why.
@@ -132,14 +135,19 @@ Implement on `master` now; it does not depend on Groq. The Groq branch then
 rebases: its menu copy uses the row table above, and its section 8b gate is
 closed as "removed".
 
-## Open questions for the owner
+## Privacy row (decided 2026-09-25)
 
-1. ⌘↵ also opens the ✦ AI menu when text is selected. "Ask for a suggestion"
-   describes only the no-selection case. Keep it, or use "AI key / Tecla de
-   IA"?
-2. The Groq spec requires a free-route privacy line. Proposed: an ordinary row
-   "Privacy / Privacidad" under the AI row that opens the privacy page, instead
-   of a paragraph of grey text in the menu.
+Under the AI key row: an ordinary row "Privacy / Privacidad" with no control.
+Clicking it opens `https://iliad.md/privacy/` (EN) or
+`https://iliad.md/es/privacidad/` (ES) in the browser, following the app
+language. The page lives in the `iliad-site` repo; it describes today's
+Gemini route. The Groq release must update it (free route through Iliad's
+server, own key, processors) before the free route ships.
+
+## Open question for the owner
+
+⌘↵ also opens the ✦ AI menu when text is selected; "Ask for a suggestion"
+describes only the no-selection case. Keep it, or use "AI key / Tecla de IA"?
 
 ## Acceptance
 
