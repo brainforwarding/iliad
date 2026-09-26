@@ -342,6 +342,7 @@ async function runInstall(route, context) {
   const lines = [
     `${result.action === "unchanged" ? "Already installed" : "Installed"}: ${result.linkPath} -> ${result.target}`
   ];
+  if (process.platform === "win32") lines.push("Open a new terminal to use the updated PATH.");
 
   if (!result.onPath) {
     lines.push(

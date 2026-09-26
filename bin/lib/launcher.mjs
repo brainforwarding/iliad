@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import os from "node:os";
-import path from "node:path";
+import nodePath from "node:path";
 
 const defaultAppName = "Iliad MD.app";
 
@@ -31,6 +31,7 @@ function defaultFs() {
  * otherwise take the single entry of `Contents/MacOS`.
  */
 function bundleExecutable(appPath, { execPath, fs }) {
+  const path = (appPath.includes("\\") || /^[a-z]:/i.test(appPath)) ? nodePath.win32 : nodePath.posix;
   const macosDirectory = path.join(appPath, "Contents", "MacOS");
 
   if (execPath && path.dirname(execPath) === macosDirectory) {
@@ -66,6 +67,7 @@ export function resolveLauncher({
   execPath = process.execPath,
   fs = defaultFs()
 }) {
+  const path = platform === "win32" ? nodePath.win32 : nodePath.posix;
   const options = { execPath, fs };
 
   if (env.ILIAD_APP) {
@@ -95,6 +97,16 @@ export function resolveLauncher({
   }
 
   const checkoutRoot = path.resolve(scriptDirectory, "..");
+  if (platform === "win32") {
+    const packagedExecutable = path.resolve(scriptDirectory, "..", "..", "Iliad MD.exe");
+    if (fs.exists(packagedExecutable)) {
+      return { kind: "app", source: "bundle", command: packagedExecutable, prefixArgs: [], appPath: packagedExecutable };
+    }
+    const developmentExecutable = path.join(checkoutRoot, "node_modules", "electron", "dist", "electron.exe");
+    if (fs.exists(developmentExecutable)) {
+      return { kind: "checkout", source: "checkout", command: developmentExecutable, prefixArgs: [checkoutRoot], appPath: checkoutRoot };
+    }
+  }
   const electronExecutable = path.join(
     checkoutRoot,
     "node_modules",
@@ -102,7 +114,7 @@ export function resolveLauncher({
     platform === "win32" ? "electron.cmd" : "electron"
   );
 
-  if (fs.exists(electronExecutable)) {
+  if (platform !== "win32" && fs.exists(electronExecutable)) {
     return { kind: "checkout", source: "checkout", command: electronExecutable, prefixArgs: [checkoutRoot], appPath: checkoutRoot };
   }
 

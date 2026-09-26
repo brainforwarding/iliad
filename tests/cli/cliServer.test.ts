@@ -1,3 +1,4 @@
+import { cliEndpoint } from "../../electron/cli/endpoint";
 import { existsSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import net from "node:net";
@@ -56,7 +57,7 @@ describe("CLI socket server", () => {
 
   beforeEach(async () => {
     dir = await realpath(await mkdtemp(path.join(os.tmpdir(), "iliad-sock-")));
-    socketPath = path.join(dir, "iliad.sock");
+    socketPath = cliEndpoint(dir);
     server = null;
     await mkdir(path.join(dir, "book", "chapters"), { recursive: true });
     await mkdir(path.join(dir, "book", ".hidden"), { recursive: true });
@@ -72,7 +73,7 @@ describe("CLI socket server", () => {
         { workspace: bookRoot, document: path.join(bookRoot, "chapters/03.md"), relativePath: "chapters/03.md", focused: true }
       ]),
       findWindowForPath: vi.fn((absolutePath: string) =>
-        absolutePath.startsWith(`${bookRoot}/`) ? { webContentsId: 1, workspaceRoot: bookRoot } : null
+        absolutePath.startsWith(`${bookRoot}${path.sep}`) ? { webContentsId: 1, workspaceRoot: bookRoot } : null
       ),
       openWorkspaceWindow: vi.fn((workspace) => ({ webContentsId: 2, workspaceRoot: workspace.path })),
       focusWindow: vi.fn(),
@@ -91,13 +92,13 @@ describe("CLI socket server", () => {
 
   it("listens with mode 0600 and answers status", async () => {
     await start();
-    expect(statSync(socketPath).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(socketPath).mode & 0o777).toBe(0o600);
 
     const response = await sendRequest(socketPath, { cmd: "status" });
     expect(response).toEqual({ ok: true, windows: (host.listWindowStatus as ReturnType<typeof vi.fn>).mock.results[0].value });
   });
 
-  it("replaces a stale socket and removes the socket on close", async () => {
+  it.skipIf(process.platform === "win32")("replaces a stale socket and removes the socket on close", async () => {
     // A crashed run leaves the path behind with nobody listening.
     await writeFile(socketPath, "");
     await expect(sendRequest(socketPath, { cmd: "status" })).rejects.toBeInstanceOf(NotRunningError);

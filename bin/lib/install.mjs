@@ -2,6 +2,7 @@ import { constants, existsSync } from "node:fs";
 import { access, lstat, mkdir, readlink, realpath, rename, rm, stat, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { installWindowsCommand, uninstallWindowsCommand, windowsCommandDirectory } from "./windowsInstall.mjs";
 
 /**
  * Putting `iliad` on PATH (macOS app bundles). The single implementation
@@ -25,6 +26,7 @@ export class InstallError extends Error {
 }
 
 export function commandInstallDirectories(home = os.homedir()) {
+  if (process.platform === "win32") return [windowsCommandDirectory(process.env, home)];
   return ["/opt/homebrew/bin", "/usr/local/bin", path.join(home, ".local", "bin")];
 }
 
@@ -112,6 +114,9 @@ async function writeProbe(target) {
  */
 export async function bundleWrapperPath(scriptDirectory, { exists = existsSync, probe = writeProbe, resolve = realpathOrSelf } = {}) {
   const directory = scriptDirectory ? await resolve(scriptDirectory) : "";
+  if (process.platform === "win32" && exists(path.resolve(directory, "..", "..", "Iliad MD.exe")) && exists(path.join(directory, "iliad.cmd"))) {
+    return path.join(directory, "iliad.cmd");
+  }
   const match = /^(.*\.app)[\\/]Contents[\\/]Resources[\\/]bin$/.exec(directory);
 
   if (!match || !exists(path.join(directory, commandName))) {
@@ -221,6 +226,7 @@ export async function installCliCommand({
   pathValue = "",
   createMissingDirectory = null
 }) {
+  if (process.platform === "win32") return installWindowsCommand({ wrapperPath, directory: exactDirectory ?? directories[0], pathValue });
   const candidates = exactDirectory ? [path.resolve(exactDirectory)] : directories;
 
   for (const directory of candidates) {
@@ -275,6 +281,7 @@ export function homebrewOwnsDirectory(directory, exists = existsSync) {
  * Never touches real files, links to other programs, or Homebrew's link.
  */
 export async function uninstallCliCommand({ directories, exists = existsSync }) {
+  if (process.platform === "win32") return uninstallWindowsCommand({ directories });
   const removed = [];
   const skipped = [];
 

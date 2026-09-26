@@ -95,7 +95,8 @@ function handleConnection(socket: net.Socket, handler: CliRequestHandler) {
  * restricted to the current user (0600) as soon as it exists.
  */
 export function startCliServer({ socketPath, handler }: { socketPath: string; handler: CliRequestHandler }): Promise<CliServer> {
-  removeStaleSocket(socketPath);
+  const isPipe = socketPath.startsWith("\\\\.\\pipe\\");
+  if (!isPipe) removeStaleSocket(socketPath);
   const server = net.createServer((socket) => handleConnection(socket, handler));
 
   return new Promise((resolve, reject) => {
@@ -104,7 +105,7 @@ export function startCliServer({ socketPath, handler }: { socketPath: string; ha
       server.off("error", reject);
 
       try {
-        chmodSync(socketPath, 0o600);
+        if (!isPipe) chmodSync(socketPath, 0o600);
       } catch (error) {
         server.close();
         reject(error);
@@ -124,7 +125,7 @@ export function startCliServer({ socketPath, handler }: { socketPath: string; ha
             closed = true;
             server.close(() => closeResolve());
             // server.close removes the socket file on POSIX; make sure.
-            rmSync(socketPath, { force: true });
+            if (!isPipe) rmSync(socketPath, { force: true });
           })
       });
     });
