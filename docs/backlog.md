@@ -104,7 +104,8 @@ reviewed. See the "Follow-up" section of
 ### Writing assists panel: one consistent row style
 
 From owner review on 2026-09-25 (mockup:
-https://www.figma.com/design/c0Us2VzRIKDj54Wo3zw6Wb). Every item is the same
+https://www.figma.com/design/i2BTwgceho8SqRYGZKjLhB, page "Writing assists:
+one row style"). Every item is the same
 row: name on the left, an optional grey note under it, the control on the
 right, thin dividers between groups. No collapsible sections, no headings in a
 different style, no pill buttons.
@@ -118,8 +119,10 @@ different style, no pill buttons.
 - No obvious helper text such as "Click a key to change it". Reset shortcuts
   is an ordinary row.
 - The own-key action is a short link ("Use my key"), never a truncated button.
-- "Open notes" opens `name.notes.md`, which autocomplete reads; its label
-  should say that it is context for the AI.
+- Remove writing notes entirely (owner decision 2026-09-25): the "Open notes"
+  row, `name.notes.md` companions, and autocomplete reading them. Comments are
+  how the writer talks to the AI. Notes arrived with Stage D (1572229) and
+  were never asked for.
 
 ### Another / Steer for selection rewrites
 
