@@ -1,0 +1,62 @@
+# Iliad AI proxy — production config (no secrets here).
+# Spec: specs/2026-09-25-groq-ai-free-tier.md §4; runbook: README.md.
+name = "iliad-ai"
+main = "src/worker.ts"
+account_id = "28887344eeefadc54750f68e4efcd22a"
+compatibility_date = "2026-08-15"
+# Client disconnects abort `request.signal`, which aborts the upstream Groq
+# fetch, so an abandoned suggestion stops costing tokens (opt-in flag).
+compatibility_flags = ["enable_request_signal"]
+workers_dev = true
+preview_urls = false
+logpush = false
+
+# No text in logs: Workers observability is on by default for new Workers.
+# Keep it off; re-check the dashboard after any manual edit.
+[observability]
+enabled = false
+
+[observability.logs]
+enabled = false
+invocation_logs = false
+
+[[durable_objects.bindings]]
+name = "QUOTA"
+class_name = "QuotaDayObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["QuotaDayObject"]
+
+# Coarse per-IP burst limiter (workers.dev has no zone WAF). Keys are daily
+# keyed hashes of the network prefix. Approximate and per-location: the DO
+# quotas are the real bound.
+[[ratelimits]]
+name = "INSTALL_RATE_LIMITER"
+namespace_id = "7301"
+simple = { limit = 3, period = 60 }
+
+[[ratelimits]]
+name = "GENERATE_RATE_LIMITER"
+namespace_id = "7302"
+simple = { limit = 30, period = 60 }
+
+[vars]
+FREE_TIER_ENABLED = "true"
+INSTALL_DAILY_REQUESTS = "50"
+IP_DAILY_REQUESTS = "150"
+IP_DAILY_NEW_INSTALLS = "5"
+IP48_DAILY_NEW_INSTALLS = "20"
+DENY_SUBJECTS = ""
+SUPPORTED_PROMPT_VERSIONS = "1"
+GLOBAL_DAILY_NANO_USD = "5000000000"
+INPUT_NANO_USD_PER_TOKEN = "150"
+OUTPUT_NANO_USD_PER_TOKEN = "600"
+PROMPT_OVERHEAD_TOKENS = "150"
+TOKEN_TTL_DAYS = "30"
+TOKEN_REFRESH_DAYS = "60"
+MIN_CLIENT_VERSION = "0.4.0"
+QUOTA_LOCATION_HINT = "enam"
+
+# Secrets — `wrangler secret put <NAME>` (see README.md), never in this file:
+#   GROQ_API_KEY, TOKEN_SIGNING_KEYS, IP_HASH_KEY, ADMIN_TOKEN
