@@ -162,36 +162,28 @@
   color: var(--focus-ring-border);
 }
 
-.icon-button[data-tooltip]::after {
-  position: absolute;
-  z-index: 50;
-  top: calc(100% + 6px);
-  left: 50%;
-  max-width: 220px;
+/* One tooltip for every [data-tooltip]; TooltipLayer keeps it inside the window. */
+.app-tooltip {
+  position: fixed;
+  z-index: 70;
+  max-width: 260px;
   padding: 5px 7px;
   border: 1px solid var(--overlay-faint);
   border-radius: 5px;
   background: var(--surface-inverse);
   box-shadow: var(--shadow-float);
   color: var(--editor);
-  content: attr(data-tooltip);
   font-size: var(--text-xs);
   font-weight: 500;
-  line-height: 1.15;
+  line-height: 1.25;
   opacity: 0;
   pointer-events: none;
   text-align: center;
-  transform: translate(-50%, -2px);
-  transition:
-    opacity 120ms ease,
-    transform 120ms ease;
-  white-space: nowrap;
+  transition: opacity 120ms ease;
 }
 
-.icon-button[data-tooltip]:hover::after {
+.app-tooltip.is-visible {
   opacity: 1;
-  transform: translate(-50%, 0);
-  transition-delay: 2.5s;
 }
 
 .document-close-backdrop {
@@ -256,18 +248,6 @@
   border-color: var(--focus-ring-border);
   background: var(--card);
   outline: none;
-}
-
-.topbar-actions .icon-button[data-tooltip]::after,
-.sidebar-actions .icon-button[data-tooltip]::after {
-  right: 0;
-  left: auto;
-  transform: translateY(-2px);
-}
-
-.topbar-actions .icon-button[data-tooltip]:hover::after,
-.sidebar-actions .icon-button[data-tooltip]:hover::after {
-  transform: translateY(0);
 }
 
 .app-content {

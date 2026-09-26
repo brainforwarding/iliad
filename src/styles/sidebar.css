@@ -325,44 +325,6 @@
   opacity: 0.58;
 }
 
-.file-tree-search-icon-button[data-tooltip]::after,
-.file-tree-search-toggle[data-tooltip]::after,
-.file-tree-search-clear[data-tooltip]::after,
-.file-tree-search-done-button[data-tooltip]::after {
-  position: absolute;
-  z-index: 50;
-  top: calc(100% + 6px);
-  left: 50%;
-  max-width: 220px;
-  padding: 5px 7px;
-  border: 1px solid var(--overlay-faint);
-  border-radius: 5px;
-  background: var(--surface-inverse);
-  box-shadow: var(--shadow-float);
-  color: var(--editor);
-  content: attr(data-tooltip);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  line-height: 1.15;
-  opacity: 0;
-  pointer-events: none;
-  text-align: center;
-  transform: translate(-50%, -2px);
-  transition:
-    opacity 120ms ease,
-    transform 120ms ease;
-  white-space: nowrap;
-}
-
-.file-tree-search-icon-button[data-tooltip]:hover::after,
-.file-tree-search-toggle[data-tooltip]:hover::after,
-.file-tree-search-clear[data-tooltip]:hover::after,
-.file-tree-search-done-button[data-tooltip]:hover::after {
-  opacity: 1;
-  transform: translate(-50%, 0);
-  transition-delay: 2.5s;
-}
-
 .content-search-results {
   display: grid;
   gap: 1px;

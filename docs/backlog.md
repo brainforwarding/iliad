@@ -101,6 +101,26 @@ reviewed. See the "Follow-up" section of
 
 ## Writing assists
 
+### Writing assists panel: one consistent row style
+
+From owner review on 2026-09-25 (mockup:
+https://www.figma.com/design/c0Us2VzRIKDj54Wo3zw6Wb). Every item is the same
+row: name on the left, an optional grey note under it, the control on the
+right, thin dividers between groups. No collapsible sections, no headings in a
+different style, no pill buttons.
+
+- Suggestions come only from the AI key. Remove "Suggest while typing" and
+  "Pause for 10 min".
+- Shortcuts are always visible as ordinary rows, not under "Shortcuts &
+  accessibility" or "Accessibility".
+- Remove the "Announce suggestions" checkbox; keep the screen-reader live
+  region always on.
+- No obvious helper text such as "Click a key to change it". Reset shortcuts
+  is an ordinary row.
+- The own-key action is a short link ("Use my key"), never a truncated button.
+- "Open notes" opens `name.notes.md`, which autocomplete reads; its label
+  should say that it is context for the AI.
+
 ### Another / Steer for selection rewrites
 
 From `specs/2026-09-24-one-ai-key.md`: the continue suggestion has ⌥↑/↓ and

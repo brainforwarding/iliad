@@ -53,6 +53,7 @@ import {
   maximumPreferredSidebarWidth,
   useSidebarWidth
 } from "./preferences/sidebarPreferences";
+import { TooltipLayer } from "./components/TooltipLayer";
 import { useWritingAssistPreferences } from "./preferences/writingAssistPreferences";
 import { useAutocompletePreferences } from "./preferences/autocompletePreferences";
 import type { EditorView } from "@codemirror/view";
@@ -1501,6 +1502,7 @@ export default function App() {
 
   return (
     <div ref={appShellRef} className={shellClassName} style={shellStyle}>
+      <TooltipLayer />
       <header className="app-topbar">
         <div className="topbar-sidebar-zone" />
         <div className="topbar-editor-zone">
