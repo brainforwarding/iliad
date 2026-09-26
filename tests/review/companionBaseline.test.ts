@@ -11,7 +11,7 @@ let services: WorkspaceBaselineService[] = [];
 afterEach(async () => {
   services.forEach((service) => service.dispose());
   services = [];
-  await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
   roots = [];
 });
 

@@ -1,5 +1,14 @@
 # Iliad Architecture Notes
 
+Windows x64 adaptation: see [windows.md](windows.md). Windows uses a per-user,
+per-profile named pipe for the existing CLI protocol; macOS retains its Unix
+socket. The Windows installer manages a user-scoped command shim and PATH
+entry. Build metadata, rather than OS, disables update checks for local artifacts.
+The shared CLI endpoint lives in `bin/lib/endpoint.cjs` and is included in both
+the main-process package and CLI resources. Its hash is not authentication.
+Window closure waits for acknowledged document saves and keeps the buffer
+open on failure; services are disposed only at `will-quit`.
+
 This document records product and implementation decisions that future contributors should read before changing the app. Specs in `specs/` capture individual change plans; this file captures stable decisions that should survive across changes.
 
 Before evaluating any new feature, read [`source-as-contract.md`](./source-as-contract.md). It is the lens through which feature decisions should pass: the on-disk Markdown file is the contract, and features that break that contract are risky regardless of how well they fit any other section below.

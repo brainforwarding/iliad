@@ -126,7 +126,7 @@ describe("UpdateService", () => {
 
   it("returns available with a download URL when the latest release is newer", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse(githubRelease()));
-    const service = new UpdateService({ currentVersion: "0.2.6", fetchImpl, arch: "arm64" });
+    const service = new UpdateService({ platform: "darwin", currentVersion: "0.2.6", fetchImpl, arch: "arm64" });
 
     await expect(service.checkForUpdates()).resolves.toMatchObject({
       status: "available",
@@ -139,7 +139,7 @@ describe("UpdateService", () => {
 
   it("returns current when the latest release is not newer", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse(githubRelease({ tag_name: "v0.2.6" })));
-    const service = new UpdateService({ currentVersion: "0.2.6", fetchImpl, arch: "arm64" });
+    const service = new UpdateService({ platform: "darwin", currentVersion: "0.2.6", fetchImpl, arch: "arm64" });
 
     await expect(service.checkForUpdates()).resolves.toMatchObject({
       status: "current",
@@ -150,7 +150,7 @@ describe("UpdateService", () => {
 
   it("returns an error state when GitHub cannot be reached", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ message: "rate limited" }, 403));
-    const service = new UpdateService({ currentVersion: "0.2.6", fetchImpl, arch: "arm64" });
+    const service = new UpdateService({ platform: "darwin", currentVersion: "0.2.6", fetchImpl, arch: "arm64" });
 
     await expect(service.checkForUpdates()).resolves.toMatchObject({
       status: "error",
@@ -166,7 +166,7 @@ describe("UpdateService", () => {
           init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
         })
     ) as typeof fetch;
-    const service = new UpdateService({ currentVersion: "0.2.6", fetchImpl, arch: "arm64", timeoutMs: 1 });
+    const service = new UpdateService({ platform: "darwin", currentVersion: "0.2.6", fetchImpl, arch: "arm64", timeoutMs: 1 });
 
     await expect(service.checkForUpdates()).resolves.toMatchObject({
       status: "error",

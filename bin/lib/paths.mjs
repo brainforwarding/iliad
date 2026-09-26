@@ -1,4 +1,5 @@
 import os from "node:os";
+import endpoint from "./endpoint.cjs";
 import path from "node:path";
 
 export const packagedUserDataName = "Iliad MD";
@@ -9,15 +10,16 @@ export const socketFileName = "iliad.sock";
  * Mirrors Electron's `app.getPath("appData")` for the current platform.
  */
 export function appDataDirectory({ env = process.env, platform = process.platform, home = os.homedir() } = {}) {
+  const paths = platform === "win32" ? path.win32 : path.posix;
   if (platform === "darwin") {
-    return path.join(home, "Library", "Application Support");
+    return paths.join(home, "Library", "Application Support");
   }
 
   if (platform === "win32") {
-    return env.APPDATA || path.join(home, "AppData", "Roaming");
+    return env.APPDATA || paths.join(home, "AppData", "Roaming");
   }
 
-  return env.XDG_CONFIG_HOME || path.join(home, ".config");
+  return env.XDG_CONFIG_HOME || paths.join(home, ".config");
 }
 
 /**
@@ -28,17 +30,18 @@ export function appDataDirectory({ env = process.env, platform = process.platfor
  */
 export function userDataDirectory(options = {}) {
   const env = options.env ?? process.env;
+  const paths = (options.platform ?? process.platform) === "win32" ? path.win32 : path.posix;
 
   if (env.ILIAD_USER_DATA) {
-    return path.resolve(env.ILIAD_USER_DATA);
+    return paths.resolve(env.ILIAD_USER_DATA);
   }
 
   const name = env.VITE_DEV_SERVER_URL ? devUserDataName : packagedUserDataName;
-  return path.join(appDataDirectory(options), name);
+  return paths.join(appDataDirectory(options), name);
 }
 
 export function cliSocketPath(options = {}) {
-  return path.join(userDataDirectory(options), socketFileName);
+  return endpoint.cliEndpoint(userDataDirectory(options), options.platform ?? process.platform);
 }
 
 export function abbreviateHome(absolutePath, home = os.homedir()) {
@@ -50,6 +53,7 @@ export function abbreviateHome(absolutePath, home = os.homedir()) {
     return "~";
   }
 
-  const prefix = home.endsWith(path.sep) ? home : `${home}${path.sep}`;
-  return absolutePath.startsWith(prefix) ? `~${path.sep}${absolutePath.slice(prefix.length)}` : absolutePath;
+  const separator = home.includes("\\") ? "\\" : "/";
+  const prefix = home.endsWith(separator) ? home : `${home}${separator}`;
+  return absolutePath.startsWith(prefix) ? `~${separator}${absolutePath.slice(prefix.length)}` : absolutePath;
 }

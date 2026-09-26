@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runCliOpenRequest, type CliOpenSteps } from "../../src/app/useCliBridge";
 import type { FileTreeNode } from "../../src/types/iliad";
@@ -33,15 +34,15 @@ describe("IliadWindowManager CLI state", () => {
     const chapters = manager.createIliadWindow({ launchWorkspace: { name: "chapters", path: "/w/book/chapters" } });
 
     expect(manager.findWindowForPath("/w/book/chapters/03.md")?.webContentsId).toBe(chapters.webContents.id);
-    expect(manager.findWindowForPath("/w/book/intro.md")?.webContentsId).toBe(book.webContents.id);
+    expect(manager.findWindowForPath(path.resolve("/w/book/intro.md"))?.webContentsId).toBe(book.webContents.id);
     expect(manager.findWindowForPath("/w/bookish/a.md")).toBeNull();
 
-    manager.setActiveDocument(book.webContents.id, "/w/book/intro.md");
+    manager.setActiveDocument(book.webContents.id, path.resolve("/w/book/intro.md"));
     manager.setActiveDocument(chapters.webContents.id, "/elsewhere/x.md");
     manager.focusWindow(book);
 
     expect(manager.listWindowStatus()).toEqual([
-      { workspace: "/w/book", document: "/w/book/intro.md", relativePath: "intro.md", focused: true },
+      { workspace: "/w/book", document: path.resolve("/w/book/intro.md"), relativePath: "intro.md", focused: true },
       { workspace: "/w/book/chapters", document: null, relativePath: null, focused: false }
     ]);
 

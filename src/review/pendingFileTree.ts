@@ -1,3 +1,4 @@
+import { pathsEqual } from "../files/pathUtils";
 import { fileHasMutableReview } from "./reviewFiles";
 import type { AgentChangeProposal, AgentProposalFileStatus, FileKind, FileTreeNode } from "../types/iliad";
 
@@ -130,7 +131,7 @@ export function fileTreeRevealAncestorPaths(nodes: FileTreeDisplayNode[], target
     for (const node of treeNodes) {
       const nodePath = displayNodePath(node);
 
-      if (nodePath === targetPath) {
+      if (pathsEqual(nodePath, targetPath)) {
         return ancestors;
       }
 

@@ -418,6 +418,28 @@ export async function renamePath(workspaceRoot: string, filePath: string, reques
   const newPath = path.join(parentDirectory, fileName);
   ensureVisibleWorkspacePath(workspaceRoot, newPath);
 
+  if (process.platform === "win32" && filePath !== newPath && filePath.toLowerCase() === newPath.toLowerCase()) {
+    if (!fileStats.isDirectory()) await assertNotAttachedCompanion(filePath);
+    const companions = isDocumentFile(filePath, fileStats.isDirectory()) ? await existingCompanions(filePath) : [];
+    const targets = companionPathsFor(newPath);
+    const moves = [{ from: filePath, to: newPath }, ...companions.map(item => ({ from: item.path, to: targets![item.kind] }))];
+    // A case-sensitive Windows directory may contain two distinct files with these spellings.
+    for (const move of moves) {
+      if (await pathExists(move.to)) {
+        const [source, target] = await Promise.all([stat(move.from), stat(move.to)]);
+        if (source.ino !== target.ino || source.dev !== target.dev) throw new Error("A file with that name already exists.");
+      }
+    }
+    const done: typeof moves = [];
+    try {
+      for (const move of moves) { await rename(move.from, move.to); done.push(move); }
+    } catch (error) {
+      for (const move of done.reverse()) await rename(move.to, move.from).catch(() => undefined);
+      throw error;
+    }
+    return fileTreeNode(workspaceRoot, newPath, fileStats.isDirectory());
+  }
+
   if (!samePath(newPath, filePath)) {
     await assertPathAvailable(newPath);
   }

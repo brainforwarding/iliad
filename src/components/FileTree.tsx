@@ -1,3 +1,4 @@
+import { pathsEqual } from "../files/pathUtils";
 import {
   ChevronDown,
   ChevronUp,
@@ -1551,7 +1552,7 @@ export function FileTree({
 
     setDurableExpanded((current) => {
       const next = new Set(current);
-      const targetNode = rowRefs.current.get(revealPath);
+      const targetNode = [...rowRefs.current].find(([path]) => pathsEqual(path, revealPath))?.[1];
 
       for (const path of ancestorPaths) {
         next.add(path);
@@ -1565,7 +1566,7 @@ export function FileTree({
     });
 
     const frame = window.requestAnimationFrame(() => {
-      const row = rowRefs.current.get(revealPath);
+      const row = [...rowRefs.current].find(([path]) => pathsEqual(path, revealPath))?.[1];
 
       if (!row) {
         onRevealFailed?.(revealPath, "missing_row");

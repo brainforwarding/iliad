@@ -73,7 +73,7 @@ describe("companion rows in the file tree", () => {
     );
 
     expect(html).toContain(">Open<");
-    expect(html).toContain(">Reveal in Finder<");
+    expect(html).toContain(">Show in file manager<");
     expect(html).toContain(">Move to Trash<");
     expect(html).not.toContain(">Rename<");
     expect(html).not.toContain(">Duplicate<");

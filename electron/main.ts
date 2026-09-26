@@ -1,9 +1,12 @@
+import { windowsFileMenu } from "./windows/nativeMenu.js";
+import { distributionUpdateOptions } from "./updates/distribution.js";
 import { app, BrowserWindow, dialog, Menu, protocol, session, shell, type MenuItemConstructorOptions } from "electron";
 import path from "node:path";
 import { createCliRequestHandler } from "./cli/commands.js";
 import { installCommandFromResources, loginShellPath } from "./cli/installCommand.js";
 import { registerCliIpc } from "./cli/ipc.js";
 import { startCliServer, type CliServer } from "./cli/server.js";
+import { cliEndpoint } from "./cli/endpoint.js";
 import { registerAutocompleteIpc } from "./ipc/autocomplete.js";
 import { registerAssetIpc, registerAssetProtocol } from "./ipc/assets.js";
 import { registerDiagnosticsIpc } from "./ipc/diagnostics.js";
@@ -39,6 +42,7 @@ type LaunchWorkspaceResult =
 const windowManager = new IliadWindowManager();
 const queuedLaunchRequests: LaunchRequest[] = [];
 let appReady = false;
+let quitRequested = false;
 let isProcessingLaunchRequests = false;
 let pendingUpdateCheckRequest = false;
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -84,11 +88,6 @@ function configureAboutPanel() {
 }
 
 function installApplicationMenu() {
-  if (process.platform !== "darwin") {
-    Menu.setApplicationMenu(null);
-    return;
-  }
-
   configureAboutPanel();
 
   const template: MenuItemConstructorOptions[] = [
@@ -150,6 +149,19 @@ function installApplicationMenu() {
     }
   ];
 
+  if (process.platform !== "darwin") {
+    template[0] = windowsFileMenu(app.getLocale(), {
+      newWindow: () => { windowManager.createIliadWindow(); },
+      installCommand: () => { void installIliadCommandFromMenu(); },
+      updates: () => {
+        if (!windowManager.sendToMostRecentWindow(updateCheckRequestedChannel)) {
+          pendingUpdateCheckRequest = true;
+          windowManager.createIliadWindow();
+        }
+      }
+    });
+    template[3] = { label: "Window", submenu: [{ role: "minimize" }, { role: "close" }] };
+  }
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
@@ -173,7 +185,7 @@ async function installIliadCommandFromMenu() {
       home: app.getPath("home"),
       pathValue: await loginShellPath()
     });
-    const pathWarning = result.onPath
+    const pathWarning = process.platform === "win32" ? "\n\nOpen a new terminal to use the updated PATH." : result.onPath
       ? ""
       : `\n\n${result.directory} is not on your PATH. Add it to your shell profile, for example:\nexport PATH="${result.directory}:$PATH"`;
     const shadowWarning = result.shadowedBy
@@ -210,7 +222,7 @@ async function startCliSocket(logWarning: (details: Record<string, string>) => v
 
   try {
     cliServer = await startCliServer({
-      socketPath: path.join(app.getPath("userData"), "iliad.sock"),
+      socketPath: cliEndpoint(app.getPath("userData")),
       handler
     });
   } catch (error) {
@@ -348,7 +360,8 @@ app.whenReady().then(async () => {
   });
   await startCliSocket((details) => diagnosticsLogger.info({ area: "app", event: "cli_socket_failed", details }));
   registerUpdatesIpc({
-    service: new UpdateService({ currentVersion: app.getVersion() }),
+    service: new UpdateService({ currentVersion: app.getVersion(),
+      ...await distributionUpdateOptions(app.getAppPath()) }),
     consumePendingCheckRequest: () => {
       const pending = pendingUpdateCheckRequest;
       pendingUpdateCheckRequest = false;
@@ -372,7 +385,8 @@ app.whenReady().then(async () => {
     windowManager.focusMostRecentWindow();
   });
 
-  app.on("before-quit", () => {
+  app.on("before-quit", () => { quitRequested = true; });
+  app.on("will-quit", () => {
     writingAiService.dispose();
     baselineService.dispose();
     void cliServer?.close();
@@ -381,7 +395,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  if (process.platform !== "darwin" || quitRequested) {
     app.quit();
   }
 });

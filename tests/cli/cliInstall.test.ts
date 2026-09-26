@@ -39,7 +39,7 @@ async function fakeBundle(root = dir) {
   return { bin, wrapper: path.join(bin, "iliad") };
 }
 
-describe("installCliCommand", () => {
+describe.skipIf(process.platform === "win32")("installCliCommand", () => {
   it("links into the first usable folder, is idempotent, and reports PATH membership", async () => {
     const readOnly = path.join(dir, "ro");
     const writable = path.join(dir, "rw");
@@ -165,7 +165,7 @@ describe("installCliCommand", () => {
   });
 });
 
-describe("bundleWrapperPath", () => {
+describe.skipIf(process.platform === "win32")("bundleWrapperPath", () => {
   it("returns the wrapper of an app bundle and refuses checkouts", async () => {
     const { bin, wrapper } = await fakeBundle();
     expect(await bundleWrapperPath(bin)).toBe(wrapper);
@@ -201,7 +201,7 @@ describe("bundleWrapperPath", () => {
   });
 });
 
-describe("uninstallCliCommand", () => {
+describe.skipIf(process.platform === "win32")("uninstallCliCommand", () => {
   it("removes only Iliad links and keeps Homebrew's", async () => {
     const ours = path.join(dir, "local", "bin");
     const foreign = path.join(dir, "foreign", "bin");
@@ -226,7 +226,7 @@ describe("uninstallCliCommand", () => {
   });
 });
 
-describe("iliad install / uninstall (runCli)", () => {
+describe.skipIf(process.platform === "win32")("iliad install / uninstall (runCli)", () => {
   let out: string[];
   let err: string[];
 
@@ -329,7 +329,7 @@ describe("iliad install / uninstall (runCli)", () => {
   });
 });
 
-describe("menu item loader (electron/cli/installCommand.ts)", () => {
+describe.skipIf(process.platform === "win32")("menu item loader (electron/cli/installCommand.ts)", () => {
   it("loads the same bin/lib/install.mjs from a Resources folder", async () => {
     const module = await loadInstallModule(repoRoot);
     expect(typeof module.installCliCommand).toBe("function");
@@ -345,7 +345,7 @@ describe("menu item loader (electron/cli/installCommand.ts)", () => {
   });
 });
 
-describe("packaged wrapper end to end", () => {
+describe.skipIf(process.platform === "win32")("packaged wrapper end to end", () => {
   it("runs `iliad install --dir` through bin/iliad with the bundle's executable, then through the link", async () => {
     const contents = path.join(dir, "Iliad MD.app", "Contents");
     await cp(path.join(repoRoot, "bin"), path.join(contents, "Resources", "bin"), { recursive: true });

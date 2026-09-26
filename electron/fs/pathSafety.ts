@@ -1,4 +1,5 @@
 import path from "node:path";
+import { realpathSync } from "node:fs";
 import { companionNameMessage, isCompanionPath } from "./companionFiles.js";
 
 export type FileKind = "directory" | "markdown" | "external";
@@ -29,8 +30,28 @@ export function ensureInsideWorkspace(workspaceRoot: string, filePath: string) {
   const target = path.resolve(filePath);
   const relative = path.relative(root, target);
 
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error("Requested path is outside the current workspace.");
+  }
+  // Resolve existing ancestors too: a not-yet-created file can sit below a junction.
+  const physical = (value: string): string => {
+    try { return realpathSync(value); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const parent = path.dirname(value);
+      return parent === value ? value : path.join(physical(parent), path.basename(value));
+    }
+  };
+  const physicalRelative = path.relative(physical(root), physical(target));
+  if (physicalRelative === ".." || physicalRelative.startsWith(`..${path.sep}`) || path.isAbsolute(physicalRelative)) {
+    throw new Error("Requested path is outside the current workspace (symbolic link or junction).");
+  }
+}
+
+export function validatePlatformName(name: string, platform: NodeJS.Platform = process.platform) {
+  if (platform !== "win32") return;
+  if (/[<>:"/\\|?*\u0000-\u001f]/.test(name) || /[. ]$/.test(name) ||
+      /^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(name)) {
+    throw new Error("This name is not valid on Windows. Avoid reserved names, special characters, and trailing dots or spaces.");
   }
 }
 
@@ -54,6 +75,7 @@ export function ensureMarkdownFile(workspaceRoot: string, filePath: string) {
 }
 
 export function normalizeMarkdownName(name: string) {
+  if (name) validatePlatformName(name);
   const trimmedName = name.trim();
   const candidateName = trimmedName || "untitled.md";
 
@@ -75,6 +97,7 @@ export function normalizeMarkdownName(name: string) {
 }
 
 export function validateMarkdownRenameName(name: string) {
+  validatePlatformName(name);
   const trimmedName = name.trim();
 
   if (!trimmedName) {
@@ -105,6 +128,7 @@ export function validateMarkdownRenameName(name: string) {
 }
 
 export function validateDirectoryName(name: string) {
+  validatePlatformName(name);
   const trimmedName = name.trim();
 
   if (!trimmedName) {
@@ -123,6 +147,7 @@ export function validateDirectoryName(name: string) {
 }
 
 export function validateVisibleFileName(name: string) {
+  validatePlatformName(name);
   const trimmedName = name.trim();
 
   if (!trimmedName) {

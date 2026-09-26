@@ -17,9 +17,12 @@ write directly; do not ask permission for each file.
   that open document.
 - If Iliad is not open, `iliad status` says `Iliad is not open.` (exit code 3);
   ask the writer which file they mean.
-- If the shell cannot find `iliad`, run
-  `"/Applications/Iliad MD.app/Contents/Resources/bin/iliad" install` once; it
-  puts the command on PATH (safe to repeat).
+- If the shell cannot find `iliad`, open a new terminal after installation.
+  On Windows, use File > Install iliad Command in the app (press Alt to show
+  the menu), or run `& "$env:LOCALAPPDATA\Programs\Iliad MD\resources\bin\iliad.cmd" install`
+  in PowerShell for the default installation location. On macOS, run
+  `"/Applications/Iliad MD.app/Contents/Resources/bin/iliad" install`.
+  Installation is safe to repeat. Quote paths containing spaces in either shell.
 
 ## Notes and comments (companion files)
 

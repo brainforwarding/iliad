@@ -104,8 +104,8 @@ describe("release:update-homebrew-cask", () => {
     expect(result.code).toBe(0);
     const updated = await readFile(path.join(root, "packaging", "homebrew", "iliad-md.rb"), "utf8");
     const sha256 = createHash("sha256").update("dmg-bytes").digest("hex");
-    expect(updated).toContain(`  version "${version}"\n`);
-    expect(updated).toContain(`  sha256 "${sha256}"\n`);
+    expect(updated.replaceAll("\r\n", "\n")).toContain(`  version "${version}"\n`);
+    expect(updated.replaceAll("\r\n", "\n")).toContain(`  sha256 "${sha256}"\n`);
     expect(updated.replace(/version "[^"]*"/, "").replace(/sha256 "[^"]*"/, "")).toBe(
       cask.replace(/version "[^"]*"/, "").replace(/sha256 "[^"]*"/, "")
     );

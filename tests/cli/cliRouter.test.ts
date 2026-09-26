@@ -101,10 +101,10 @@ describe("runCli", () => {
   });
 
   it("status: prints windows, or JSON with --json", async () => {
-    const windows = [{ workspace: `${dir}/book`, document: `${dir}/book/a.md`, relativePath: "a.md", focused: true }];
+    const windows = [{ workspace: path.join(dir, "book"), document: path.join(dir, "book/a.md"), relativePath: "a.md", focused: true }];
     const send = vi.fn().mockResolvedValue({ ok: true, windows });
     expect(await runCli(["status"], { ...io(), send })).toBe(0);
-    expect(out).toEqual(["~/book  a.md  (focused)"]);
+    expect(out).toEqual([`~${path.sep}book  a.md  (focused)`]);
     expect(send).toHaveBeenCalledWith({ cmd: "status" }, expect.any(Number));
 
     out.length = 0;
@@ -233,7 +233,7 @@ describe("runCli", () => {
 
   it("skill print writes the skill to stdout", async () => {
     expect(await runCli(["skill", "print"], { ...io(), scriptDirectory: repoBin })).toBe(0);
-    expect(out[0]).toMatch(/^---\nname: iliad\n/);
+    expect(out[0]).toMatch(/^---\r?\nname: iliad\r?\n/);
   });
 
   it("finds the skill next to the script in a packaged layout", async () => {

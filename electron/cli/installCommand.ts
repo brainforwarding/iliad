@@ -76,6 +76,7 @@ export async function installCommandFromResources({
  * PATH their terminal sees. Falls back to the app's own PATH.
  */
 export function loginShellPath(fallback = process.env.PATH ?? ""): Promise<string> {
+  if (process.platform !== "darwin") return Promise.resolve(fallback);
   const shell = process.env.SHELL || "/bin/zsh";
 
   return new Promise((resolve) => {

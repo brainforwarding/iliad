@@ -1,4 +1,5 @@
 import path from "node:path";
+import { ensureInsideWorkspace } from "./pathSafety.js";
 
 const allowedWorkspaceRoots = new Set<string>();
 
@@ -13,7 +14,7 @@ export function isInsideAllowedWorkspace(filePath: string) {
     const relative = path.relative(root, target);
 
     if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
-      return true;
+      try { ensureInsideWorkspace(root, target); return true; } catch { continue; }
     }
   }
 

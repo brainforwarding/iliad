@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+// Exercise the real WASM engine without Harper's Node file-URL pathname bug on Windows.
+// Electron's renderer uses the normal browser asset loader.
+vi.mock("harper.js/binary", async () => ({ binary: (await import("harper.js/binaryInlined")).binaryInlined }));
 import {
   detectWritingIssues,
   harperSpanToTextRange,

@@ -59,6 +59,7 @@ interface ParsedVersion {
 }
 
 export interface UpdateServiceOptions {
+  platform?: NodeJS.Platform;
   currentVersion: string;
   fetchImpl?: typeof fetch;
   releaseApiUrl?: string;
@@ -185,7 +186,15 @@ export function selectMacDmgAsset(assets: UpdateReleaseAsset[], arch: NodeJS.Arc
   return dmgAssets.find((asset) => !/(^|[-_.])(arm64|x64)([-_.]|$)/i.test(asset.name)) ?? null;
 }
 
+export function selectPlatformAsset(assets: UpdateReleaseAsset[], platform: NodeJS.Platform, arch: NodeJS.Architecture, version: string) {
+  if (platform === "darwin") return selectMacDmgAsset(assets, arch, version);
+  const extension = platform === "win32" ? ".exe" : ".AppImage";
+  const osName = platform === "win32" ? "win" : "linux";
+  return assets.find(asset => asset.name.endsWith(`-${version}-${osName}-${arch}${extension}`)) ?? null;
+}
+
 export class UpdateService {
+  private readonly platform: NodeJS.Platform;
   private readonly currentVersion: string;
   private readonly fetchImpl: typeof fetch;
   private readonly releaseApiUrl: string;
@@ -194,11 +203,13 @@ export class UpdateService {
 
   constructor({
     currentVersion,
+    platform = process.platform,
     fetchImpl = fetch,
     releaseApiUrl = defaultUpdateReleaseApiUrl,
     arch = process.arch,
     timeoutMs = 5000
   }: UpdateServiceOptions) {
+    this.platform = platform;
     this.currentVersion = currentVersion;
     this.fetchImpl = fetchImpl;
     this.releaseApiUrl = releaseApiUrl;
@@ -207,6 +218,10 @@ export class UpdateService {
   }
 
   async checkForUpdates(): Promise<UpdateCheckResult> {
+    if (!this.releaseApiUrl) return {
+      status: "error", currentVersion: this.currentVersion,
+      message: "Local build", detail: "Esta versión local se actualiza instalando un nuevo instalador de Windows. / Update this local build by installing a new Windows installer."
+    };
     let timeout: NodeJS.Timeout | null = null;
 
     try {
@@ -240,7 +255,7 @@ export class UpdateService {
         };
       }
 
-      const downloadAsset = selectMacDmgAsset(release.assets, this.arch, release.version);
+      const downloadAsset = selectPlatformAsset(release.assets, this.platform, this.arch, release.version);
 
       return {
         status: "available",

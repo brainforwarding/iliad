@@ -117,7 +117,7 @@ export const appStrings = {
       rename: "Rename",
       moveToWorkspaceRoot: "Move to workspace root",
       copyPath: "Copy path",
-      revealInFinder: "Reveal in Finder",
+      revealInFinder: "Show in file manager",
       moveToTrash: "Move to Trash"
     },
     typography: {
@@ -446,7 +446,7 @@ export const appStrings = {
       rename: "Renombrar",
       moveToWorkspaceRoot: "Mover a la raíz del espacio",
       copyPath: "Copiar ruta",
-      revealInFinder: "Mostrar en Finder",
+      revealInFinder: "Mostrar en el explorador de archivos",
       moveToTrash: "Mover a la papelera"
     },
     typography: {

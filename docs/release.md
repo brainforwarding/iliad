@@ -334,3 +334,16 @@ git -C "$TAP" commit -am "iliad-md X.Y.Z" && git -C "$TAP" push
 Commit the updated `packaging/homebrew/iliad-md.rb` with the post-release
 record commit. If the DMG is rebuilt after this step, run the script again:
 the audit and install fail on a checksum mismatch.
+
+## Windows x64 artifacts
+
+`npm run dist:win` produces an unsigned local/CI installer with release checks
+disabled. To prepare an official Windows artifact, run `npm run build` and
+`npx electron-builder --win --x64 --publish never` without the local metadata
+override. This does not publish a release or configure signing.
+
+Before distributing, complete [Windows validation](windows-validation.md),
+record the source commit and installer SHA-256, and keep the versioned
+`Iliad MD-<version>-win-x64.exe` name used by the update selector. Windows
+publication and any future signing policy remain maintainer decisions. Existing
+macOS signing, notarization and metadata verification requirements are unchanged.

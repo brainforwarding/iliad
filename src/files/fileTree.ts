@@ -1,3 +1,4 @@
+import { pathsEqual } from "./pathUtils";
 import type { FileTreeNode } from "../types/iliad";
 
 export function findNodeByRelativePath(nodes: FileTreeNode[], relativePath: string): FileTreeNode | null {
@@ -20,7 +21,7 @@ export function findNodeByRelativePath(nodes: FileTreeNode[], relativePath: stri
 
 export function findNode(nodes: FileTreeNode[], path: string): FileTreeNode | null {
   for (const node of nodes) {
-    if (node.path === path) {
+    if (pathsEqual(node.path, path)) {
       return node;
     }
 
