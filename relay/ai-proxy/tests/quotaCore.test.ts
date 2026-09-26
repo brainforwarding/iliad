@@ -74,13 +74,13 @@ describe("quota core", () => {
     expect(quota.reserve(b)).toEqual({ ok: true, nano });
     expect(quota.reserve(reserveInput({ policy }))).toEqual({ ok: false, code: "global_cap" });
 
-    const settled = quota.settle({ day: DAY, id: a.id, usage: { promptTokens: 400, completionTokens: 60 }, policy });
+    const settled = quota.settle({ day: DAY, id: a.id, usage: { promptTokens: 400, completionTokens: 60 } });
     expect(settled).toEqual({ settled: true, chargedNano: 400 * 150 + 60 * 600, releasedNano: nano - 96_000 });
     expect(quota.stats()).toMatchObject({ spentNano: 96_000, reservedNano: nano, requests: 2 });
     // Worst case still does not fit (96,000 spent + one open reservation + one more > cap)…
     expect(quota.reserve(reserveInput({ policy })).ok).toBe(false);
     // …until the second settle releases its room too.
-    quota.settle({ day: DAY, id: b.id, usage: { promptTokens: 400, completionTokens: 60 }, policy });
+    quota.settle({ day: DAY, id: b.id, usage: { promptTokens: 400, completionTokens: 60 } });
     expect(quota.reserve(reserveInput({ policy })).ok).toBe(true);
   });
 
@@ -89,10 +89,10 @@ describe("quota core", () => {
     const input = reserveInput();
     const reserved = quota.reserve(input);
     expect(reserved.ok).toBe(true);
-    const result = quota.settle({ day: DAY, id: input.id, usage: null, policy: POLICY });
+    const result = quota.settle({ day: DAY, id: input.id, usage: null });
     expect(result).toEqual({ settled: true, chargedNano: costNano(1000, 768, 150, 600), releasedNano: 0 });
     // Settling twice is a no-op.
-    expect(quota.settle({ day: DAY, id: input.id, usage: null, policy: POLICY })).toEqual({ settled: false });
+    expect(quota.settle({ day: DAY, id: input.id, usage: null })).toEqual({ settled: false });
     expect(quota.stats()).toMatchObject({ requests: 1, reservedNano: 0, openReservations: 0 });
   });
 
@@ -112,7 +112,7 @@ describe("quota core", () => {
     const { core: quota } = core();
     const input = reserveInput({ inTokens: 10, outTokens: 10 });
     quota.reserve(input);
-    const result = quota.settle({ day: DAY, id: input.id, usage: { promptTokens: 20, completionTokens: 10 }, policy: POLICY });
+    const result = quota.settle({ day: DAY, id: input.id, usage: { promptTokens: 20, completionTokens: 10 } });
     expect(result).toMatchObject({ settled: true, chargedNano: 20 * 150 + 10 * 600 });
     expect(quota.stats().counters.usage_over_reservation).toBe(1);
   });
@@ -145,19 +145,58 @@ describe("quota core", () => {
       expect(quota.stats().policy?.installLimit).toBe(2);
     });
 
-    it("applies a rate increase to new reservations and to settles of old ones", () => {
+    it("applies a rate increase to new reservations only; open ones settle at their stored rates", () => {
       const { core: quota } = core();
       const old = reserveInput();
       expect(quota.reserve(old)).toEqual({ ok: true, nano: costNano(1000, 768, 150, 600) });
       const pricier = { ...POLICY, inRate: 300, outRate: 1200 };
       expect(quota.reserve(reserveInput({ policy: pricier }))).toEqual({ ok: true, nano: costNano(1000, 768, 300, 1200) });
-      // The old reservation settles at the higher current rates.
-      expect(quota.settle({ day: DAY, id: old.id, usage: { promptTokens: 100, completionTokens: 10 }, policy: POLICY })).toMatchObject({
-        chargedNano: 100 * 300 + 10 * 1200
+      // The old reservation settles at the rates it was admitted with.
+      expect(quota.settle({ day: DAY, id: old.id, usage: { promptTokens: 100, completionTokens: 10 } })).toMatchObject({
+        chargedNano: 100 * 150 + 10 * 600
       });
       // A later rate decrease the same day never lowers a charge.
       const cheap = reserveInput({ policy: { ...POLICY, inRate: 1, outRate: 1 } });
       expect(quota.reserve(cheap)).toEqual({ ok: true, nano: costNano(1000, 768, 300, 1200) });
+    });
+
+    it("keeps spent + reserved <= cap across a mid-day rate increase, even when a reservation filled the cap", () => {
+      const { core: quota } = core();
+      const nano = costNano(1000, 768, 150, 600);
+      const policy = { ...POLICY, capNano: nano };
+      const invariant = () => {
+        const stats = quota.stats();
+        expect(stats.spentNano + stats.reservedNano).toBeLessThanOrEqual(policy.capNano);
+      };
+      const filler = reserveInput({ policy });
+      expect(quota.reserve(filler)).toEqual({ ok: true, nano });
+      invariant();
+      // A refused request carries a rate increase; it persists for new reservations only.
+      const pricier = { ...policy, inRate: 300, outRate: 1200 };
+      expect(quota.reserve(reserveInput({ policy: pricier }))).toEqual({ ok: false, code: "global_cap" });
+      expect(quota.stats().policy).toMatchObject({ inRate: 300, outRate: 1200 });
+      invariant();
+      // Cut stream: the filler settles in full, at its stored rates, never above the cap.
+      expect(quota.settle({ day: DAY, id: filler.id, usage: null })).toEqual({ settled: true, chargedNano: nano, releasedNano: 0 });
+      invariant();
+      expect(quota.stats().spentNano).toBe(nano);
+    });
+
+    it("keeps the invariant when a reservation settles with full usage after a rate increase, and via the sweep", () => {
+      const { core: quota } = core();
+      const nano = costNano(1000, 768, 150, 600);
+      const policy = { ...POLICY, capNano: nano * 2 };
+      const a = reserveInput({ policy });
+      const b = reserveInput({ policy });
+      expect(quota.reserve(a).ok).toBe(true);
+      expect(quota.reserve(b).ok).toBe(true);
+      quota.reserve(reserveInput({ policy: { ...policy, inRate: 1000, outRate: 5000 } }));
+      quota.settle({ day: DAY, id: a.id, usage: { promptTokens: 1000, completionTokens: 768 } });
+      quota.sweep(NOW + RESERVATION_MAX_AGE_MS);
+      const stats = quota.stats();
+      expect(stats.openReservations).toBe(0);
+      expect(stats.spentNano).toBe(nano * 2);
+      expect(stats.spentNano + stats.reservedNano).toBeLessThanOrEqual(policy.capNano);
     });
 
     it("the kill switch is not part of the snapshot (handled in the Worker), and install limits snapshot too", () => {
@@ -196,7 +235,7 @@ describe("quota core", () => {
       expect(stats.spentNano + stats.reservedNano).toBeLessThanOrEqual(policy.capNano);
       const mode = next(3);
       const usage = mode === 0 ? null : { promptTokens: next(input.inTokens + 1), completionTokens: next(input.outTokens + 1) };
-      const settled = quota.settle({ day: DAY, id: input.id, usage, policy });
+      const settled = quota.settle({ day: DAY, id: input.id, usage });
       if (!settled.settled) throw new Error("not settled");
       expectedSpent += usage ? usage.promptTokens * 150 + usage.completionTokens * 600 : reserved.nano;
       expect(Number.isSafeInteger(settled.chargedNano)).toBe(true);

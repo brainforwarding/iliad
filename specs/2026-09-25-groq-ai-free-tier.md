@@ -503,9 +503,10 @@ hard, and the Groq org spend limit is the backstop.
   more conservative value is written back, so a tightening takes effect on the
   next request and is never undone by a later loosening that day; loosening
   (higher cap, lower price, higher limits) applies from the next UTC day. Each
-  reservation stores the rates it was reserved with, and settle uses those
-  rates (or higher current ones), so a mid-day price change can never make a
-  settled amount smaller than the reservation assumed. The kill switch is not
+  reservation stores the rates it was reserved with, and settle uses exactly
+  those rates: a mid-day rate increase applies to new reservations only and
+  never reprices an open one (repricing could settle a reservation that
+  filled the cap above the cap), and a later decrease never lowers a charge. The kill switch is not
   part of the snapshot: it applies immediately.
 - Reserve (single `transactionSync`) under the effective policy: reject if
   `subjects.count ≥ installLimit`, `networks.count ≥ ipLimit`, or `spent +

@@ -215,7 +215,7 @@ async function generate(
   let resolveSettled!: (value: unknown) => void;
   ctx.waitUntil(new Promise((resolve) => (resolveSettled = resolve)));
   const settle = (usage: { promptTokens: number; completionTokens: number } | null) =>
-    quota.call(day, "settle", { day, id, usage, policy: config.policy }).then(
+    quota.call(day, "settle", { day, id, usage }).then(
       () => undefined,
       () => deps.log({ code: "settle_failed" })
     );

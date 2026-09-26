@@ -46,8 +46,6 @@ export interface SettleInput {
   day: string;
   id: string;
   usage: UsageTokens | null;
-  /** The Worker's current env policy; absent for the alarm sweep (snapshot only). */
-  policy?: QuotaPolicy;
 }
 
 export type SettleResult = { settled: false } | { settled: true; chargedNano: number; releasedNano: number };
@@ -161,30 +159,28 @@ export class QuotaCore {
   }
 
   /**
-   * With usage → actual cost at the reservation's rates (or higher current
-   * ones), releasing the rest. Without usage (abort, cut stream, timeout) →
-   * the full reservation: gpt-oss reasons before it writes, and aborted
-   * reasoning is still billed. Never lowers the request count.
+   * With usage → actual cost at the reservation's own stored rates,
+   * releasing the rest. Without usage (abort, cut stream, timeout) → the full
+   * reservation: gpt-oss reasons before it writes, and aborted reasoning is
+   * still billed. Never lowers the request count. A mid-day rate change never
+   * reprices an open reservation: its worst case was admitted against the cap
+   * at its own rates, so settling it higher could push spent past the cap.
    */
   settle(input: SettleInput): SettleResult {
     return this.store.transactionSync(() => {
       const row = this.reservation(input.id);
       if (!row) return { settled: false } as const;
       this.ensureDay(input.day);
-      const policy = input.policy ? this.effectivePolicy(input.policy) : this.snapshot();
-      const inRate = Math.max(row.inRate, policy?.inRate ?? 0);
-      const outRate = Math.max(row.outRate, policy?.outRate ?? 0);
-      const full = Math.max(row.nano, costNano(row.inTokens, row.outTokens, inRate, outRate));
 
       let charged: number;
       if (input.usage) {
-        charged = costNano(input.usage.promptTokens, input.usage.completionTokens, inRate, outRate);
+        charged = costNano(input.usage.promptTokens, input.usage.completionTokens, row.inRate, row.outRate);
         if (input.usage.promptTokens > row.inTokens || input.usage.completionTokens > row.outTokens) {
           // A premise of the hard cap failed (spec §4): book the real cost anyway and count it.
           this.bump("usage_over_reservation");
         }
       } else {
-        charged = full;
+        charged = row.nano;
         this.bump("settled_without_usage");
       }
 
