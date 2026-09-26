@@ -126,16 +126,21 @@ export class IliadAiProxyClient {
     return `${ILIAD_AI_CLIENT}/${this.options.clientVersion}`;
   }
 
+  /**
+   * The shared issuance is bounded only by its own timeout, never by the
+   * request that happened to start it: canceling that request must not fail
+   * the others waiting on the same token. Each caller waits abort-aware.
+   */
   private issue(baseUrl: string, expiredToken: string | null, signal: AbortSignal): Promise<string> {
     if (!this.issuing) {
-      this.issuing = this.requestToken(baseUrl, expiredToken, signal).finally(() => {
+      this.issuing = this.requestToken(baseUrl, expiredToken).finally(() => {
         this.issuing = null;
       });
     }
-    return this.issuing;
+    return untilAborted(this.issuing, signal);
   }
 
-  private async requestToken(baseUrl: string, expiredToken: string | null, signal: AbortSignal): Promise<string> {
+  private async requestToken(baseUrl: string, expiredToken: string | null): Promise<string> {
     const response = await this.fetchImpl(`${baseUrl}/v1/install`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Iliad-Client": this.clientHeader() },
@@ -144,7 +149,7 @@ export class IliadAiProxyClient {
         version: this.options.clientVersion,
         ...(expiredToken ? { refresh: expiredToken } : {})
       }),
-      signal: AbortSignal.any([signal, AbortSignal.timeout(INSTALL_TIMEOUT_MS)])
+      signal: AbortSignal.timeout(INSTALL_TIMEOUT_MS)
     });
 
     if (!response.ok) {
@@ -166,6 +171,25 @@ export class IliadAiProxyClient {
     await this.options.tokens.write(token);
     return token;
   }
+}
+
+/** Awaits a shared promise, rejecting with the caller's abort reason if it is canceled first. */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
 }
 
 /** §5: proxy HTTP refusals → app error codes. `resetAt` only on the "out" codes. */
