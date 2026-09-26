@@ -19,7 +19,11 @@ function Install-App([string]$Choice = '') {
   $arguments = @('/S')
   if ($Choice) { $arguments += "/ILIADCLI=$Choice" }
   $process = Start-Process -FilePath $Installer -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait
-  if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+  if ($process.ExitCode -ne 0) {
+    Write-Output "Installer diagnostics: app exists=$(Test-Path (Join-Path $installDirectory 'Iliad MD.exe')); CLI exists=$(Test-Path $commandPath)"
+    Get-WinEvent -FilterHashtable @{LogName='Application'; Id=1000; StartTime=(Get-Date).AddMinutes(-5)} -ErrorAction SilentlyContinue | Select-Object -First 3 -ExpandProperty Message | Write-Output
+    throw "Installer failed: $($process.ExitCode)"
+  }
 }
 Install-App
 if (Test-Path $commandPath) { throw 'CLI must be opt-in on a fresh installation.' }

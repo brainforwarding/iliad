@@ -39,7 +39,7 @@ async function launch() {
   await waitFor(async () => Boolean((await page.evaluate(() => window.iliad.getLaunchWorkspace()))?.sessionId), "workspace session");
 }
 async function open(shell = "powershell") {
-  const commandEnv = { ...env, ILIAD_TEST_CLI: cli, ILIAD_TEST_DOC: document };
+  const commandEnv = { ...env, PATH: `${process.env.SystemRoot}\\System32;${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0`, ILIAD_TEST_CLI: cli, ILIAD_TEST_DOC: document };
   if (shell === "powershell") await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "& $env:ILIAD_TEST_CLI open $env:ILIAD_TEST_DOC; exit $LASTEXITCODE"], { env: commandEnv, windowsHide: true });
   else await run("cmd.exe", ["/d", "/s", "/c", '""%ILIAD_TEST_CLI%" open "%ILIAD_TEST_DOC%""'], { env: commandEnv, windowsHide: true, windowsVerbatimArguments: true });
   await page.locator(".cm-content").waitFor();
@@ -155,7 +155,31 @@ try {
   pass("Closing immediately after typing flushes the last edit");
   await launch(); await open();
   await page.screenshot({ path: path.join(artifacts, "editor.png") });
-  await writeFile(path.join(artifacts, "report.json"), JSON.stringify({ executablePath, results, aiLiveTest: "Not run: no Gemini key in isolated profile" }, null, 2));
+  const secondRoot = path.join(artifacts, "Second workspace");
+  await mkdir(secondRoot);
+  const secondDocument = path.join(secondRoot, "Second.md");
+  await writeFile(secondDocument, "Second document.");
+  await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "& $env:ILIAD_TEST_CLI open $env:ILIAD_TEST_DOC; exit $LASTEXITCODE"], {
+    env: { ...env, ILIAD_TEST_CLI: cli, ILIAD_TEST_DOC: secondDocument }, windowsHide: true
+  });
+  await waitFor(async () => app.windows().length === 2, "second window");
+  const secondPage = app.windows().find(candidate => candidate !== page);
+  secondPage.on("dialog", dialog => { if (dialog.type() !== "beforeunload") void dialog.dismiss().catch(() => {}); });
+  await secondPage.locator(".cm-content").waitFor();
+  await page.locator(".cm-content").click();
+  await page.locator(".cm-content").press("Control+End");
+  await page.locator(".cm-content").pressSequentially(" First window pending.");
+  await secondPage.locator(".cm-content").click();
+  await secondPage.locator(".cm-content").press("Control+End");
+  await secondPage.locator(".cm-content").pressSequentially(" Second window pending.");
+  const quit = new Promise(resolve => app.process().once("exit", resolve));
+  await app.evaluate(({ app }) => { setTimeout(() => app.quit(), 0); });
+  await Promise.race([quit, new Promise((_, reject) => setTimeout(() => reject(new Error("Multi-window quit timed out")), 15000))]);
+  app = null;
+  assert.match(await readFile(document, "utf8"), /First window pending/);
+  assert.match(await readFile(secondDocument, "utf8"), /Second window pending/);
+  pass("Application quit flushes edits in two windows");
+  await writeFile(path.join(artifacts, "report.json"), JSON.stringify({ sourceCommit: process.env.GITHUB_SHA || (await run("git", ["rev-parse", "HEAD"]).catch(() => ({ stdout: "unknown" }))).stdout.trim(), executablePath, results, aiLiveTest: "Not run: no Gemini key in isolated profile" }, null, 2));
   console.log(`Artifacts: ${artifacts}`);
 } catch (error) {
   if (page && !page.isClosed()) await page.screenshot({ path: path.join(artifacts, "failure.png") }).catch(() => {});
