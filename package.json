@@ -30,10 +30,13 @@
     "release:verify-update-metadata": "node scripts/verifyUpdateMetadata.mjs",
     "release:update-homebrew-cask": "node scripts/updateHomebrewCask.mjs",
     "test": "vitest run",
-    "typecheck": "tsc -b && tsc -p electron/tsconfig.json --noEmit",
+    "typecheck": "tsc -b && tsc -p electron/tsconfig.json --noEmit && npm run proxy:typecheck",
     "lint:css": "stylelint \"src/styles/**/*.css\"",
     "benchmark:autocomplete": "vite-node scripts/benchmarkAutocomplete.ts --",
-    "dev:fake-ai-proxy": "vite-node scripts/devFakeAiProxy.ts --"
+    "dev:fake-ai-proxy": "vite-node scripts/devFakeAiProxy.ts --",
+    "proxy:typecheck": "tsc -p relay/ai-proxy/tsconfig.json --noEmit",
+    "proxy:test": "vitest run relay/ai-proxy/tests",
+    "proxy:test:workers": "npm --prefix relay/ai-proxy run test:workers"
   },
   "dependencies": {
     "@codemirror/commands": "^6.8.1",

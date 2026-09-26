@@ -17,6 +17,8 @@ export default defineConfig({
   },
   test: {
     // Agent worktrees live under .claude/; never run their copies of the suite.
-    exclude: ["**/node_modules/**", "**/dist/**", ".claude/**"]
+    // The AI proxy's workerd integration tests import `cloudflare:test` and run
+    // only under their own pool: `npm run proxy:test:workers`.
+    exclude: ["**/node_modules/**", "**/dist/**", ".claude/**", "relay/ai-proxy/tests/workers/**"]
   }
 });

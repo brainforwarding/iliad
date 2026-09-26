@@ -7,3 +7,5 @@ release
 *.log
 .env*
 .claude/worktrees
+.wrangler
+.dev.vars*
