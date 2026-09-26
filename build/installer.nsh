@@ -1,8 +1,17 @@
+!include "MUI2.nsh"
 !include "nsDialogs.nsh"
 !include "FileFunc.nsh"
 !ifndef BUILD_UNINSTALLER
 Var IliadCliChoice
 Var IliadCliCheckbox
+LangString IliadCliTitle 1033 "Command-line integration"
+LangString IliadCliTitle 3082 "Integración con la terminal"
+LangString IliadCliDescription 1033 "Choose whether to install the iliad command."
+LangString IliadCliDescription 3082 "Elige si deseas instalar el comando iliad."
+LangString IliadCliHelp 1033 "Optional command-line integration. You can also install the command later from the application menu."
+LangString IliadCliHelp 3082 "La integración con la terminal es opcional. También puedes instalar el comando después desde el menú de la aplicación."
+LangString IliadCliLabel 1033 "Install the iliad command (add to my PATH)"
+LangString IliadCliLabel 3082 "Instalar el comando iliad (añadir a mi PATH)"
 !endif
 
 !macro customInit
@@ -42,11 +51,12 @@ Var IliadCliCheckbox
 
 !ifndef BUILD_UNINSTALLER
 Function IliadCliPage
+  !insertmacro MUI_HEADER_TEXT "$(IliadCliTitle)" "$(IliadCliDescription)"
   nsDialogs::Create 1018
   Pop $0
-  ${NSD_CreateLabel} 0 0 100% 30u "Optional command-line integration. You can also install the command later from the application menu."
+  ${NSD_CreateLabel} 0 0 100% 30u "$(IliadCliHelp)"
   Pop $0
-  ${NSD_CreateCheckbox} 0 40u 100% 20u "Install the iliad command (add to my PATH)"
+  ${NSD_CreateCheckbox} 0 40u 100% 20u "$(IliadCliLabel)"
   Pop $IliadCliCheckbox
   ${NSD_SetState} $IliadCliCheckbox $IliadCliChoice
   nsDialogs::Show

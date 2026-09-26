@@ -113,7 +113,11 @@
       "allowElevation": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false,
-      "include": "build/installer.nsh"
+      "include": "build/installer.nsh",
+      "installerLanguages": [
+        "en_US",
+        "es_ES"
+      ]
     },
     "linux": {
       "icon": "build/icon.png",
