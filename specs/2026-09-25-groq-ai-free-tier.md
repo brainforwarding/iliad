@@ -1290,3 +1290,75 @@ unchecked); out-of-quota notice only on explicit requests; automatic
 suggestions made a separable, pending decision (section 8b); measured latency
 (gpt-oss-120b low: 609 ms median first token) and the dev key in
 `.env.local` for Phase 0.
+
+## Phase 1 results: app side implemented (2026-09-26)
+
+Branch `groq-app` (from `groq-impl`). Provider routing, own key, Gemini
+removal, key migration, status/IPC, strings and UI states per sections 1–3
+(app side), 5, 6 and 8; tests against an in-process fake proxy
+(`tests/fixtures/fakeAiProxy.ts`, also `npm run dev:fake-ai-proxy`) and a fake
+Groq. Built-in proxy URL `https://iliad-ai.quiet-bush-25b1.workers.dev`
+(allowlist `*.quiet-bush-25b1.workers.dev`, `ai.iliad.md`); package version
+0.4.0 to meet `MIN_CLIENT_VERSION`.
+
+Live QA (real Electron app, disposable workspace, separate userData, CDP):
+own-key route with the dev key saved through the form (safeStorage) and the
+fake proxy stopped — ⌘, ⌘. ⌘/ and ✦ AI Rewrite in EN and ES all from Groq
+direct; free route against the fake proxy (install limit 4) — suggestions,
+✦ AI Rewrite review, then "Today's free AI has run out. It's back at
+9:00 PM." / "…Vuelve a las 21:00." on ⌘, and on ✦ AI, again on the next
+request (no cooldown), "Use my key" opening the key form; invalid key refused
+("Groq no aceptó esta clave.", not saved); unreadable key → "Re-enter your
+key" row and notice, no proxy call; legacy `assistant/settings.json` 0644 with
+`geminiApiKey` → rewritten 0600 without it. Free route against the production
+Worker: 3 requests (sentence EN, ✦ Rewrite ES, paragraph ES), first one after
+a stale fake token exercised 401 `invalid_token` → re-issue → retry
+(first visible 1.6 s incl. issuance; later 0.86–0.96 s). Diagnostics checked:
+codes and timings only.
+
+### Contract notes (implementation)
+
+App-side additions and decisions not spelled out above (no Worker change
+needed):
+
+1. **Renderer reason `unreachable`** (network/DNS failure on either route).
+   Section 5 has no row for it but section 8 has the "Proxy unreachable"
+   notice; own key uses "Couldn't reach Groq. Check your connection." /
+   "No se pudo conectar con Groq. Revisa tu conexión." (new copy, no "Use my
+   key"). No cooldown.
+2. **Free-route `rate_limited`** (`upstream_busy` or the Worker's burst
+   limiter `rate_limited`) shows "Free AI is busy. Try again shortly." / "La IA
+   gratis está ocupada. Intenta de nuevo en un momento." (new copy) and keeps
+   the existing 60 s cooldown. `internal_error`, `not_found`,
+   `method_not_allowed` and unknown codes → `provider`. `scope` is ignored.
+3. **`groqKey.rejected`** in `writing-assist:status`: main remembers (memory
+   only) that Groq refused the saved key on a request; the AI row's note then
+   reads "Groq rejected this key" / "Groq rechazó esta clave" (Figma 42:2,
+   frame 6D). Cleared when the key changes.
+4. **Key shape errors** get their own copy: "That doesn't look like a Groq API
+   key." / "Eso no parece una clave API de Groq." (never sent to Groq).
+5. **Own-key notices** carry "Update key" / "Actualizar clave" (rejected or
+   unreadable key), per Figma frame 6C; the rate-limit notice has no button.
+6. **`ai.json`** is fetched in the background of a free request (the request
+   never waits for it), at most once a day including failures; the endpoint is
+   the origin only (no path, port or credentials). Built-in or cached URLs
+   that still contain the `REPLACE` placeholder are refused (nothing sent).
+7. **Install token issuance** is shared by concurrent free requests; `/v1/install`
+   has its own 10 s timeout. A token is stored only if it is a single
+   printable word ≤ 4 KB.
+8. **resetAt** is accepted only as a parseable ISO timestamp ≤ 40 chars and
+   passed to the renderer only with `free_exhausted`; without one the notice
+   uses the next 00:00 UTC. Spanish uses "a la 1:00" for one o'clock.
+9. **Selection timeout** is 30 s (section 2); autocomplete keeps 18 s / 30 s.
+10. **✦ AI notice placement**: the notice replaces the status pill above the
+    selection (same bar style as the suggestion notice) rather than sitting
+    inside the reopened menu (frame 5). It stays until dismissed or the writer
+    moves on; plain errors still fade after 1.6 s.
+11. **Echo fix** (Phase 0 finding 1) also covers a line restated on a fresh
+    line right after a single line break (seen live: cursor on the line after
+    "She climbed the stairs slowly, and" → the model repeated that line), not
+    after a blank line.
+
+Observations for the QA pass: with the cursor after "—Solo sabía que",
+gpt-oss twice answered " solo que …" (a loose partial echo the cleaner does
+not catch); prose quality otherwise good in EN and ES.

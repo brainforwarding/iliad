@@ -18,7 +18,7 @@ review, companion files, CLI),
 ### Pending QA cases
 
 E12 (a ✦ AI or autocomplete accept produces no outside item) was blocked
-without a provider; run it with a Gemini key. Blocks I (per-chunk review) and
+without a provider; run it on the free route or with a Groq key. Blocks I (per-chunk review) and
 J (companion files) of the QA matrix are new and not yet run live.
 
 Three more cannot be forced from outside the app and stay `blocked` unless

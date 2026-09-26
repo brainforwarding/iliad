@@ -58,8 +58,10 @@ electron/
   shared/          code shared with the renderer (companion paths, comments file)
   updates/         auto-update service
   window/          window creation and window manager
-  writing/         Gemini text/autocomplete, tighten (✦ AI menu), key store,
-                   writingAiService
+  writing/         writingAiService, autocomplete + tighten cleaners, errors;
+                   groq/ (prompts/ shared with the Worker, SSE reader, own-key
+                   and proxy clients, key store, install token, endpoint,
+                   migration)
   writingCorrector/ corrector memory store
 
 src/
@@ -291,8 +293,10 @@ writer's Markdown in two ways, and both keep every change visible and
 reversible.
 
 **Built-in writing AI** works on the current document and the current selection
-only, runs on one Gemini key (`electron/writing/`, model in `geminiText.ts`),
-and is review-first: nothing lands in the buffer without Tab or Accept.
+only, runs on Groq (`openai/gpt-oss-120b`, `reasoning_effort: "low"`,
+streaming; `electron/writing/`), and is review-first: nothing lands in the
+buffer without Tab or Accept. Spec: `specs/2026-09-25-groq-ai-free-tier.md`
+(ADR-0023, proposed).
 
 - Inline completion (`src/editor/ideaAutocomplete/`) shows ghost text, only
   on request: typing never sends a request (no automatic suggestions since
@@ -304,12 +308,64 @@ and is review-first: nothing lands in the buffer without Tab or Accept.
   (`src/editor/aiReview/`) with exact-match-or-discard apply: if the range
   changed, the result is dropped.
 - The corrector (`src/editor/writingCorrector/`) is local and needs no key.
-- The Gemini key is stored in main (`userData/assistant/settings.json`, mode
-  0600; the path is historical) and set from Writing assists, in the "Gemini
-  key" row (masked key and a Change link, or Add key; the link opens the key
-  form in place of the row). With no key ✦ AI is shown disabled; clicking it
-  opens Writing assists with the key form open and focused. Writing AI IPC is accepted only from
-  trusted app windows (`electron/ipc/trust.ts`).
+- **Two routes, chosen in main per request** from a three-state key store
+  (`groq/keyStore.ts`): no key → **free** (the Iliad AI proxy, a Cloudflare
+  Worker in `relay/ai-proxy/`, holds Iliad's Groq key and enforces per-install,
+  per-network and global daily limits); a saved key → **own key** (Mac → Groq
+  directly); a saved key that cannot be decrypted → **blocked** ("Re-enter
+  your Groq key"). There is no fallback between routes: an unreadable key is
+  never treated as "no key", own-key failures are never retried free, and a
+  free "out" never uses a key the writer did not give.
+- Prompts, limits and budgets live in the pure, versioned
+  `electron/writing/groq/prompts/` (frozen `vN.ts`, imported by the Worker
+  too). Both routes read the same OpenAI-compatible SSE through
+  `groq/sse.ts`, which reads only `choices[0].delta.content` (reasoning never
+  reaches the cleaners) and caps output at the task's `maxOutputChars`.
+  Streaming partials (`groq/partials.ts`) show stable words at most every
+  100 ms. The own-key route builds the messages itself; the free route sends
+  only the **structured task** (`/v1/generate`) and the Worker builds the same
+  messages. Text carrying harmony/think markers is discarded.
+- Free route client (`groq/proxyClient.ts`): an anonymous install token
+  (`userData/ai/install.json`) is issued lazily by the first free request
+  (never at launch); a 401 `invalid_token` re-issues once and `token_expired`
+  refreshes once (same identity), then the request is retried once. Refusals
+  map per the spec's error contract: `quota_exhausted` / `global_cap` /
+  `install_limited` → `free_exhausted` with `resetAt` (00:00 UTC), kill switch
+  → `free_unavailable`, `client_outdated`, `upstream_busy` / `rate_limited` →
+  `rate_limited`, others → `provider` / `timeout`. The app sends
+  `X-Iliad-Client: iliad-md/<version>`.
+- Proxy URL (`groq/config.ts`): the built-in workers.dev URL, optionally
+  relocated by `https://iliad.md/ai.json` (`{ v: 1, proxyUrl }`, HTTPS and
+  host on the single `ILIAD_AI_PROXY_HOST_ALLOWLIST` constant; fetched in the
+  background of a free request at most once a day and cached in
+  `userData/ai/endpoint.json`). A URL still carrying the `REPLACE` placeholder
+  is refused (nothing is sent).
+- **Dev overrides** are read only when `!app.isPackaged`: `GROQ_API_KEY`
+  (own-key route when no key is saved) and `ILIAD_AI_PROXY_URL` (free route
+  base URL, e.g. `npm run dev:fake-ai-proxy -- --install-limit 2` →
+  `http://127.0.0.1:8788`, an in-process fake of the Worker contract from
+  `tests/fixtures/fakeAiProxy.ts`, or `wrangler dev`). Packaged builds ignore
+  both, so no environment variable can reroute a packaged app's text.
+- The own key lives in `userData/ai/settings.json`, encrypted with Electron
+  `safeStorage` (`groqApiKeyEnc`; plaintext only if encryption is unavailable,
+  `storage: "plain"`), and is validated against Groq `GET /models` before it
+  is saved ("rejected" vs "unreachable"). Every AI file is written atomically
+  (temp + rename) and chmod 0600. An awaited startup migration, before the
+  writing IPC is registered, removes `geminiApiKey` from the historical
+  `userData/assistant/settings.json` (other fields kept; file deleted if
+  empty). Gemini env vars are not read.
+- Status (`writing-assist:status`) reports `{ corrector, ai: { route, model },
+  groqKey: { state, last4, rejected } }`, never counts or quota. "Out" is
+  learned from request results: autocomplete and ✦ AI failures carry
+  `resetAt`, and the renderer shows one calm notice (`src/editor/aiNotice.ts`,
+  `src/components/AiNoticeBar.tsx`) with the reset time in local time, plus
+  "Use my key" (free-route notices) or "Update key" (own key rejected or
+  unreadable). Free "out" and key/connection notices set no cooldown: every
+  request is explicit. ✦ AI is enabled with no key.
+- Diagnostics (`autocomplete.ai.*`, `selection_ai.ai.*`) record route, model,
+  timings, finish reason, output length and error codes, never text, keys,
+  tokens or proxy bodies. Writing AI IPC is accepted only from trusted app
+  windows (`electron/ipc/trust.ts`).
 
 **Length keys suggest; ⌘↵ opens the ✦ AI menu**
 (`specs/2026-09-24-one-ai-key.md`, revised by
@@ -336,8 +392,11 @@ The Writing assists menu (`src/components/WritingAssistsMenu.tsx`, Figma
 style: name, optional grey note, control on the right, a hairline under each
 row. Rows: Corrector, Autocomplete, then (while Autocomplete is on) ✦ AI menu,
 Sentence, Paragraph, Full idea (key chips over native selects), Accept /
-Another / Dismiss (fixed keys), Reset shortcuts; then the Gemini key row and
-Privacy (opens `https://iliad.md/privacy/` or `https://iliad.md/es/privacidad/`
+Another / Dismiss (fixed keys), Reset shortcuts; then the AI key row ("AI
+included — Free, with a daily limit — Use my key"; with a key "Groq key —
+••••1234 — Change · Remove"; "Re-enter your key" or "Groq rejected this key"
+in the note when relevant; the link opens the key form in place of the row)
+and Privacy (opens `https://iliad.md/privacy/` or `https://iliad.md/es/privacidad/`
 by app language). In-the-moment controls (Longer, Another, Steer…) live on the
 suggestion toolbar. Stored preferences keep only `shortcuts`; older stored
 `manualOnly`/`announce` keys are ignored.
@@ -649,7 +708,7 @@ Relevant files:
 - Visual Markdown feature rules and shared decoration helpers: `src/editor/visualMarkdown/`.
 - Electron file safety and workspace boundary rules: `electron/fs/pathSafety.ts`.
 - Electron filesystem operations: `electron/fs/fileOps.ts`.
-- Built-in writing AI (Gemini, tighten, key storage): `electron/writing/`; diagnostics: `electron/diagnostics/`.
+- Built-in writing AI (Groq routes, prompts, tighten, key storage): `electron/writing/` and `electron/writing/groq/`; notices: `src/editor/aiNotice.ts`; diagnostics: `electron/diagnostics/`.
 - Workspace baseline, outside-change review, and the guarded Markdown write primitive: `electron/review/`.
 - IPC handler groups: `electron/ipc/`.
 - Window creation and app loading: `electron/window/createWindow.ts`.
@@ -684,12 +743,15 @@ Manual Electron checks still matter:
 - Open several Markdown files repeatedly.
 - Open a document with local or remote image syntax.
 - Trackpad/wheel scroll a long document and confirm a native overlay scrollbar appears.
-- With a Gemini key set in Writing assists: type and pause (no suggestion
-  appears), request a completion (⌘, ⌘. ⌘/) and accept it with Tab; ⌘↵ with
-  nothing selected does nothing; select text, press ⌘↵ or click ✦ AI, run an
-  action, Accept and Reject it. Without a key, ✦ AI is disabled and opens
-  Writing assists with the key form open. Check the Writing assists menu
-  against Figma frame 15 in English and Spanish.
+- With no key (free route; in dev point `ILIAD_AI_PROXY_URL` at
+  `npm run dev:fake-ai-proxy -- --install-limit 2`): type and pause (no
+  suggestion appears), request a completion (⌘, ⌘. ⌘/) and accept it with
+  Tab; ⌘↵ with nothing selected does nothing; select text, press ⌘↵ or click
+  ✦ AI, run an action, Accept and Reject it. Past the limit, each request
+  shows "Today's free AI has run out. It's back at {time}." with "Use my key".
+  Save an own Groq key (an invalid one is refused, not saved) and repeat;
+  remove it to return to free. Check the Writing assists menu against Figma
+  frame 15 in English and Spanish.
 - Edit an open document from another tool: each chunk shows Keep / Restore;
   Keep all and Restore all work from the toolbar and the tree strip; an
   outside-created file offers Keep file / Move to Trash and a deletion offers

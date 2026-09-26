@@ -22,9 +22,9 @@ It has no chat panel and no agent of its own. See
 - Adjust typography from one compact popover; switch the interface between
   English and Spanish; use focus mode to hide the sidebar.
 - Search file names and document contents from the sidebar.
-- **Inline completion** (Gemini): a sentence, paragraph, or full idea as ghost
+- **Inline completion**: a sentence, paragraph, or full idea as ghost
   text when you ask for it (never while you type), accepted with Tab.
-- **✦ AI menu** on a selection (Gemini): a typed instruction, or Rewrite /
+- **✦ AI menu** on a selection: a typed instruction, or Rewrite /
   Expand / Shorten / Summarize / Turn into a list, reviewed inline with
   Accept / Reject.
 - **Corrector**: local English writing checks, no key needed.
@@ -45,14 +45,25 @@ npm install
 npm run dev
 ```
 
-## Gemini key
+## AI: free, or your own Groq key
 
-Built-in AI runs on one Gemini API key. Open **Writing assists** in the topbar
-and use **Add key** in the Gemini key row (it powers autocomplete and the ✦ AI
-menu). The key is stored in Electron app data, never in your Markdown files.
-For development, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is also read. Google
-bills this API separately. Without a key, autocomplete is off and ✦ AI is shown
-disabled.
+Built-in AI works on first launch with no account and no key. It runs on Groq
+(`openai/gpt-oss-120b`) through Iliad's server (the Iliad AI proxy), with a
+daily limit; when today's free AI runs out, Iliad says when it is back (00:00
+UTC, shown in your local time). Text is sent only when you ask (a length key
+or the ✦ AI menu); see https://iliad.md/privacy/ for what each service sees.
+
+To skip Iliad's server and its limit, open **Writing assists** and use **Use my
+key** in the AI row: paste a Groq API key (https://console.groq.com/keys). It
+is checked with Groq before it is saved, stored encrypted in Electron app data
+(never in your Markdown files), and requests then go straight from your Mac to
+Groq. **Remove** returns to the free route. Gemini is no longer supported;
+saved Gemini keys are removed on first launch.
+
+For development (never in packaged builds), `GROQ_API_KEY` sets an own key and
+`ILIAD_AI_PROXY_URL` points the free route elsewhere, e.g. the local fake:
+`npm run dev:fake-ai-proxy -- --install-limit 2`, then
+`ILIAD_AI_PROXY_URL=http://127.0.0.1:8788 npm run dev`.
 
 Shortcuts (configurable in Writing assists while Autocomplete is on):
 
