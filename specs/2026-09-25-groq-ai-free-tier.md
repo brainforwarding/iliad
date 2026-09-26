@@ -90,8 +90,10 @@ who want no limits or no Iliad server in the path.
 - Usage meters, quota displays, "n left today".
 - Streaming the ✦ AI rewrite into the editor (the rewrite still lands whole in
   the inline review).
-- Deploying the Worker or creating Cloudflare/Groq resources (the owner will
-  provide access later). This change is code + docs only.
+- ~~Deploying the Worker or creating Cloudflare/Groq resources.~~ Superseded
+  2026-09-26: the owner gave Cloudflare access and the Worker is deployed
+  (see "Phase 2 results"). Groq ZDR and the org spend limit remain owner
+  tasks and release gates.
 - Changing autocomplete interaction (keys, alternatives, Steer) or the inline
   review's safety checks; the writing-assists spec owns the menu, the removal
   of automatic suggestions and notes, and ⌘↵.
@@ -992,7 +994,7 @@ per-`v` snapshot matrix.
    documents mid-request; `wrangler dev` shows the upstream request aborted.
 8. EN and ES copy in every state; VoiceOver announces notices.
 
-## Deployment (later, by the owner; not in this change)
+## Deployment (Worker done 2026-09-26; see "Phase 2 results")
 
 1. Cloudflare: Workers Paid plan (recommended for CPU headroom); the
    `workers.dev` URL (or a custom domain, per the owner's choice); WAF
@@ -1090,6 +1092,157 @@ kept; no preamble, quotes or fences; Spanish is natural. Samples:
    imports `parseWritingAiTask`, `buildWritingAiPrompt`,
    `groqChatCompletionBody`, `promptUtf8Bytes` and the limits from
    `prompts/index.ts`.
+
+## Phase 2 results: Worker implemented and deployed (2026-09-26)
+
+Branch `groq-worker` (from `groq-impl`). Package `relay/ai-proxy/`; runbook in
+`relay/ai-proxy/README.md` (deploy, secrets, change limits, kill switch,
+rotate keys, admin stats, staging recipe).
+
+**Deployed URL: `https://iliad-ai.quiet-bush-25b1.workers.dev`** (Worker
+`iliad-ai`, Cloudflare account "Admin@wer6.io's Account",
+`28887344eeefadc54750f68e4efcd22a`). `electron/writing/groq/config.ts` must use
+this URL for the free route.
+
+**Production config** (`relay/ai-proxy/wrangler.toml`, committed; no secrets):
+
+| Setting | Value |
+| --- | --- |
+| `compatibility_date` / flags | `2026-08-15` / `["enable_request_signal"]` |
+| `workers_dev` / `preview_urls` / `logpush` | `true` / `false` / `false` |
+| `[observability]`, `[observability.logs]` | `enabled = false` (logs and invocation logs off; API shows no observability, no Logpush, no tail consumers) |
+| DO | `QUOTA` → `QuotaDayObject`, migration `v1` `new_sqlite_classes`, location hint `enam` (`QUOTA_LOCATION_HINT`) |
+| Rate-limit bindings | `INSTALL_RATE_LIMITER` 3/60 s, `GENERATE_RATE_LIMITER` 30/60 s (namespaces 7301/7302) |
+| `FREE_TIER_ENABLED` | `"true"` |
+| `INSTALL_DAILY_REQUESTS` / `IP_DAILY_REQUESTS` | `50` / `150` |
+| `IP_DAILY_NEW_INSTALLS` / `IP48_DAILY_NEW_INSTALLS` | `5` / `20` |
+| `DENY_SUBJECTS` / `SUPPORTED_PROMPT_VERSIONS` | `""` / `"1"` |
+| `GLOBAL_DAILY_NANO_USD` | `5000000000` ($5) |
+| `INPUT_` / `OUTPUT_NANO_USD_PER_TOKEN` | `150` / `600` |
+| `PROMPT_OVERHEAD_TOKENS` | `150` (≥ 2 × 71 measured; config refuses < 150) |
+| `TOKEN_TTL_DAYS` / `TOKEN_REFRESH_DAYS` | `30` / `60` |
+| `MIN_CLIENT_VERSION` | `0.4.0` |
+| Secrets | `GROQ_API_KEY` (the dev key from `.env.local`), `TOKEN_SIGNING_KEYS` (one kid, `k2026a`), `IP_HASH_KEY`, `ADMIN_TOKEN` — generated with `openssl rand`, piped to `wrangler secret bulk`, never printed; copies in the owner's git-ignored `.env.local` (0600) as `ILIAD_PROXY_*` |
+
+Deployment commands (from `relay/ai-proxy/`): `npx wrangler deploy`, then
+`node scripts/secretsJson.mjs | npx wrangler secret bulk --name iliad-ai`.
+
+**Live verification** (from the owner's Mac, Chile; ~25 Groq calls in total,
+≈ $0.003 booked, well under a cent of real spend):
+
+- `/healthz` → `{"ok":true}`; `/v1/install` → 200 `v1.k2026a.…` token.
+- One real streamed generate per task kind, EN and ES: sentence, paragraph,
+  idea, ✦ tighten, ✦ edit — all 200 with clean text (e.g. sentence ES "una
+  sombra moviéndose lentamente hacia el piso superior."; tighten EN "It is
+  crucial that we finish the report now."). First visible content through
+  the proxy (incl. DO reserve): 533–878 ms, median ≈ 640 ms vs 609 ms
+  direct (Phase 0) — the proxy + DO overhead is tens of ms.
+- Admin stats after the run: requests 9, `spentNano` 913,350, `reservedNano`
+  0, open reservations 0, policy snapshot = defaults.
+- Contract: unknown path 404; `GET /v1/generate` 405; invalid JSON, wrong
+  content type, `messages`/`guidance` fields, `kind: "inline"`, prefix 2,501
+  chars, missing client header → 400 `bad_request`; 70 KB body → 413
+  `too_large`; `v: 2` and client 0.3.2 → 426 `client_outdated` (also on
+  `/v1/install`); forged token → 401 `invalid_token`; admin stats without
+  token → 401; `OPTIONS` preflight → 405 with no `Access-Control-Allow-Origin`,
+  and no ACAO on any response.
+- Client abort after the first chunk (idea): settled at the full reservation
+  (`settled_without_usage: 1`, reserved back to 0).
+- Tiny limits were verified on a throwaway Worker `iliad-ai-staging` (own DO
+  namespace, same code and secrets; deleted afterwards, now 404) because the
+  daily policy snapshot would have kept a tightened production limit until
+  00:00 UTC: `INSTALL_DAILY_REQUESTS=3` → requests 1–3 200, the 4th 429
+  `{"code":"quota_exhausted","resetAt":"2026-09-27T00:00:00.000Z","scope":"install"}`;
+  redeploy with the default 50 and `GLOBAL_DAILY_NANO_USD=1000000` → the
+  snapshot kept `installLimit: 3` (loosening waits for the next day) and took
+  `capNano: 1000000` at once; two more requests fit, then 429
+  `{"code":"global_cap","resetAt":"2026-09-27T00:00:00.000Z"}`; installs: 3
+  within a minute → 429 `rate_limited` (`Retry-After: 60`, burst limiter),
+  6th of the day → 429 `install_limited` with `resetAt`;
+  `FREE_TIER_ENABLED=false` → 503 `free_tier_disabled` on install and
+  generate.
+- Production was never redeployed with test values; after all tests it
+  serves the defaults above (policy snapshot confirmed via admin stats).
+
+### Worker implementation notes (deviations and decisions)
+
+1. **WAF → Workers Rate Limiting binding.** `workers.dev` is not a zone the
+   account owns, so zone WAF rate-limiting rules cannot apply. Launch uses the
+   `[[ratelimits]]` binding per network (keyed by a daily HMAC of the IPv4
+   address or IPv6 /64, never the raw IP): `/v1/install` 3/min, `/v1/generate`
+   30/min, refusing with **429 `rate_limited`** + `Retry-After: 60` (a new
+   code, see contract notes). It is approximate and per-location; the DO
+   quotas remain the bound. Moving to a custom domain on a Cloudflare zone
+   would allow real WAF rules and bot challenges.
+2. **`wrangler.toml` committed** instead of `wrangler.toml.example`: it holds
+   no secrets and is the source of truth for production vars. Compatibility
+   date `2026-08-15` (the pool's workerd supports up to 2026-08-22).
+3. **Root test exclusion** lives in `vite.config.ts` `test.exclude` (the
+   repo's existing Vitest config) rather than a new `vitest.config.ts`, which
+   would have replaced it. Root scripts: `proxy:typecheck` (chained into
+   `npm run typecheck`), `proxy:test` (the unit tests also run in `npm test`),
+   `proxy:test:workers` (package-local `@cloudflare/vitest-pool-workers` 0.22 /
+   Vitest 4; 7 workerd tests: real SQLite DO, concurrency, refund, abort via
+   `enable_request_signal`, alarm sweep, validation).
+4. **Extra modules**: `crypto.ts`, `log.ts`, `network.ts`, `quotaCore.ts`
+   (pure core over an injected SQLite store; unit tests use `node:sqlite`),
+   `scripts/secretsJson.mjs` (pipes secrets from `.env.local` into
+   `wrangler secret bulk`). The Worker imports `prompts/` (parse, build,
+   pinned body, UTF-8 bytes), `sse.ts` (`ChatCompletionSseParser`) and
+   `config.ts` (Groq URL) from `electron/writing/groq/`; nothing is duplicated.
+5. **Tables**: as specified, plus `meta(day)`, `policy` also snapshots the
+   two issuance limits, `global` also counts `installs`/`refreshes`,
+   `reservations` stores `in_tokens`/`out_tokens` so a no-usage settle can be
+   recomputed at raised rates. Error counters: `refused_quota_install`,
+   `refused_quota_network`, `refused_global_cap`, `refused_install_network`,
+   `refused_install_48`, `upstream_<status|network>`, `settled_without_usage`,
+   `swept`, `usage_over_reservation`.
+6. **Refresh** accepts a validly signed token that is expired less than
+   `TOKEN_REFRESH_DAYS` ago **or not yet expired** (same `sub`, uncounted); a
+   denied, invalid or too-old refresh token gets a fresh, counted `sub`.
+7. **Client version** on `/v1/generate` comes from `X-Iliad-Client:
+   iliad-md/<semver>`; a missing or unparsable header is 400 `bad_request`
+   (not 426). Prerelease suffixes are ignored (`0.4.0-beta.1` ≥ `0.4.0`).
+8. **Order** on `/v1/generate`: kill switch/config → client version → token →
+   deny list → `CF-Connecting-IP` → burst limiter → body (64 KB, content
+   type, JSON, schema) → reserve → Groq. A non-numeric `v` is 400; a numeric
+   `v` not served is 426.
+9. **First byte** = Groq response headers within 10 s; idle 15 s and total
+   45 s apply to the body. A client abort before headers settles in full.
+   Upstream 404 and other non-429 statuses map to 502 `upstream_error`
+   (refunded).
+10. **Admin stats** serve only today and the two previous UTC days and never
+    create storage for a day without data; the response includes
+    `freeTierEnabled` and the day's policy snapshot. Stats also answer when
+    the kill switch is off.
+11. Unexpected internal failures return 500 `internal_error` (not in the §5
+    table; the app should map unknown codes to `provider`). A failing quota
+    DO returns 502 `upstream_error` (fail closed).
+12. Observability is off in config and absent from the API's script
+    settings; the dashboard check after any manual edit stays on the
+    deployment checklist.
+
+**Contract notes for the app (Phase 1 client):**
+
+- Base URL above; endpoints `POST /v1/install` (`{ client: "iliad-md",
+  version, refresh? }` → `{ token }`), `POST /v1/generate` (headers
+  `Authorization: Bearer`, `X-Iliad-Client: iliad-md/<version>`,
+  `Content-Type: application/json`).
+- Response SSE frames: `data: {"choices":[{"index":0,"delta":{"content":"…"},"finish_reason":null}]}`,
+  a finish frame `{"choices":[{"index":0,"delta":{},"finish_reason":"stop"|"length"|…}]}`,
+  then `data: [DONE]`; in-band errors `data: {"error":{"code":"upstream_error"|"upstream_timeout"}}`
+  then close. No usage is forwarded. A capped output ends with
+  `finish_reason: "length"`.
+- Error bodies `{ "error": { "code", "resetAt"?, "scope"? } }`; `scope`
+  (`install` | `network`) only on `quota_exhausted`, for diagnostics.
+- New code **`rate_limited`** (429, `Retry-After: 60`, no `resetAt`) from the
+  burst limiter on both endpoints: map it like `upstream_busy`
+  (`rate_limited`, cooldown), never as "free AI ran out". Also possible:
+  `internal_error` (500), `not_found` (404), `method_not_allowed` (405) → map
+  to `provider`.
+- `MIN_CLIENT_VERSION` is `0.4.0`: the app must send ≥ 0.4.0 (dev builds at
+  0.3.x get 426 until the version is bumped, or test against a staging
+  Worker with `--var MIN_CLIENT_VERSION:0.3.0`).
 
 ## Phased plan
 
