@@ -120,9 +120,9 @@ export const selectionCases: SelectionCase[] = [
 // Adversarial Unicode for the budget probe (billed prompt tokens vs UTF-8
 // bytes). Deterministic (seeded) so runs are comparable.
 
-export type AdversarialFlavor = "cjk" | "cjk-ext-b" | "emoji-zwj" | "combining" | "rtl" | "random";
+export type AdversarialFlavor = "cjk" | "cjk-ext-b" | "emoji-zwj" | "combining" | "rtl" | "random" | "ascii-noise";
 
-export const ADVERSARIAL_FLAVORS: AdversarialFlavor[] = ["cjk", "cjk-ext-b", "emoji-zwj", "combining", "rtl", "random"];
+export const ADVERSARIAL_FLAVORS: AdversarialFlavor[] = ["cjk", "cjk-ext-b", "emoji-zwj", "combining", "rtl", "random", "ascii-noise"];
 
 function mulberry32(seed: number) {
   let state = seed >>> 0;
@@ -156,7 +156,7 @@ export function adversarialText(flavor: AdversarialFlavor, maxChars: number, see
         return String.fromCodePoint(range(0x20000, 0x2a6df));
       case "emoji-zwj": {
         const skin = rand() < 0.5 ? String.fromCodePoint(range(0x1f3fb, 0x1f3ff)) : "";
-        return `${String.fromCodePoint(pick(EMOJI_BASES))}${skin}‍${String.fromCodePoint(pick(EMOJI_BASES))}️`;
+        return `${String.fromCodePoint(pick(EMOJI_BASES))}${skin}\u200d${String.fromCodePoint(pick(EMOJI_BASES))}\ufe0f`;
       }
       case "combining": {
         let cluster = String.fromCodePoint(range(0x61, 0x7a));
@@ -168,6 +168,9 @@ export function adversarialText(flavor: AdversarialFlavor, maxChars: number, see
         const [from, to] = pick(RTL_RANGES);
         return rand() < 0.15 ? String.fromCodePoint(pick(BIDI_CONTROLS)) : rand() < 0.1 ? " " : String.fromCodePoint(range(from, to));
       }
+      case "ascii-noise":
+        // Printable ASCII with no word structure: the fewest bytes per BPE merge.
+        return String.fromCharCode(range(0x21, 0x7e));
       case "random": {
         // Any assigned-or-not scalar value outside surrogates and controls.
         let code = 0;

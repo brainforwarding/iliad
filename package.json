@@ -31,7 +31,8 @@
     "release:update-homebrew-cask": "node scripts/updateHomebrewCask.mjs",
     "test": "vitest run",
     "typecheck": "tsc -b && tsc -p electron/tsconfig.json --noEmit",
-    "lint:css": "stylelint \"src/styles/**/*.css\""
+    "lint:css": "stylelint \"src/styles/**/*.css\"",
+    "benchmark:autocomplete": "vite-node scripts/benchmarkAutocomplete.ts --"
   },
   "dependencies": {
     "@codemirror/commands": "^6.8.1",
@@ -59,6 +60,7 @@
     "stylelint": "^17.12.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.3",
+    "vite-node": "^3.2.4",
     "vitest": "^3.2.4",
     "wait-on": "^8.0.1"
   },
