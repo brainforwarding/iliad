@@ -1371,6 +1371,56 @@ Also from the lead (owner-pending): proxy URL leaning `workers.dev`, with an
 optional allowlisted `https://iliad.md/ai.json` to relocate it without a
 release (section 1).
 
+## Review — Codex xhigh implementation (2026-09-25)
+
+Codex (xhigh, read-only) on the integrated `groq-integration` branch:
+**NO-SHIP**, 1 P0 / 1 P1 / 3 P2. All accepted and fixed on
+`groq-integration`; the Worker was redeployed with the P0 fix.
+
+1. P0 a mid-day rate increase could break the global cap: settle repriced open
+   reservations at the higher current rate while releasing only the original
+   reservation, so one that filled the cap at the old rate could settle above
+   it (and a refused request could persist the higher rate). **Fixed:** settle
+   uses only the reservation's stored rates; increases apply to new
+   reservations only (section 4, "Policy snapshot", reworded). Tests assert
+   `spentNano + reservedNano ≤ capNano` before and after a mid-day increase,
+   including a reservation that filled the cap and a refused request carrying
+   the new rate, and via the sweep; the old test that expected repricing now
+   expects stored rates. Commit `54e132b`. Redeployed 2026-09-26 (version
+   `12dd715c`); live `/healthz` ok, one streamed sentence 200 in ~1.0 s,
+   admin stats show it settled with usage and `reservedNano` 0. A fresh
+   `/v1/install` from the QA network answered `429 install_limited` (that
+   network had already used its 5 new installs that UTC day), so the smoke
+   used an existing QA token.
+2. P1 shared token issuance used the first caller's `AbortSignal`, so
+   canceling that request failed every request waiting on the same token.
+   **Fixed:** issuance is bounded only by its 10 s timeout; each caller waits
+   through its own abort-aware wrapper. Test: A starts issuance and is
+   canceled, B gets the token and completes (fails on the old code). Commit
+   `1253ea2`.
+3. P2 ✦ AI reported a proxy `upstream_timeout` as `provider` unless its local
+   timer fired. **Fixed:** `request_timeout` maps to `timeout`
+   unconditionally; `timedOut` only tells a local timeout from a user cancel.
+   `freeRoute.test.ts` now expects `timeout` for ✦ AI too (HTTP 504 and
+   in-band). Commit `56e9f58`.
+4. P2 `tighten:cancel` had no sender check. **Fixed:** same trusted-sender and
+   non-empty request-id checks as `autocomplete:cancel`, plus an
+   untrusted-cancel test. Commit `b676f61`.
+5. P2 stale docs. **Fixed:** `product-vision.md` (free by default through
+   Iliad's proxy on Groq, or your own Groq key; only explicit requests send
+   text), `source-as-contract.md` (comments are the only companion; notes
+   files are ordinary documents), `decisions.md` (stray conflict marker
+   removed; ADR-0021 points at its amendments; ADR-0023 accepted with its
+   release gates: Groq ZDR verified by the owner 2026-09-25 with Global ZDR
+   and Inference ZDR on, Worker observability off, EN/ES privacy pages written
+   and going live with the release), and the QA matrix's companion block.
+   README, CLAUDE.md, `docs/architecture.md` and the bundled skill were
+   already current. Commit `1778ad3`.
+
+Validation after the fixes: `npm run typecheck`, `npm test` (84 files, 760
+tests), `npm run lint:css`, `npm run build`, `npm run proxy:test:workers`
+(7 tests) and the Worker's own suite (105 tests) all green.
+
 ## Review — earlier passes
 
 **Codex (xhigh, read-only) could not run** at first on 2026-09-25: two attempts
@@ -1498,7 +1548,8 @@ needed):
    the origin only (no path, port or credentials). Built-in or cached URLs
    that still contain the `REPLACE` placeholder are refused (nothing sent).
 7. **Install token issuance** is shared by concurrent free requests; `/v1/install`
-   has its own 10 s timeout. A token is stored only if it is a single
+   has its own 10 s timeout and is never bound to the signal of the request
+   that started it (each caller waits abort-aware). A token is stored only if it is a single
    printable word ≤ 4 KB.
 8. **resetAt** is accepted only as a parseable ISO timestamp ≤ 40 chars and
    passed to the renderer only with `free_exhausted`; without one the notice
