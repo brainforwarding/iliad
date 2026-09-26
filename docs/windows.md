@@ -61,3 +61,7 @@ See [the validation checklist](windows-validation.md) for installer and manual t
 - Gemini assistance remains document-scoped. The local corrector supports
   English; Gemini can assist with Spanish. Provider availability is independent
   of Windows support. No internal agent or chat is added.
+
+The minimum electron-builder version is 26.15.3: its per-user NSIS folder
+resolution fixes a System.dll crash on fresh Windows installations
+([upstream report](https://github.com/electron-userland/electron-builder/issues/7921)).

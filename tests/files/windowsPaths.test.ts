@@ -17,3 +17,8 @@ it("preserves root identity and descendant boundaries", () => {
   expect(pathIsSameOrInside("/", "/book/doc.md")).toBe(true);
   expect(pathIsSameOrInside("C:/", "c:/book/doc.md")).toBe(true);
 });
+
+it("does not reinterpret a valid POSIX backslash filename as a directory", () => {
+  expect(pathsEqual("/book/a\\b.md", "/book/a/b.md")).toBe(false);
+  expect(relocatePath("/book", "/new", "/book/a\\b.md")).toBe("/new/a\\b.md");
+});

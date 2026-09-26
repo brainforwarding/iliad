@@ -5,7 +5,7 @@
   "private": true,
   "description": "A local-first Markdown writing workspace.",
   "license": "MIT",
-  "author": "Sebasti\u00c3\u00a1n Marambio",
+  "author": "Sebastián Marambio",
   "repository": {
     "type": "git",
     "url": "https://github.com/brainforwarding/iliad.git"
@@ -56,7 +56,7 @@
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
     "electron": "^42.2.0",
-    "electron-builder": "^26.8.1",
+    "electron-builder": "^26.15.3",
     "playwright": "^1.63.0",
     "stylelint": "^17.12.0",
     "typescript": "^5.7.2",

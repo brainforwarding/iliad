@@ -82,14 +82,14 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
     }
   }, []);
 
-  const writeCurrentDocument = useCallback(async (nextText?: string) => {
+  const writeCurrentDocument = useCallback(async () => {
     const current = stateRef.current;
 
     if (!current.workspace || !current.activeFile || current.activeFile.kind !== "markdown") {
       return;
     }
 
-    const textToSave = nextText ?? current.documentText;
+    const textToSave = current.documentText;
 
     if (textToSave === current.savedText) {
       if (saveStatusRef.current !== "conflict") {
@@ -140,7 +140,7 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
   }, [messages.saveDocumentFallback, onError, setSaveStatus, setSavedText]);
 
   // Serialize writes so every compare-and-swap uses the preceding acknowledged hash.
-  const saveCurrentDocument = useCallback(async (_nextText?: string) => {
+  const saveCurrentDocument = useCallback(async () => {
     while (saveInFlight.current) await saveInFlight.current;
     const pending = writeCurrentDocument();
     saveInFlight.current = pending;
@@ -155,14 +155,14 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
   }, [cancelPendingSave, saveCurrentDocument]);
 
   const scheduleAutosave = useCallback(
-    (value: string) => {
+    () => {
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
       }
 
       saveTimer.current = setTimeout(() => {
         saveTimer.current = null;
-        saveCurrentDocument(value).catch(() => {
+        saveCurrentDocument().catch(() => {
           // Errors are already reflected in saveStatus; the timer must not reject.
         });
       }, autosaveDelayMs);
@@ -181,7 +181,7 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
       }
 
       setSaveStatus(value === stateRef.current.savedText ? "saved" : "unsaved");
-      scheduleAutosave(value);
+      scheduleAutosave();
     },
     [scheduleAutosave, setDocumentText, setSaveStatus]
   );
@@ -226,7 +226,7 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
     setSaveStatus(dirty ? "unsaved" : "saved");
 
     if (dirty) {
-      scheduleAutosave(latest.documentText);
+      scheduleAutosave();
     }
   }, [scheduleAutosave, setSaveStatus]);
 

@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 const run = promisify(execFile);
 const executablePath = path.resolve(process.argv[2] || path.join(process.env.LOCALAPPDATA, "Programs", "Iliad MD", "Iliad MD.exe"));
 const artifacts = path.resolve("test-artifacts", `smoke-${Date.now()}`);
-const workspace = path.join(artifacts, "Libro de prueba á 🦉");
+const workspace = path.join(artifacts, "Libro de prueba á 🦉 & (demo) ! 100%");
 await mkdir(workspace, { recursive: true });
 const root = await realpath(workspace);
 const document = path.join(root, "Capítulo 1 🦉.md");
