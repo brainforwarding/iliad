@@ -31,7 +31,7 @@ writer talks to the AI; notes duplicate that.
    subtitles in another style, no pill buttons, no helper text that restates
    the obvious ("Click a key to change it").
 2. **Suggestions only on request.** Automatic suggestions are removed.
-   Suggestions come from the AI key and the length keys. This resolves the
+   Suggestions come only from the length keys (⌘, ⌘. ⌘/). This resolves the
    owner gate in `specs/2026-09-25-groq-ai-free-tier.md` section 8b in favour
    of removal.
 3. **Screen-reader announcement always on.** The live region that reads a
@@ -74,8 +74,7 @@ copy but use the same row and link styles.
 - `src/editor/ideaAutocomplete/extension.ts`: remove the automatic trigger
   (`schedule("automatic")`, `pendingAutomaticTrigger`, `automaticPausedUntil`
   and its 5-minute back-off, the `snoozedUntil` and `automaticEnabled`
-  options). Manual requests (continue key, length keys, ⌥↑/↓, Steer) are
-  unchanged.
+  options). Length keys, ⌥↑/↓ and Steer are unchanged.
 - The `inline` suggestion kind exists only for automatic requests. Remove it
   from the renderer and from `electron/writing/autocomplete.ts` if nothing
   else uses it after the trigger goes; escalation then starts at `sentence`.
@@ -86,8 +85,12 @@ copy but use the same row and link styles.
   values (no migration step needed); shortcuts parse as today.
 - Strings removed, EN and ES: `suggestWhileTyping`, `suggestWhileTypingOff`,
   `snooze`, `resume`, `announce`, `shortcuts`, `continueKeyHint`,
-  `openNotes`, `openNotesHint`, `openNotesFailed`, `companionNotes`. Rename
-  `continueKey` copy to "Ask for a suggestion" / "Pedir sugerencia".
+  `openNotes`, `openNotesHint`, `openNotesFailed`, `companionNotes`.
+- The `continue` key no longer requests or extends a suggestion with nothing
+  selected (remove that path and the press-again escalation); ⌘, ⌘. ⌘/ are
+  the only suggestion keys. Whether ⌘↵ stays for the ✦ AI list is the open
+  question below; if it stays, rename `continueKey` to "✦ AI menu" /
+  "Menú ✦ IA".
 
 ### Announcement
 
