@@ -5,6 +5,9 @@ Status: implemented on branch `writing-assists-one-row` (2026-09-25), pending re
 Design: Figma "Iliad — AI writing interactions" (`i2BTwgceho8SqRYGZKjLhB`),
 page "Writing assists: one row style (2026-09-25)", frame 15 (node `57:133`).
 Scope: the Writing assists menu, automatic suggestions, writing notes.
+Related: [`2026-09-25-groq-ai-free-tier.md`](./2026-09-25-groq-ai-free-tier.md)
+owns the provider, proxy, quota, key storage, notices, the AI key row's states
+and the privacy page content for the Groq release.
 
 ## Reviewer brief
 

@@ -110,6 +110,16 @@ over compact chips for now. Candidates: record a shortcut by pressing it, a
 small key-hint chip near the cursor, and a Full idea default that is easy to
 type on a Spanish keyboard (⌘/ needs Shift there).
 
+### Key recorder, key-hint chip, ES-layout default for Full idea
+
+From Figma page "Writing assists" option A (node `47:2`, file
+`i2BTwgceho8SqRYGZKjLhB`), left out of
+`specs/2026-09-25-writing-assists-one-row.md` and
+`specs/2026-09-25-groq-ai-free-tier.md` (non-goals in both): a key recorder
+with swap and blocked states instead of key selects; a key-hint chip near the
+cursor following the storyboard's rules; and a layout-aware default ⌘' for
+Full idea on ES/LatAm keyboard layouts, where ⌘/ needs Shift.
+
 ### Another / Steer for selection rewrites
 
 From `specs/2026-09-24-one-ai-key.md`: the continue suggestion has ⌥↑/↓ and

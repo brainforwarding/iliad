@@ -1,9 +1,15 @@
 # Groq AI: Free by Default, Your Own Key Optional
 
 Date: 2026-09-25
-Status: v3 — Codex xhigh review (NO-GO on v2) folded in, plus the earlier
-adversarial review and owner decisions. Not implemented. Implementation is
-gated on the owner decision in section 8b and the Phase 0 probes.
+Status: v4 — aligned with the writing-assists spec (automatic suggestions
+and writing notes removed there); v3 folded in the Codex xhigh review. Not
+implemented. Implementation starts after the writing-assists spec ships on
+`master` and is gated on the Phase 0 probes.
+Related: [`2026-09-25-writing-assists-one-row.md`](./2026-09-25-writing-assists-one-row.md)
+owns the Writing assists menu layout, the removal of automatic suggestions and
+writing notes, the always-on announcement, the Privacy row, and ⌘↵. This spec
+owns the provider, proxy, quota, key storage, notices, and the privacy page
+content for the Groq release.
 Branch: `groq-ai-free-tier` (from `master` at `2cd1901`, Iliad MD 0.3.2)
 ADR: ADR-0022 (draft, `docs/decisions.md`)
 Design: Figma `i2BTwgceho8SqRYGZKjLhB`, page "AI: free + your Groq key
@@ -24,7 +30,7 @@ fixed by the owner; challenge the implementation, not the direction.
 
 ## Problem
 
-Built-in AI (inline completion ⌘, ⌘. ⌘/ ⌘↵ and the ✦ AI selection menu) runs
+Built-in AI (inline completion ⌘, ⌘. ⌘/ and the ✦ AI selection menu) runs
 only after the writer creates a Gemini key in Google AI Studio and pastes it
 into Writing assists (ADR-0021). That is the first thing a new writer hits, it
 reads as setup, and most people never do it. The owner wants AI to work on
@@ -52,7 +58,7 @@ who want no limits or no Iliad server in the path.
 - No login now.
 - UI shows no usage counters or remaining quota, ever. It only says when the
   writer is out, with one calm inline notice for both the per-user and the
-  global limit, showing the local reset time, plus "Use your own Groq key…".
+  global limit, showing the local reset time, plus "Use my key".
   The notice appears only on explicit requests.
 - Quotas reset at 00:00 UTC; the Worker returns `resetAt` (ISO 8601) with
   every quota refusal.
@@ -65,7 +71,7 @@ who want no limits or no Iliad server in the path.
 
 ## Goals
 
-- G1 First launch: ⌘, / ⌘. / ⌘/ / ⌘↵ and ✦ AI work with no key, no account, no
+- G1 First launch: ⌘, / ⌘. / ⌘/ and ✦ AI work with no key, no account, no
   dialog.
 - G2 One provider in the app (Groq, one model, one parameter set), with two
   routes: **free** (via the proxy) and **own key** (direct). Same prompts, same
@@ -86,8 +92,11 @@ who want no limits or no Iliad server in the path.
   the inline review).
 - Deploying the Worker or creating Cloudflare/Groq resources (the owner will
   provide access later). This change is code + docs only.
-- Changing autocomplete interaction (keys, escalation, alternatives, Steer) or
-  the inline review's safety checks.
+- Changing autocomplete interaction (keys, alternatives, Steer) or the inline
+  review's safety checks; the writing-assists spec owns the menu, the removal
+  of automatic suggestions and notes, and ⌘↵.
+- A key recorder, key-hint chip, or ES-layout default for Full idea (Figma
+  page `47:2`); tracked in `docs/backlog.md`.
 
 ## Current state (what exists today)
 
@@ -142,6 +151,16 @@ confirms the pinned model. A dev key is in the repo root `.env.local`
 (git-ignored, `GROQ_API_KEY`) for benchmarks and live tests; it is never
 printed, logged or committed.
 
+### Baseline after the writing-assists spec
+
+This spec assumes `specs/2026-09-25-writing-assists-one-row.md` has shipped
+on `master` first. After it: no automatic suggestions (every request is
+explicit: ⌘, ⌘. ⌘/ or ✦ AI), no `inline` kind, no writing notes (no
+`guidance` field, no "Author's writing notes" prompt line), the menu uses one
+row style with an AI key row and a Privacy row, and ⌘↵ no longer requests
+suggestions (whether it stays as the ✦ AI menu opener is that spec's open
+question). The "Current state" bullets above describe `master` before it.
+
 ## Design
 
 ### 1. Routes
@@ -163,9 +182,15 @@ renderer ──IPC──▶ main: WritingAiService ──▶ GroqClient ──�
 - Dev overrides: `GROQ_API_KEY` (own-key route), `ILIAD_AI_PROXY_URL` (free
   route base URL, for `wrangler dev` or the fake server). Both are read only
   when `!app.isPackaged`, so no env var can reroute a packaged app's text.
-- The proxy base URL is a built-in constant in `electron/writing/groq/config.ts`
-  (leaning: the Worker's `workers.dev` URL, e.g.
-  `https://iliad-ai.<account>.workers.dev`; owner to confirm, Open questions).
+- The proxy base URL is a built-in constant in `electron/writing/groq/config.ts`:
+  the Worker's `workers.dev` URL (e.g. `https://iliad-ai.<account>.workers.dev`;
+  recommended, owner to confirm). Why not `ai.iliad.md`: the `iliad.md` DNS
+  zone is on Route 53, and a Cloudflare Worker custom domain requires the zone
+  on Cloudflare, i.e. moving DNS. Trade-offs of `workers.dev`: the URL is baked
+  into each app version (moving it later strands old versions), some
+  corporate or school networks block `*.workers.dev`, and it looks less
+  first-party in a network inspector. Mitigation: the optional `ai.json`
+  relocation below (owner-pending).
 - **Optional (owner to confirm): relocatable proxy.** The app may read
   `https://iliad.md/ai.json` (`{ "v": 1, "proxyUrl": "https://…" }`) to move
   the proxy without a release. Rules: fetched lazily with the first free
@@ -230,8 +255,8 @@ Pinned params (both routes; the Worker sets them itself on the free route):
 No tools, no `response_format`, no `stop`, default temperature (tuned only if
 the benchmark shows a reason). `include_reasoning: false` is set, but the
 reader ignores `delta.reasoning` regardless (measured: Groq sends reasoning
-there when it is included). Budgets: inline 512, sentence 768, paragraph
-1024, idea 2048; selection transform
+there when it is included). Budgets: sentence 768, paragraph 1024, idea
+2048; selection transform
 `min(4096, selectionTransformMaxOutputTokens(selectedText, mode) + 1024)`,
 computed from the **selected** text (`tightenSelectedText`), as
 `writingAiService.ts` does today, not the whole context.
@@ -340,18 +365,19 @@ chat messages, system prompts, model names or parameters:
 ```ts
 type GenerateBody =
   | { v: 1; task: "autocomplete"; language: "en" | "es";
-      kind: "inline" | "sentence" | "paragraph" | "idea"; trigger: "automatic" | "manual";
+      kind: "sentence" | "paragraph" | "idea";
       extend: boolean; prefix: string; suffix: string; documentTitle: string;
       headingPath: string[]; nearbyHeadings: string[]; direction: string;
-      guidance: string; avoid: string[] }
+      avoid: string[] }
   | { v: 1; task: "selection"; language: "en" | "es"; mode: "tighten" | "edit";
       instruction?: string; text: string; selection: { from: number; to: number } };
 ```
 
 The Worker validates every field against the same limits main enforces today
 (prefix ≤ 2,500, suffix ≤ 1,000, title ≤ 120, ≤ 8 headings × 120, direction ≤
-240, guidance ≤ 1,800, avoid ≤ 3 × 2,400; selection text ≤ 4,000, instruction ≤
-1,000, `0 ≤ from < to ≤ text.length`; automatic ⇒ `kind = "inline"`), rejects
+240, avoid ≤ 3 × 2,400 (`avoid` = the previous candidates for "Another",
+not notes); selection text ≤ 4,000, instruction ≤ 1,000, `0 ≤ from < to ≤
+text.length`), rejects
 unknown fields and unknown `v` (`bad_request` / `client_outdated`), then builds
 the messages with the shared `prompts/vN.ts` and sets model and params itself.
 Consequences:
@@ -359,7 +385,7 @@ Consequences:
 - The proxy is not a general Groq gateway: system prompts are Iliad's, output
   length is pinned per task, and there is no messages/tools/model field to
   abuse. The residual "free LLM" surface is the ✦ AI typed instruction (≤ 1,000
-  chars over ≤ 4,000 chars of text), long `guidance`/`avoid` fields on `idea`,
+  chars over ≤ 4,000 chars of text), long `avoid` fields on `idea`,
   and prompt injection inside document text. They are bounded by quotas, token
   budgets, and a **Worker-side forwarded-output cap** per task
   (`maxOutputChars` from `prompts/`: the `AUTOCOMPLETE_MAX_*_OUTPUT_CHARS`
@@ -545,8 +571,9 @@ closed (503 `free_tier_disabled`) rather than open.
   nano-USD amounts, the day policy snapshot, reservation ids, error-code counts.
 - Groq side: by default Groq may keep inference data up to 30 days for abuse
   and reliability. **Zero Data Retention in the Groq org's Data Controls is a
-  blocking release gate**: the free route does not ship, and the "Nothing is
-  stored" copy, the privacy page and the release notes do not go live, until
+  blocking release gate**: the free route does not ship, and the "Iliad
+  doesn't store this text" wording, the privacy page and the release notes do
+  not go live, until
   ZDR is on and verified in the console.
 
 **This is a bounded public service.** No CORS only affects browsers; curl
@@ -607,22 +634,19 @@ codes are mapped before that branch, and proxy-derived `detail` values never
 contain those words (tests pin both). `autocompleteCooldownMsForFailure`
 gets cases for the new reasons.
 
-`resetAt` and the trigger reach UI state (today they cannot:
-`IdeaAutocompleteStatus` `failed` keeps only `reason`, the selection overlay's
-error state keeps only `reason`, and the shared cooldown in
-`src/editor/ideaAutocomplete/extension.ts` blocks manual requests too):
+`resetAt` reaches UI state (today it cannot: `IdeaAutocompleteStatus`
+`failed` keeps only `reason`, and so does the selection overlay's error
+state):
 
-- `IdeaAutocompleteStatus` becomes `{ state: "failed"; reason; resetAt?;
-  trigger }`; the overlay's `tightenState` error gains `resetAt?`;
-  `EditorPane.tsx` passes both to the localized notice.
-- A new **automatic-only** gate, `freeOutUntil` (shared across views like
-  today's cooldown), is set from `resetAt` on `free_exhausted` and cleared
-  when an own key is saved or the time passes. It blocks automatic requests
-  only. Manual requests never consult it: they always reach main/the proxy,
-  and a refusal shows the notice again. `free_exhausted` does **not** use the
-  existing shared cooldown, which would block manual requests.
-- Notices render only when `trigger === "manual"` or for ✦ AI; automatic
-  failures stay silent. `rate_limited` keeps today's cooldown.
+- `IdeaAutocompleteStatus` becomes `{ state: "failed"; reason; resetAt? }`;
+  the overlay's `tightenState` error gains `resetAt?`; `EditorPane.tsx` passes
+  both to the localized notice.
+- Every request is explicit (automatic suggestions are removed by the
+  writing-assists spec), so every refusal shows its notice. `free_exhausted`
+  and the other free "out" reasons set **no cooldown**: the next explicit
+  request goes to the proxy again and, if still out, shows the notice again
+  (a refused request costs the Worker one DO round trip, no Groq call).
+  `rate_limited` keeps today's cooldown.
 
 ### 6. Key storage and settings
 
@@ -689,21 +713,30 @@ test):
 
 ### 8. UI states and copy (EN / ES)
 
-Layout and final wording follow the Figma page (node `42:2`); behavior and the
-copy decided so far are here. Tone: calm, no exclamation marks, never a count.
-Spanish uses "clave".
+The menu's layout, row order and row style belong to the writing-assists
+spec (one row style, Figma "Writing assists: one row style", node `57:133`);
+this section only gives the AI key row's states and copy in that style, the
+notices, and the privacy page content. Tone: calm, no exclamation marks, never
+a count. Spanish uses "clave".
 
-Writing assists menu (settings only):
+AI key row (one row: name, grey note, text link on the right):
 
-- Free route (default): a quiet row "AI included — Free, with a daily limit" /
-  "IA incluida — Gratis, con un límite diario", and below it "Use your own Groq
-  key…" / "Usa tu propia clave de Groq…". The privacy line:
-  EN "Free AI sends the text near your cursor or selection through Iliad's
-  server to Groq. Iliad doesn't store this text." + "Privacy" link.
-  ES "La IA gratis envía el texto cerca del cursor o de la selección a Groq a
-  través del servidor de Iliad. Iliad no guarda este texto." + "Privacidad".
-  The claim is only about Iliad; it ships with the ZDR gate passed (section 4).
-- The privacy page (website, linked from the app) enumerates the processors
+| State | Name | Note | Link |
+| --- | --- | --- | --- |
+| Free (default) | AI included / IA incluida | Free, with a daily limit / Gratis, con un límite diario | Use my key / Usar mi clave |
+| Own key | Groq key / Clave de Groq | ••••1234 | Change / Cambiar (Remove / Quitar in the expanded form) |
+| Unreadable key | Groq key / Clave de Groq | Re-enter your key / Vuelve a ingresar tu clave | Change / Cambiar |
+
+No separate privacy line in the menu. The writing-assists spec's Privacy row
+sits directly under the AI key row and opens the privacy page, which is the
+one place the full explanation lives; repeating a two-sentence disclosure in
+the menu would break the one-row style and duplicate that row. The free/own
+difference is still visible in the menu itself: the free row says "AI
+included", the key form hint says the key goes straight to Groq.
+
+- The privacy page (`https://iliad.md/privacy/`, `/es/privacidad/`, in the
+  `iliad-site` repo; today it describes the Gemini route) must be updated
+  before the free route ships. It enumerates the processors
   and what each sees: Cloudflare (runs the Worker; sees the request including
   text in transit and the connecting IP; Iliad's Worker logs are off, with
   Cloudflare's own platform handling described per its policy), Groq
@@ -712,29 +745,24 @@ Writing assists menu (settings only):
   a random install id and a daily-keyed hash of the network, deleted after
   ≤ 48 h; no text). It also covers the own-key route (text goes to Groq under
   the writer's own Groq account terms) and the `ai.json` fetch if adopted.
-- "Use your own Groq key…" expands the key field: label "Groq API key" /
+- "Use my key" / "Usar mi clave" expands the key form in place of the row
+  (same row and link styles): label "Groq API key" /
   "Clave API de Groq"; placeholder "Paste your Groq API key" / "Pega tu clave
   API de Groq"; hint "Goes straight to Groq, with no daily limit from Iliad."
   / "Va directo a Groq, sin límite diario de Iliad."; buttons Save / Cancel /
   "Get a key" (`https://console.groq.com/keys`) — "Guardar" / "Cancelar" /
   "Obtener una clave". Save shows "Checking…" / "Comprobando…" while the key is
   validated.
-- Own-key route: "Groq key ••••1234 · Change · Remove" / "Clave de Groq
-  ••••1234 · Cambiar · Quitar"; privacy line "Your text goes straight to
-  Groq." / "Tu texto va directo a Groq."
-- Unreadable key: "Re-enter your Groq key" / "Vuelve a ingresar tu clave de
-  Groq" with Change / Remove.
 - Save errors: "Groq didn't accept this key." / "Groq no aceptó esta clave.";
   "Couldn't reach Groq to check the key. Try again." / "No se pudo contactar a
   Groq para comprobar la clave. Intenta de nuevo."; generic "Could not save the
   key. Try again." (existing).
 
 Inline notices (autocomplete status spot near the cursor, and the ✦ AI
-overlay). Out-of-quota and the other free-route notices appear **only on
-explicit requests** (length keys, ⌘↵, ✦ AI); automatic suggestions fail
-silently and pause until `resetAt`. Notices that concern the free route carry
-"Use your own Groq key…" / "Usa tu propia clave de Groq…", which opens Writing
-assists at the key field (today's `requestGeminiKey` → `requestGroqKey`).
+overlay). All requests are explicit (⌘, ⌘. ⌘/ and ✦ AI), so a refusal always
+shows its notice. Notices that concern the free route carry a "Use my key" /
+"Usar mi clave" button, which opens Writing assists with the key form
+expanded (today's `requestGeminiKey` → `requestGroqKey`).
 
 | State | EN | ES |
 | --- | --- | --- |
@@ -755,34 +783,10 @@ Strings: all `geminiKey*`, `noKey`, `addKey`, `editNoKey`, `noProvider`,
 `autocompleteNeedsKey` and Gemini mentions in `src/i18n/strings.ts` are
 removed or replaced by the keys above, EN and ES together.
 
-### 8b. Automatic suggestions: a pre-Phase-1 gate (owner decision pending)
+### 8b. Automatic suggestions — REMOVED
 
-Automatic suggestions in free mode would spend the 50/day quota within
-minutes of writing and send text without an explicit action. The owner's
-decision is a **gate before Phase 1**; until it is made, the safe interim for
-free mode is **manual-only** (automatic requests are not sent on the free
-route; own-key behavior unchanged).
-
-**Recommended resolution (owner-pending): Option A — remove automatic
-suggestions entirely** (Figma page node `47:2`): one "AI suggestions" toggle in
-Writing assists; the length keys shown as visible key rows; a key-hint chip
-near the cursor following the storyboard's rules; a key recorder with swap and
-blocked states; and a layout-aware default ⌘' for Full idea on ES/LatAm
-keyboard layouts (where ⌘/ needs Shift). Those UI details come from the Figma
-page and are out of this spec's provider scope. The removal itself stays
-small and separable:
-
-- Whatever the choice, the provider/proxy work does not depend on it: in
-  free mode, if automatic requests exist, they count against the quota and
-  pause silently when out (section 5).
-- If removal is chosen, it is one follow-up commit touching only the
-  renderer: drop the automatic trigger path in
-  `src/editor/ideaAutocomplete/extension.ts` (450 ms pause, dismiss-pause,
-  `automaticEnabled`), the "Suggest while I type" switch and its strings, and
-  `manualOnly` from `AutocompletePreferences` (normalizer ignores the old
-  field). Main keeps accepting `trigger: "automatic"` → `inline` for older
-  renderers; the Worker keeps the field, so no prompt version bump is needed.
-- Nothing else in this spec depends on automatic suggestions existing.
+Closed: automatic suggestions are removed by
+`specs/2026-09-25-writing-assists-one-row.md` (Decision 2).
 
 ### 9. Cost model and monitoring
 
@@ -791,7 +795,6 @@ tokens; reasoning at `low` ≈ 50–250 tokens, to be measured):
 
 | Request | Input tok | Output tok (incl. reasoning) | Cost |
 | --- | --- | --- | --- |
-| inline / automatic | ~1,300 | ~150 | ~$0.00029 |
 | sentence | ~1,300 | ~250 | ~$0.00035 |
 | paragraph | ~1,300 | ~400 | ~$0.00044 |
 | idea | ~1,400 | ~900 | ~$0.00075 |
@@ -802,7 +805,7 @@ tokens; reasoning at `low` ≈ 50–250 tokens, to be measured):
   typical requests ≈ 150–250 writers using the full quota daily (many more at
   typical use). Monthly worst case $150 Groq + Cloudflare Workers Paid $5.
 - Reservations are worst case (input bytes, `max_completion_tokens`): an
-  inline request reserves ~$0.0012, an idea ~$0.0017, a worst ✦ AI edit
+  sentence request reserves ~$0.0012, an idea ~$0.0017, a worst ✦ AI edit
   ~$0.0038. Near the cap the Worker refuses slightly early rather than
   overspending; settle with real usage releases the difference within
   seconds. Aborted requests (common: typing cancels suggestions) are charged
@@ -888,13 +891,11 @@ App (root `npm test`):
   migration completes before the first status call.
 - `ai.json` (if adopted): off-allowlist host ignored; HTTP ignored; fetch
   failure keeps cache; at most one fetch per day.
-- Renderer: `failed` status and the overlay error carry `resetAt`;
-  `free_exhausted` sets the automatic-only gate and manual requests still hit
-  IPC and show the notice; every reason maps to its copy; `{time}` formatted from `resetAt`
-  in EN and ES locales; out-of-quota notice only on explicit requests;
-  automatic requests silent and suspended until `resetAt`, manual still runs;
-  ✦ AI enabled with no key; Writing assists free/own-key/unreadable states
-  (EN/ES).
+- Renderer: `failed` status and the overlay error carry `resetAt`; after
+  `free_exhausted` the next explicit request still reaches IPC (no cooldown)
+  and shows the notice again; every reason maps to its copy; `{time}`
+  formatted from `resetAt` in EN and ES locales; ✦ AI enabled with no key;
+  AI key row free/own-key/unreadable states and the expanded form (EN/ES).
 
 Worker (`relay/ai-proxy/tests`, run by root `npm test` and `npm run
 proxy:test`; injected storage/clock/fetch like the old relay tests):
@@ -910,7 +911,7 @@ proxy:test`; injected storage/clock/fetch like the old relay tests):
   of old ones; loosening never undoes a same-day tightening; integer nano-USD
   arithmetic with no floats (property test over random usages).
 - Validation: every limit ±1, unknown fields, unknown/unsupported `v` → 426,
-  automatic with non-inline kind, 64 KB body cap (a max-size CJK request
+  `inline` kind, `trigger` or `guidance` fields (rejected as unknown), 64 KB body cap (a max-size CJK request
   passes), wrong content type/method; `DENY_SUBJECTS`.
 - Quota core (pure class over an injected transactional store): install limit
   at 49/50/51; network limit across two installs; IPv6 addresses in the same
@@ -976,8 +977,8 @@ per-`v` snapshot matrix.
    "isn't reachable" notice; editor unaffected.
 3. Out: point at `wrangler dev` with `INSTALL_DAILY_REQUESTS=2`; the third
    explicit request shows "Today's free AI has run out. It's back at {time}."
-   with the local time of 00:00 UTC + "Use your own Groq key…"; automatic
-   suggestions stop silently; the next manual request shows the notice again.
+   with the local time of 00:00 UTC + "Use my key"; the next request shows
+   the notice again.
    Same message with `GLOBAL_DAILY_NANO_USD=100000`. Repeat in Spanish.
 4. Add own key → requests go direct (verify with the proxy stopped); remove key
    → back to free.
@@ -1053,24 +1054,39 @@ per-`v` snapshot matrix.
 
 ## Open questions for the owner
 
-1. **Automatic "suggest while I type"** (gate before Phase 1). Recommended:
-   Option A, remove them (Figma `47:2`, section 8b). Alternatives: keep them
-   only with an own key; keep them everywhere and accept fast exhaustion.
-   Interim default for free mode: manual-only.
-2. Proxy URL: the `workers.dev` URL (leaning) vs `ai.iliad.md`; and whether to
-   adopt the optional `https://iliad.md/ai.json` relocation file (section 1).
-3. `MIN_CLIENT_VERSION` / version: is the next release 0.4.0?
-4. Should there be an explicit "Built-in AI off" switch (hides ✦ AI too) for
-   writers who never want text to leave the Mac? Today only Autocomplete has a
-   switch.
-5. Own key storage: the spec upgrades to `safeStorage` (Keychain-backed); today's
-   Gemini key was plaintext 0600 JSON, not Keychain. OK? (Side effect: an
-   unreadable key blocks AI until re-entered.)
-6. Token expiry 30 days with a 60-day refresh window: OK?
-7. Free-tier accounting charges aborted requests their full worst-case
-   reservation (needed for a hard cap). Accept that the free tier admits
-   fewer requests than $5 of real spend would allow, or raise the cap once
-   admin stats vs the Groq bill show the ratio?
+Closed: automatic suggestions (removed; writing-assists spec).
+
+1. ⌘↵ (shared with the writing-assists spec, which owns it): keep it only as
+   the ✦ AI menu opener, or remove it. Either way it never requests
+   suggestions; this spec does not depend on the answer.
+2. Proxy URL. Recommended: `workers.dev` now (DNS stays on Route 53), plus the
+   optional `https://iliad.md/ai.json` relocation file.
+3. Next release version for `MIN_CLIENT_VERSION`. Recommended: 0.4.0.
+4. An extra "Built-in AI off" switch. Recommended: no. After the
+   writing-assists spec, text leaves the Mac only on an explicit request (a
+   length key or ✦ AI), and the Autocomplete switch already hides the length
+   keys.
+5. Own key stored with `safeStorage` (Keychain-backed; today's Gemini key is
+   plaintext 0600 JSON). Recommended: yes (an unreadable key then blocks AI
+   until re-entered).
+6. Install tokens expire after 30 days with a same-identity refresh within 60.
+   Recommended: yes.
+7. Aborted requests charged their full worst-case reservation (needed for a
+   hard cap; the free tier admits fewer requests than $5 of real spend).
+   Recommended: yes; revisit the cap once admin stats can be compared with
+   the Groq bill.
+
+## Alignment with the writing-assists spec (v4, 2026-09-25)
+
+Rebased on `master` after `2026-09-25-writing-assists-one-row.md`. Removed
+here because that spec owns them: the automatic-suggestions gate (section 8b
+now REMOVED), the `inline` kind and `trigger` field, the notes `guidance`
+field and prompt line, the automatic-only `freeOutUntil` gate, the in-menu
+privacy line (the Privacy row replaces it), and ⌘↵ as a suggestion trigger.
+Menu copy now follows that spec's row table ("AI included", "Free, with a
+daily limit", "Use my key"). The key recorder, key-hint chip and ES-layout
+default for Full idea (Figma `47:2`) are non-goals in both specs and tracked
+in `docs/backlog.md`.
 
 ## Review — Codex xhigh (2026-09-25)
 
