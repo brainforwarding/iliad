@@ -76,6 +76,22 @@ describe("Gemini autocomplete", () => {
     await expect(generateGeminiAutocomplete("test-key", request(), fetcher)).rejects.toMatchObject({ agentError: { code: "invalid_api_key" } });
   });
 
+  it("returns an empty provider answer without inventing a suggestion", async () => {
+    expect(await generateGeminiAutocomplete("test-key", request(), vi.fn().mockResolvedValue(reply("")))).toBe("");
+  });
+
+  it("propagates an in-flight timeout without retrying or leaking input", async () => {
+    const controller = new AbortController();
+    const fetcher = vi.fn<typeof fetch>((_url, options) => new Promise((_resolve, reject) => {
+      options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true });
+    }));
+    const pending = generateGeminiAutocomplete("test-key", { ...request(), signal: controller.signal }, fetcher);
+    const failed = expect(pending).rejects.toMatchObject({ name: "TimeoutError" });
+    controller.abort(new DOMException("Timed out", "TimeoutError"));
+    await failed;
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("never starts an already canceled request", async () => {
     const fetcher = vi.fn<typeof fetch>();
     const input = { ...request(), signal: AbortSignal.abort() };

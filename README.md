@@ -1,6 +1,6 @@
 # Iliad
 
-A calm, local-first Markdown writing app for macOS, built with Electron. Iliad
+A calm, local-first Markdown writing app for macOS and Windows x64, built with Electron. Iliad
 is the place to write one document with small AI help, and the place to review
 what an outside AI agent (Claude Code, Codex, or any tool) did to your writing.
 It has no chat panel and no agent of its own. See
@@ -39,6 +39,12 @@ It has no chat panel and no agent of its own. See
   outside agents can read, and they follow the document when it is renamed,
   moved, duplicated, or trashed.
 - **`iliad` command** for the terminal and for outside agents (see below).
+
+## Windows x64
+
+Build a per-user installer with `npm run dist:win`. The bundled CLI needs no
+Node.js installation and can optionally be added to PATH. See
+[Windows setup](docs/windows.md) and [validation](docs/windows-validation.md).
 
 ## Run
 
