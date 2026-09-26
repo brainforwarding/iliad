@@ -75,9 +75,9 @@ copy but use the same row and link styles.
   (`schedule("automatic")`, `pendingAutomaticTrigger`, `automaticPausedUntil`
   and its 5-minute back-off, the `snoozedUntil` and `automaticEnabled`
   options). Length keys, ⌥↑/↓ and Steer are unchanged.
-- The `inline` suggestion kind exists only for automatic requests. Remove it
-  from the renderer and from `electron/writing/autocomplete.ts` if nothing
-  else uses it after the trigger goes; escalation then starts at `sentence`.
+- The `inline` suggestion kind exists only for automatic requests, so nothing
+  uses it once the trigger goes. Remove it from the renderer and from
+  `electron/writing/autocomplete.ts`; escalation then starts at `sentence`.
 - `src/preferences/autocompletePreferences.ts`: remove the snooze state and
   `toggleSnooze`. `App.tsx` and `EditorPane.tsx` stop passing them.
 - `src/editor/ideaAutocomplete/options.ts`: drop `manualOnly` and `announce`
@@ -171,8 +171,8 @@ Agreed so far: ⌘↵ no longer asks for suggestions; suggestions come only from
 - The menu matches frame 15 in both languages: one row style, equal
   single-line row heights, no chevron section, no checkbox, no pill, no helper
   text.
-- Typing never sends a request; only the continue and length keys do. A test
-  asserts no request after edits and idle time.
+- Typing never sends a request; only the length keys (⌘, ⌘. ⌘/) and the ✦ AI
+  menu do. A test asserts no request after edits and idle time.
 - With VoiceOver on, a shown suggestion is announced without any setting.
 - A folder with `a.md` and `a.notes.md` shows both as documents; nothing is
   deleted; autocomplete requests carry no notes text; `a.notes.md` is no longer
