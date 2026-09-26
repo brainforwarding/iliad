@@ -265,7 +265,7 @@ function GroqKeyRow({
       {errorText ? (
         <span className="writing-assist-key-error" role="alert">{errorText}</span>
       ) : (
-        <span className="writing-assist-row-note writing-assist-key-hint">{saving === "key" ? labels.keyChecking : labels.groqKeyHint}</span>
+        <span className="writing-assist-row-note writing-assist-key-hint">{labels.groqKeyHint}</span>
       )}
       <div className="writing-assist-key-actions">
         <button type="submit" className="writing-assist-link" disabled={!draft.trim() || saving !== null}>

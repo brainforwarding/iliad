@@ -13,21 +13,21 @@ export const GROQ_KEYS_PAGE_URL = "https://console.groq.com/keys";
 // ---------------------------------------------------------------------------
 // Free route: the Iliad AI proxy (Cloudflare Worker).
 //
-// >>> RELEASE BLOCKER: replace BOTH "REPLACE" placeholders below with the
-// >>> Worker's real workers.dev account subdomain before shipping. While the
-// >>> placeholder is present the free route refuses to send anything
-// >>> (`free_unavailable`, detail `proxy_not_configured`): a placeholder host
-// >>> could be registered by someone else, so text must never go there.
+// The Worker is deployed at the workers.dev URL below (Groq spec, "Phase 2
+// results"). Safety net: while a URL carries the "REPLACE" placeholder the
+// free route refuses to send anything (`free_unavailable`, detail
+// `proxy_not_configured`), since a placeholder host could be registered by
+// someone else and text must never go there.
 
 /** The Worker's built-in base URL (no path). Baked into each app version. */
-export const ILIAD_AI_PROXY_BUILTIN_URL = "https://iliad-ai.REPLACE.workers.dev";
+export const ILIAD_AI_PROXY_BUILTIN_URL = "https://iliad-ai.quiet-bush-25b1.workers.dev";
 
 /**
  * The single allowlist for proxy hosts (built-in URL and `ai.json`
  * relocations). `*.` matches exactly one DNS label: workers under Iliad's
  * workers.dev account subdomain, plus the optional custom domain.
  */
-export const ILIAD_AI_PROXY_HOST_ALLOWLIST: readonly string[] = ["*.REPLACE.workers.dev", "ai.iliad.md"];
+export const ILIAD_AI_PROXY_HOST_ALLOWLIST: readonly string[] = ["*.quiet-bush-25b1.workers.dev", "ai.iliad.md"];
 
 /** Marker that means the proxy URL has not been set for this build. */
 export const ILIAD_AI_PROXY_PLACEHOLDER = "REPLACE";

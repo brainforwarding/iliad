@@ -74,12 +74,25 @@ export function nextUtcMidnightIso(now: number) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1)).toISOString();
 }
 
+const QA_REPLIES = {
+  en: {
+    paragraph: "the stairs creaked under her weight. Somewhere above, the lamp kept turning.",
+    idea: "The lamp kept turning above her, patient as a clock.\n\nBy the time she reached the top, the sea had gone silver."
+  },
+  es: {
+    paragraph: "la escalera crujía bajo su peso. Arriba, la lámpara seguía girando.",
+    idea: "La lámpara seguía girando sobre ella, paciente como un reloj.\n\nCuando llegó arriba, el mar se había vuelto de plata."
+  }
+} as const;
+
 export function defaultFakeReply(task: WritingAiTask): FakeReply {
   if (task.task === "autocomplete") {
-    const words = task.language === "es"
-      ? ["una ", "línea ", "tranquila ", "desde ", "el ", "proxy ", "de ", "prueba."]
-      : ["a ", "quiet ", "line ", "from ", "the ", "fake ", "proxy."];
-    return { deltas: words, finishReason: "stop", delayMs: 15 };
+    // Sentences keep the fixed reply the tests assert; longer kinds differ so
+    // the app's echo checks do not reject them during manual QA.
+    const text = task.kind === "sentence"
+      ? (task.language === "es" ? "una línea tranquila desde el proxy de prueba." : "a quiet line from the fake proxy.")
+      : QA_REPLIES[task.language][task.kind];
+    return { deltas: text.split(/(?<= )/), finishReason: "stop", delayMs: 15 };
   }
   const selected = task.text.slice(task.selection.from, task.selection.to);
   const tightened = selected.replace(/\b(really|very|realmente|muy|just|simplemente) /gi, "").trim();

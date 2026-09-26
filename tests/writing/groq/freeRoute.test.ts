@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { handleAutocompleteIpc } from "../../../electron/ipc/autocomplete";
 import { handleTightenIpc } from "../../../electron/ipc/tighten";
+import { ILIAD_AI_PROXY_BUILTIN_URL } from "../../../electron/writing/groq/config";
 import { SELECTION_MAX_OUTPUT_CHARS } from "../../../electron/writing/groq/prompts/index";
 import { WritingAiService } from "../../../electron/writing/writingAiService";
 import { startFakeAiProxy, type FakeAiProxy } from "../../fixtures/fakeAiProxy";
@@ -155,6 +156,10 @@ describe("free route (Iliad AI proxy)", () => {
     [{ status: 503, code: "free_tier_disabled" }, "free_unavailable"],
     [{ status: 426, code: "client_outdated" }, "client_outdated"],
     [{ status: 503, code: "upstream_busy" }, "rate_limited"],
+    // The Worker's burst limiter: a short wait, never "free AI ran out".
+    [{ status: 429, code: "rate_limited" }, "rate_limited"],
+    [{ status: 500, code: "internal_error" }, "provider"],
+    [{ status: 404, code: "not_found" }, "provider"],
     [{ status: 502, code: "upstream_error" }, "provider"],
     [{ status: 504, code: "upstream_timeout" }, "timeout"],
     [{ status: 400, code: "bad_request" }, "provider"],
@@ -253,8 +258,8 @@ describe("free route (Iliad AI proxy)", () => {
     expect(await runAutocomplete(service)).toEqual({ ok: false, reason: "unreachable" });
   });
 
-  it("refuses to send anything while the built-in proxy URL is a placeholder (packaged, no override)", async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}", { status: 404 }));
+  it("a packaged app ignores ILIAD_AI_PROXY_URL and talks only to the built-in proxy", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ error: { code: "free_tier_disabled" } }, { status: 503 }));
     const service = new WritingAiService(await userDataDir(), {
       isPackaged: true,
       env: { ILIAD_AI_PROXY_URL: "http://127.0.0.1:1" },
@@ -262,8 +267,9 @@ describe("free route (Iliad AI proxy)", () => {
       diagnostics: recordingDiagnostics().logger
     });
     expect(await runAutocomplete(service)).toEqual({ ok: false, reason: "free_unavailable" });
-    // Only the background ai.json check may run; never /v1/*.
-    expect(fetchImpl.mock.calls.map(([url]) => String(url)).filter((url) => url.includes("/v1/"))).toEqual([]);
+    const urls = fetchImpl.mock.calls.map(([url]) => String(url));
+    expect(urls.filter((url) => url.includes("/v1/"))).toEqual([`${ILIAD_AI_PROXY_BUILTIN_URL}/v1/install`]);
+    expect(urls.some((url) => url.includes("127.0.0.1"))).toBe(false);
   });
 
   it("passes a selection rewrite between 8,001 and 12,000 characters end to end", async () => {

@@ -283,12 +283,12 @@ describe("dev env overrides", () => {
     const dev = new WritingAiService(await userDataDir(), { isPackaged: false, env, diagnostics: quietDiagnostics() });
     expect((await dev.writingAssistStatus()).groqKey).toEqual({ state: "ok", last4: "WXYZ", rejected: false });
 
-    // Only the background ai.json check may run (stubbed here); never a request to the dev URL.
-    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}", { status: 404 }));
+    // Packaged: no env key (free route) and never a request to the dev URL (stubbed fetch).
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ error: { code: "free_tier_disabled" } }, { status: 503 }));
     const packaged = new WritingAiService(await userDataDir(), { isPackaged: true, env, fetchImpl, diagnostics: quietDiagnostics() });
     expect((await packaged.writingAssistStatus()).groqKey.state).toBe("none");
     expect(await autocomplete(packaged)).toEqual({ ok: false, reason: "free_unavailable" });
-    expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual(["https://iliad.md/ai.json"]);
+    expect(fetchImpl.mock.calls.map(([url]) => String(url)).some((url) => url.includes("127.0.0.1"))).toBe(false);
 
     const noGroq = new WritingAiService(await userDataDir(), {
       isPackaged: false,

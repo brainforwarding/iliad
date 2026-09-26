@@ -209,6 +209,9 @@ export function proxyHttpError(status: number, error: ProxyErrorBody): AgentRunt
         retryable: false
       });
     case "upstream_busy":
+    // The Worker's per-network burst limiter (429, Retry-After: 60): a short
+    // wait, never "free AI ran out" (Phase 2 contract notes).
+    case "rate_limited":
       return new AgentRuntimeError({
         code: "rate_limited",
         userMessage: "Free AI is busy. Try again shortly.",

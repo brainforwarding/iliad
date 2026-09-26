@@ -60,6 +60,9 @@ export interface EditorSelectionCommentsProps {
   onFullReplacement: (documentPath: string, documentText: string) => void;
 }
 
+/** Matches `.editor-ai-notice` max-width in editor.css. */
+const AI_NOTICE_MAX_WIDTH = 500;
+
 export interface EditorTightenProps {
   /** A Markdown file is active. ✦ AI needs no key: it runs free, on the writer's key, or reports a blocked key. */
   enabled: boolean;
@@ -1381,7 +1384,12 @@ export function EditorPane({
             notice={autocompleteNotice}
             labels={writingAssists.labels.aiNotices}
             className={autocompleteStatusAnchor ? "is-anchored" : "is-corner"}
-            style={autocompleteStatusAnchor ? { left: autocompleteStatusAnchor.left, top: autocompleteStatusAnchor.top } : undefined}
+            style={autocompleteStatusAnchor ? {
+              // The notice is wider than the status line: keep it inside the surface.
+              left: Math.max(8, Math.min(autocompleteStatusAnchor.left,
+                (editorSurfaceRef.current?.scrollLeft ?? 0) + (editorSurfaceRef.current?.clientWidth ?? 0) - AI_NOTICE_MAX_WIDTH - 16)),
+              top: autocompleteStatusAnchor.top
+            } : undefined}
             onAction={writingAssists.onRequestAiKey}
             onDismiss={() => {
               setAutocompleteStatus({ state: "idle" });
