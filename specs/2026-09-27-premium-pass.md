@@ -270,4 +270,4 @@ State is tracked in this file's "Progress" section below.
 - [x] Stage 3 — sidebar (review row sits under the header, above search; `shouldShowPendingReviewStrip`; `createFolder(explicitDirectoryPath?)`; context menu clamps to its measured size; Settings footer props `onOpenSettings`/`settingsOpen`/`updateAvailable` wired in stage 4; Check for updates stays in the folder menu until stage 4)
 - [x] Stage 4 — settings panel (`src/components/settings/`, `useSettingsPanel`; update check moved from the workspace menu to General; app menu "Settings…")
 - [x] Stage 5 — review in the top row (`ReviewControls` portaled into the top-row slot; ↑ ↓ wrap, local active hunk, hidden when stale), rendered suggestions (`renderedInsert.ts`), removed rows full width and aligned with the added block (owner feedback), resize line hidden at rest so the sidebar edge is one hairline (owner feedback)
-- [ ] Stage 6 — empty state G
+- [x] Stage 6 — empty state G (`EditorEmptyState`, `src/preferences/recentDocuments.ts`; recorded via `useFileActions` `onDocumentOpened`, relocated via `onPathRelocated`; stale entries skipped at render)

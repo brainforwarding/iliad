@@ -258,9 +258,33 @@ menu-shortcut pause.
 - Writing (`WritingAssistsSettings.tsx`): the Writing assists rows below.
   AI notices' "Use my key" opens this tab with the key field focused.
 
+### Empty state and recent documents
+
+With no document open, `EditorPane` renders `EditorEmptyState` (spec
+`specs/2026-09-27-premium-pass.md`, stage 6): a serif line, up to five recent
+documents as quiet row buttons (name without `.md`, its folder faint, the day
+on the right: Today / Yesterday / weekday / short date via `Intl` in the app
+language), then "New document ⌘N" as a plain link. Without recents the line
+reads "Pick a document to start" and only the link shows. The ClipMark stays on
+the launch screen and the error boundary only. A row opens its document the way
+a tree click does (leave a normal review, `openNode`, which flushes the pending
+save first and stops if it fails).
+
+Recents are a display preference in `src/preferences/recentDocuments.ts`:
+`localStorage` `iliad:recent-documents`, a map of workspace root → up to 10
+normalized workspace-relative paths with the last-opened ISO date, never
+written into the workspace. `useFileActions` reports `onDocumentOpened` only
+after `readMarkdown` succeeded (so virtual create/delete review files never
+record), comments companions (`*.comments.md`) are excluded, and
+`onPathRelocated` moves entries on in-app renames and moves (folders carry
+their documents). Entries that no longer exist in the tree are skipped at
+render, not deleted.
+
 Relevant files:
 
 - `src/App.tsx`
+- `src/components/EditorEmptyState.tsx`
+- `src/preferences/recentDocuments.ts`
 - `src/components/settings/GeneralSettings.tsx`
 - `src/styles/app.css`
 - `src/styles/chrome.css`

@@ -20,6 +20,10 @@ interface UseFileActionsOptions {
   loadDocument: (text: string) => void;
   messages: FileActionMessages;
   onMarkdownNavigation: (previousPath: string, nextPath: string) => void;
+  /** A Markdown document really opened (its text was read and loaded). */
+  onDocumentOpened?: (workspaceRoot: string, node: FileTreeNode) => void;
+  /** A file or folder was renamed or moved (workspace-relative paths). */
+  onPathRelocated?: (workspaceRoot: string, oldRelativePath: string, newRelativePath: string) => void;
   onTreeNodeMoved?: (move: {
     oldNode: FileTreeNode;
     newNode: FileTreeNode;
@@ -119,6 +123,8 @@ export function useFileActions({
   loadDocument,
   messages,
   onMarkdownNavigation,
+  onDocumentOpened,
+  onPathRelocated,
   onTreeNodeMoved,
   refreshTree,
   renamingPath,
@@ -201,6 +207,7 @@ export function useFileActions({
         if (options.recordHistory !== false && previousPath) {
           onMarkdownNavigation(previousPath, node.path);
         }
+        onDocumentOpened?.(workspace.path, node);
         setError(null);
         return { kind: "markdown", path: node.path };
       } catch (readError) {
@@ -212,6 +219,7 @@ export function useFileActions({
       flushSave,
       loadDocument,
       messages,
+      onDocumentOpened,
       onMarkdownNavigation,
       setActiveFile,
       setError,
@@ -337,6 +345,8 @@ export function useFileActions({
         throw new Error(messages.renamedFileMissing);
       }
 
+      onPathRelocated?.(workspace.path, node.relativePath, hydratedNode.relativePath);
+
       const currentActiveFile = stateRef.current.activeFile;
 
       if (currentActiveFile && pathIsSameOrInside(node.path, currentActiveFile.path)) {
@@ -361,6 +371,7 @@ export function useFileActions({
   }, [
     flushSave,
     messages,
+    onPathRelocated,
     refreshTree,
     selectedTreePath,
     setActiveFile,
@@ -420,6 +431,8 @@ export function useFileActions({
         throw new Error(messages.movedFileMissing);
       }
 
+      onPathRelocated?.(workspace.path, node.relativePath, hydratedNode.relativePath);
+
       const currentActiveFile = stateRef.current.activeFile;
       let activeFileAfterMove = currentActiveFile;
 
@@ -456,6 +469,7 @@ export function useFileActions({
     closeTreeContextMenu,
     flushSave,
     messages,
+    onPathRelocated,
     onTreeNodeMoved,
     refreshTree,
     renamingPath,

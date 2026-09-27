@@ -441,33 +441,115 @@
   text-align: center;
 }
 
-.editor-empty__action {
-  display: inline-flex;
-  align-items: center;
+/* Empty state G (no document open): one centred ~360px column. The generic
+   .editor-empty / h1 / p rules above also serve the error boundary. */
+.editor-empty__column {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 18px;
+  width: min(360px, 100%);
+}
+
+.editor-empty .editor-empty__title {
+  color: var(--ink-1);
+  font-family: var(--font-serif);
+  font-size: var(--text-title);
+  font-weight: 400;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.editor-empty__recents {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 -10px;
+  padding: 0;
+  list-style: none;
+}
+
+.editor-empty__recent {
+  display: flex;
+  align-items: baseline;
   gap: 8px;
-  min-height: 36px;
-  margin-top: 6px;
-  padding: 0 16px;
-  border: 1px solid var(--border-control);
-  border-radius: 7px;
-  background: var(--editor);
-  color: var(--accent-deep);
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2);
   cursor: pointer;
   font-size: var(--text-md);
-  font-weight: 600;
-  transition:
-    border-color 140ms ease,
-    background 140ms ease,
-    transform 90ms ease;
+  text-align: left;
+  transition: background 120ms ease;
 }
 
-.editor-empty__action:hover {
-  border-color: var(--accent);
-  background: var(--card);
+.editor-empty__recent:hover {
+  background: var(--row-hover);
 }
 
-.editor-empty__action:active {
-  transform: translateY(1px);
+.editor-empty__recent:focus-visible {
+  outline: none;
+  background: var(--row-selected);
+}
+
+.editor-empty__recent-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-empty__recent-folder {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted-3);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-empty__recent-day {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--muted-3);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.editor-empty__new {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted-1);
+  cursor: pointer;
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+
+.editor-empty__new:hover {
+  color: var(--ink-2);
+}
+
+.editor-empty__new:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.editor-empty__shortcut {
+  color: var(--muted-3);
+  font-size: var(--text-sm);
+  font-weight: 400;
 }
 
 @keyframes editor-empty-enter {

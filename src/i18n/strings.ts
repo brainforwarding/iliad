@@ -202,7 +202,11 @@ export const appStrings = {
       sizeValue: (size: number) => `${size} px`
     },
     editor: {
-      emptyTitle: "Pick a file to start",
+      emptyTitle: "Pick a document to start",
+      emptyRecentTitle: "Pick up where you left off",
+      emptyRecentLabel: "Recent documents",
+      emptyToday: "Today",
+      emptyYesterday: "Yesterday",
       emptyNewDocument: "New document",
       crashTitle: "Unable to render this document",
       visualMarkdown: {
@@ -570,7 +574,11 @@ export const appStrings = {
       sizeValue: (size: number) => `${size} px`
     },
     editor: {
-      emptyTitle: "Elige un archivo para empezar",
+      emptyTitle: "Elige un documento para empezar",
+      emptyRecentTitle: "Retoma donde lo dejaste",
+      emptyRecentLabel: "Documentos recientes",
+      emptyToday: "Hoy",
+      emptyYesterday: "Ayer",
       emptyNewDocument: "Nuevo documento",
       crashTitle: "No se pudo mostrar este documento",
       visualMarkdown: {

@@ -50,10 +50,10 @@ import type {
   WritingCorrectorMemorySnapshot
 } from "../types/iliad";
 import { AiNoticeBar } from "./AiNoticeBar";
-import { ClipMark } from "./ClipMark";
+import { EditorEmptyState } from "./EditorEmptyState";
+import type { RecentDocumentItem } from "../preferences/recentDocuments";
 import { DetachedCommentsBar } from "./DetachedCommentsBar";
 import { ReviewControls } from "./ReviewControls";
-import { FilePlus } from "lucide-react";
 
 export interface EditorSelectionCommentsProps {
   comments: SelectionComment[];
@@ -160,6 +160,8 @@ interface EditorPaneProps {
   editorFontPreset: EditorFontPreset;
   labels: {
     emptyTitle: string;
+    emptyRecentTitle: string;
+    emptyRecentLabel: string;
     emptyNewDocument: string;
     visualMarkdown: {
       markdownImage: string;
@@ -201,6 +203,9 @@ interface EditorPaneProps {
   onInsertImageReference: (relativePath: string) => Promise<string | null>;
   onOpenLink: (href: string) => void | Promise<void>;
   onCreateDocument?: () => void;
+  /** Empty state G: existing recent documents (filtered, at most five). */
+  recentDocuments?: RecentDocumentItem[];
+  onOpenRecentDocument?: (relativePath: string) => void;
   /**
    * The right-side slot of the window's top row (App state from a callback
    * ref, null until mounted). The outside-review controls are portaled into it
@@ -308,6 +313,8 @@ export function EditorPane({
   onInsertImageReference,
   onOpenLink,
   onCreateDocument,
+  recentDocuments,
+  onOpenRecentDocument,
   topbarSlot = null,
   onEditorViewChange,
   contentSearchRevealTarget,
@@ -1147,16 +1154,12 @@ export function EditorPane({
   if (!file) {
     return (
       <main className="editor-shell">
-        <div className="editor-empty">
-          <ClipMark size={76} className="editor-empty__mark" />
-          <h1>{labels.emptyTitle}</h1>
-          {onCreateDocument ? (
-            <button type="button" className="editor-empty__action" onClick={onCreateDocument}>
-              <Icon icon={FilePlus} />
-              {labels.emptyNewDocument}
-            </button>
-          ) : null}
-        </div>
+        <EditorEmptyState
+          labels={labels}
+          recentDocuments={recentDocuments}
+          onOpenRecentDocument={onOpenRecentDocument}
+          onCreateDocument={onCreateDocument}
+        />
       </main>
     );
   }

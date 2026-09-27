@@ -43,6 +43,7 @@ import { findNode, findNodeByRelativePath } from "./files/fileTree";
 import { documentBreadcrumbParts } from "./files/pathUtils";
 import { useAppLanguage } from "./i18n/appLanguage";
 import { useEditorPreferences } from "./preferences/editorPreferences";
+import { recentDocumentItems, useRecentDocuments } from "./preferences/recentDocuments";
 import {
   clampSidebarWidth,
   minimumSidebarWidth,
@@ -256,6 +257,11 @@ export default function App() {
     relocateHistoryPaths,
     recordNormalNavigation
   } = useDocumentHistory(tree);
+  const { recentEntries, recordRecent, relocateRecent } = useRecentDocuments(workspace?.path ?? null);
+  const handleDocumentOpened = useCallback(
+    (workspaceRoot: string, node: FileTreeNode) => recordRecent(workspaceRoot, node.relativePath),
+    [recordRecent]
+  );
   const {
     copyNodePath,
     createFolder,
@@ -279,6 +285,8 @@ export default function App() {
     flushSave,
     loadDocument,
     onMarkdownNavigation: recordNormalNavigation,
+    onDocumentOpened: handleDocumentOpened,
+    onPathRelocated: relocateRecent,
     onTreeNodeMoved: ({ oldNode, newNode }) => {
       relocateHistoryPaths(oldNode.path, newNode.path);
     },
@@ -1309,6 +1317,31 @@ export default function App() {
   const visibleStatus = statusText(saveStatus, lastSavedAt, strings.topbar.saveStatus);
   const shouldShowStatus = saveStatus !== "saved";
   const editorFile = virtualReviewFile ?? activeFile;
+  // Empty state G: the day labels are computed when the list changes; a list
+  // left open past midnight keeps yesterday's labels until the next change.
+  const recentDocuments = useMemo(
+    () =>
+      recentDocumentItems(recentEntries, tree, new Date(), language, {
+        today: strings.editor.emptyToday,
+        yesterday: strings.editor.emptyYesterday
+      }),
+    [language, recentEntries, strings.editor.emptyToday, strings.editor.emptyYesterday, tree]
+  );
+  const openRecentDocument = useCallback(
+    (relativePath: string) => {
+      const node = findNodeByRelativePath(tree, relativePath);
+
+      if (node?.kind !== "markdown") {
+        return;
+      }
+
+      // Same path as a tree click: leave a normal review, then open (the
+      // open flushes the pending save first and stops if it fails).
+      clearReviewForNormalNavigation(node);
+      void openNode(node);
+    },
+    [clearReviewForNormalNavigation, openNode, tree]
+  );
   const editorSelectionComments = useMemo<EditorSelectionCommentsProps | undefined>(() => {
     // No comments on a comments file itself (spec V12).
     if (!activeFile || activeFile.kind !== "markdown" || editorFile !== activeFile || !commentsEnabled) {
@@ -1690,6 +1723,8 @@ export default function App() {
             onInsertImageReference={insertImageReference}
             onOpenLink={openDocumentLink}
             onCreateDocument={createMarkdownFile}
+            recentDocuments={editorFile ? undefined : recentDocuments}
+            onOpenRecentDocument={openRecentDocument}
             topbarSlot={topbarSlot}
             onEditorViewChange={handleEditorViewChange}
             contentSearchRevealTarget={contentSearchRevealTarget}
