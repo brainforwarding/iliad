@@ -96,7 +96,7 @@
 }
 
 /* A row with a note under its name grows to two lines (54px in the design). */
-.writing-assist-row:has(.writing-assist-row-note) {
+.writing-assist-row:has(.writing-assist-row-note:not([hidden])) {
   padding: 10px 0;
 }
 
@@ -145,47 +145,50 @@
   font-size: var(--text-xs);
 }
 
-.writing-assist-key-select {
-  position: relative;
-  display: inline-flex;
+/* The key chip is a button: click it and press the keys you want (spec 2026-09-27). */
+.writing-assist-key-button {
   flex: none;
-  align-items: center;
-  gap: 14px;
+  min-width: 36px;
+  margin: 0;
   padding: 2px 8px;
   border: 1px solid var(--hairline);
   border-radius: 5px;
+  background: transparent;
   color: var(--ink-1);
+  cursor: pointer;
+  font: inherit;
   font-size: var(--text-xs);
   line-height: 1.4;
 }
 
-.writing-assist-key-select svg {
-  color: var(--muted-2);
-}
-
-.writing-assist-key-select:hover {
+.writing-assist-key-button:hover {
   border-color: var(--border-control);
 }
 
-.writing-assist-key-select:has(select:focus-visible) {
+.writing-assist-key-button:focus-visible {
   outline: 2px solid var(--ink-2);
   outline-offset: 2px;
 }
 
-/* The native select covers the chip: it opens the system list and keeps keyboard access. */
-.writing-assist-key-select select {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  opacity: 0;
-  cursor: pointer;
-  font: inherit;
+.writing-assist-key-button.is-recording {
+  border-color: var(--ink-2);
+  background: var(--paper);
+  color: var(--muted-2);
 }
 
-.writing-assists-popover .writing-assist-key-select select:focus-visible {
+.writing-assist-key-button.is-recording:focus-visible {
   outline: none;
+}
+
+.writing-assist-key-button.is-warning {
+  border-color: var(--error-border);
+  background: var(--error-surface);
+  color: var(--error);
+}
+
+.writing-assist-row-note.is-warning {
+  color: var(--error);
+  white-space: normal;
 }
 
 .writing-assist-key {

@@ -60,12 +60,11 @@ describe("Writing assists menu", () => {
     }
   });
 
-  it("keeps four remappable key selects with duplicate keys blocked", () => {
+  it("shows four key chips you click to record, and no key list", () => {
     const html = render();
-    expect(html.match(/<select/g)).toHaveLength(4);
-    expect(html).toContain('<option value="Mod-/" selected="">');
-    // A key already used by another action is disabled in this select.
-    expect(html).toMatch(/<option value="Mod-,"[^>]*disabled=""/);
+    expect(html).not.toContain("<select");
+    expect(html.match(/class="writing-assist-key-button"/g)).toHaveLength(4);
+    expect(html).toContain('aria-label="Full idea: ⌘/"');
     expect(html).toContain(">Tab<");
     expect(html).toContain(">Esc<");
   });

@@ -12,7 +12,7 @@ import type { EditorReviewState } from "../editor/aiReview/types";
 import { CodeMirrorHost } from "../editor/CodeMirrorHost";
 import { imageDropPasteExtension } from "../editor/imageDropPaste";
 import { ideaAutocompleteExtension, runAutocompleteAction, type IdeaAutocompleteStatus, type IdeaAutocompleteSuggestionKind } from "../editor/ideaAutocomplete/extension";
-import { defaultAutocompletePreferences, shortcutLabel, type AutocompletePreferences } from "../editor/ideaAutocomplete/options";
+import { compactShortcutLabel, defaultAutocompletePreferences, type AutocompletePreferences } from "../editor/ideaAutocomplete/options";
 import { Check, ChevronLeft, ChevronRight, RotateCw, X } from "lucide-react";
 import {
   selectionCommentsExtension,
@@ -1250,7 +1250,7 @@ export function EditorPane({
                     minChars: tighten.minChars,
                     maxChars: tighten.maxChars,
                     labels: tighten.labels,
-                    aiKeyLabel: shortcutLabel(aiKey),
+                    aiKeyLabel: compactShortcutLabel(aiKey),
                     run: tighten.run,
                     cancel: tighten.cancel,
                     filePath: file.path,
@@ -1325,7 +1325,7 @@ export function EditorPane({
             {autocompleteStatus.kind !== "idea" ? (
               <button type="button" onClick={() => editorView && runAutocompleteAction(editorView, "longer")}>
                 {writingAssists.labels.autocomplete.longer}
-                <kbd>{shortcutLabel((writingAssists.preferences?.shortcuts ?? defaultAutocompletePreferences.shortcuts)[autocompleteStatus.kind === "paragraph" ? "idea" : "paragraph"])}</kbd>
+                <kbd>{compactShortcutLabel((writingAssists.preferences?.shortcuts ?? defaultAutocompletePreferences.shortcuts)[autocompleteStatus.kind === "paragraph" ? "idea" : "paragraph"])}</kbd>
               </button>
             ) : null}
             <button type="button" onClick={() => editorView && runAutocompleteAction(editorView, "new")}>

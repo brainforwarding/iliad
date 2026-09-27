@@ -16,6 +16,17 @@ export function registerWritingSettingsIpc({ service }: { service: WritingSettin
   ipcMain.handle("writing-assist:status", (event) => handleWritingAssistStatusIpc(event, service));
   ipcMain.handle("writing:get-groq-key-state", (event) => handleGetGroqKeyStateIpc(event, service));
   ipcMain.handle("writing:set-groq-key", (event, key: unknown) => handleSetGroqKeyIpc(event, key, service));
+  ipcMain.handle("writing:set-recording-shortcut", (event, recording: unknown) => handleSetRecordingShortcutIpc(event, recording));
+}
+
+/**
+ * While a Writing assists key chip records a shortcut, the app menu's own
+ * shortcuts (Quit, Copy, Hide…) must not act on the keys being pressed
+ * (spec 2026-09-27). Scoped to the sender's window.
+ */
+export function handleSetRecordingShortcutIpc(event: TrustedIpcEvent, recording: unknown) {
+  if (!isTrustedIpcSender(event) || typeof recording !== "boolean") return;
+  event.sender.setIgnoreMenuShortcuts(recording);
 }
 
 export function handleWritingAssistStatusIpc(event: TrustedIpcEvent, service: WritingSettingsService) {

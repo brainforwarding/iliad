@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { handleAutocompleteIpc } from "../../electron/ipc/autocomplete";
 import { handleTightenCancelIpc, handleTightenIpc } from "../../electron/ipc/tighten";
-import { handleSetGroqKeyIpc, handleWritingAssistStatusIpc } from "../../electron/ipc/writingSettings";
+import { handleSetGroqKeyIpc, handleSetRecordingShortcutIpc, handleWritingAssistStatusIpc } from "../../electron/ipc/writingSettings";
 import { GroqKeyStore, type SafeStorageLike } from "../../electron/writing/groq/keyStore";
 import { GROQ_MODEL } from "../../electron/writing/groq/prompts/index";
 import { WritingAiService } from "../../electron/writing/writingAiService";
@@ -318,5 +318,18 @@ describe("dev env overrides", () => {
       diagnostics: quietDiagnostics()
     });
     expect((await noGroq.writingAssistStatus()).ai.route).toBe("free");
+  });
+});
+
+describe("writing:set-recording-shortcut", () => {
+  it("pauses the app menu's shortcuts for a trusted window only, and only for a boolean", () => {
+    const setIgnoreMenuShortcuts = vi.fn();
+    const sender = { id: 1, setIgnoreMenuShortcuts };
+    handleSetRecordingShortcutIpc({ sender, senderFrame: { url: "https://evil.example" } } as never, true);
+    handleSetRecordingShortcutIpc({ sender, senderFrame: { url: "file:///app/index.html" } } as never, "yes");
+    expect(setIgnoreMenuShortcuts).not.toHaveBeenCalled();
+    handleSetRecordingShortcutIpc({ sender, senderFrame: { url: "file:///app/index.html" } } as never, true);
+    handleSetRecordingShortcutIpc({ sender, senderFrame: { url: "file:///app/index.html" } } as never, false);
+    expect(setIgnoreMenuShortcuts.mock.calls).toEqual([[true], [false]]);
   });
 });

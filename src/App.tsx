@@ -1574,6 +1574,7 @@ export default function App() {
               onSaveGroqKey={saveGroqKey}
               onGetGroqKey={openGroqKeyPage}
               onOpenPrivacy={() => void window.iliad.openUrl(strings.writingAssists.privacyUrl)}
+              onRecordingShortcutChange={(recording) => void window.iliad.setRecordingShortcut(recording).catch(() => undefined)}
               keyFieldFocusRequest={keyFieldFocusRequest}
               onToggleOpen={() => {
                 setWritingAssistsOpen((open) => {

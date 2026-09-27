@@ -391,7 +391,7 @@ The Writing assists menu (`src/components/WritingAssistsMenu.tsx`, Figma
 "Writing assists: one row style", frame 15) holds settings only, in one row
 style: name, optional grey note, control on the right, a hairline under each
 row. Rows: Corrector, Autocomplete, then (while Autocomplete is on) ✦ AI menu,
-Sentence, Paragraph, Full idea (key chips over native selects), Accept /
+Sentence, Paragraph, Full idea (key chips you click to record keys), Accept /
 Another / Dismiss (fixed keys), Reset shortcuts; then the AI key row ("AI
 included — Free, with a daily limit — Use my key"; with a key "Groq key —
 ••••1234 — Change · Remove"; "Re-enter your key" or "Groq rejected this key"
@@ -400,6 +400,18 @@ and Privacy (opens `https://iliad.md/privacy/` or `https://iliad.md/es/privacida
 by app language). In-the-moment controls (Longer, Another, Steer…) live on the
 suggestion toolbar. Stored preferences keep only `shortcuts`; older stored
 `manualOnly`/`announce` keys are ignored.
+
+Shortcut keys are recorded, not picked from a list (spec
+`specs/2026-09-27-record-your-own-shortcuts.md`, Figma frame 16): clicking a
+chip records the next key combination as a CodeMirror key name, spelled the
+way CodeMirror's keymap will match it (`shortcutFromKeyEvent` in
+`src/editor/ideaAutocomplete/options.ts`; the character the layout produces,
+so a Spanish keyboard can use ⌘ñ). A key needs ⌘ or ⌃ (or is ⌥↵); keys Iliad
+already uses (app menu, ⌘W/⌘O, comment/shorten keys, editor essentials) are
+refused as "taken"; a key another row uses offers a swap (↵). Esc or blur
+cancels. The recording logic is the pure `recordShortcutKeyDown`
+(`shortcutRecording.ts`); while a chip records, the window's menu shortcuts
+are paused through `writing:set-recording-shortcut` (`setIgnoreMenuShortcuts`).
 
 **Outside agents** write Markdown directly in the folder. Iliad derives their
 changes from the workspace baseline (next section) and shows them in the same

@@ -160,6 +160,12 @@ export const appStrings = {
       keyRejectedNote: "Groq rejected this key",
       continueKey: "✦ AI menu", sentenceKey: "Sentence", paragraphKey: "Paragraph", ideaKey: "Full idea",
       accept: "Accept", alternatives: "Another", dismiss: "Dismiss", reset: "Reset shortcuts",
+      shortcutPress: "Press keys…",
+      shortcutChange: (row: string, key: string) => `${row}: ${key}`,
+      shortcutRecording: (row: string) => `Recording shortcut for ${row}`,
+      shortcutConflict: (row: string, key: string) => `${row} uses ${key} · ↵ swap · Esc cancel`,
+      shortcutTaken: (key: string) => `${key} is taken`,
+      shortcutNeedsModifier: (mac: boolean) => (mac ? "Add ⌘ or ⌃" : "Add Ctrl"),
       privacy: "Privacy", privacyUrl: "https://iliad.md/privacy/"
     },
     updates: {
@@ -500,6 +506,12 @@ export const appStrings = {
       keyRejectedNote: "Groq rechazó esta clave",
       continueKey: "Menú ✦ IA", sentenceKey: "Oración", paragraphKey: "Párrafo", ideaKey: "Idea completa",
       accept: "Aceptar", alternatives: "Otra", dismiss: "Descartar", reset: "Restablecer atajos",
+      shortcutPress: "Pulsa las teclas…",
+      shortcutChange: (row: string, key: string) => `${row}: ${key}`,
+      shortcutRecording: (row: string) => `Grabando atajo para ${row}`,
+      shortcutConflict: (row: string, key: string) => `${row} usa ${key} · ↵ intercambiar · Esc cancelar`,
+      shortcutTaken: (key: string) => `${key} ya está en uso`,
+      shortcutNeedsModifier: (mac: boolean) => (mac ? "Añade ⌘ o ⌃" : "Añade Ctrl"),
       privacy: "Privacidad", privacyUrl: "https://iliad.md/es/privacidad/"
     },
     updates: {

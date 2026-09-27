@@ -550,6 +550,8 @@ export interface IliadApi {
   getGroqKeyState: () => Promise<GroqKeyState>;
   /** Validates a new key against Groq in main and saves it only if Groq accepts it; null removes it. */
   setGroqApiKey: (key: string | null) => Promise<SetGroqKeyResult>;
+  /** Pauses the app menu's shortcuts in this window while a Writing assists key chip records keys. */
+  setRecordingShortcut: (recording: boolean) => Promise<void>;
   assetUrl: (absolutePath: string) => string;
   agent: AgentApi;
 }

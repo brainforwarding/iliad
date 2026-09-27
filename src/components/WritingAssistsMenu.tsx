@@ -1,6 +1,13 @@
-import { ChevronDown, PenLine } from "lucide-react";
-import { useEffect, useRef, useState, type Dispatch, type FormEvent, type ReactNode, type RefObject, type SetStateAction } from "react";
-import { autocompleteShortcutActions, autocompleteShortcutChoices, compactShortcutLabel, shortcutLabel, type AutocompletePreferences } from "../editor/ideaAutocomplete/options";
+import { PenLine } from "lucide-react";
+import { useEffect, useRef, useState, type Dispatch, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject, type SetStateAction } from "react";
+import {
+  autocompleteShortcutActions,
+  compactShortcutLabel,
+  heldModifiers,
+  type AutocompletePreferences,
+  type AutocompleteShortcutAction
+} from "../editor/ideaAutocomplete/options";
+import { recordShortcutKeyDown, type ShortcutRecording } from "../editor/ideaAutocomplete/shortcutRecording";
 import type { AppStrings } from "../i18n/strings";
 import type { GroqKeyState, SetGroqKeyResult } from "../types/iliad";
 
@@ -31,6 +38,8 @@ interface WritingAssistsMenuProps {
   onGetGroqKey: () => void;
   /** Opens the privacy page (in the app language) in the browser. */
   onOpenPrivacy: () => void;
+  /** True while a key chip records keys (the app menu's shortcuts pause meanwhile). */
+  onRecordingShortcutChange?: (recording: boolean) => void;
   /** Bumped to open the key form and focus its field (a notice's "Use my key" / "Update key"). */
   keyFieldFocusRequest?: number;
   onToggleOpen: () => void;
@@ -287,6 +296,76 @@ function GroqKeyRow({
   );
 }
 
+function ShortcutRow({
+  action,
+  preferences,
+  labels,
+  rowLabels,
+  recording,
+  onRecordingChange,
+  onPreferencesChange
+}: {
+  action: AutocompleteShortcutAction;
+  preferences: AutocompletePreferences;
+  labels: AppStrings["writingAssists"];
+  rowLabels: Record<AutocompleteShortcutAction, string>;
+  recording: ShortcutRecording | null;
+  onRecordingChange: (recording: ShortcutRecording | null) => void;
+  onPreferencesChange: (preferences: AutocompletePreferences) => void;
+}) {
+  const mac = /Mac/.test(globalThis.navigator?.platform ?? "");
+  const current = preferences.shortcuts[action];
+  const active = recording?.action === action ? recording : null;
+  const clash = recording?.problem?.kind === "conflict" && recording.problem.other === action;
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (!active) return;
+    const step = recordShortcutKeyDown(active, event.nativeEvent, preferences.shortcuts, mac);
+    if (!step.handled) return;
+    // Nothing reaches the editor, the menu or the app while recording.
+    event.preventDefault();
+    event.stopPropagation();
+    if (step.shortcuts) onPreferencesChange({ ...preferences, shortcuts: step.shortcuts });
+    onRecordingChange(step.recording);
+  };
+
+  const onKeyUp = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (active && !active.problem) onRecordingChange({ ...active, held: heldModifiers(event.nativeEvent, mac) });
+  };
+
+  const problem = active?.problem;
+  const chipText = problem
+    ? compactShortcutLabel(problem.key, mac)
+    : active
+      ? active.held ? compactShortcutLabel(`${active.held}-…`, mac) : labels.shortcutPress
+      : compactShortcutLabel(current, mac);
+  const note = !problem
+    ? undefined
+    : problem.kind === "conflict"
+      ? labels.shortcutConflict(rowLabels[problem.other], compactShortcutLabel(problem.key, mac))
+      : problem.kind === "taken"
+        ? labels.shortcutTaken(compactShortcutLabel(problem.key, mac))
+        : labels.shortcutNeedsModifier(mac);
+  const chipClass = ["writing-assist-key-button", active ? "is-recording" : "", problem || clash ? "is-warning" : ""]
+    .filter(Boolean).join(" ");
+
+  return (
+    <div className="writing-assist-row">
+      <span className="writing-assist-row-copy">
+        <span className="writing-assist-row-label">{rowLabels[action]}</span>
+        <span className="writing-assist-row-note is-warning" aria-live="polite" hidden={!note}>{note}</span>
+      </span>
+      <button type="button" className={chipClass}
+        aria-label={active ? labels.shortcutRecording(rowLabels[action]) : labels.shortcutChange(rowLabels[action], compactShortcutLabel(current, mac))}
+        onClick={() => { if (!active) onRecordingChange({ action, held: "" }); }}
+        onKeyDown={onKeyDown}
+        onKeyUp={onKeyUp}
+        onBlur={() => { if (active) onRecordingChange(null); }}>
+        {chipText}
+      </button>
+    </div>
+  );
+}
+
 export function WritingAssistsMenu({
   preferences,
   onPreferencesChange,
@@ -301,12 +380,26 @@ export function WritingAssistsMenu({
   onSaveGroqKey,
   onGetGroqKey,
   onOpenPrivacy,
+  onRecordingShortcutChange,
   keyFieldFocusRequest,
   onToggleOpen,
   onSetCorrectorEnabled,
   onSetAutocompleteEnabled
 }: WritingAssistsMenuProps) {
   const shortcutActionLabels = { continue: labels.continueKey, sentence: labels.sentenceKey, paragraph: labels.paragraphKey, idea: labels.ideaKey };
+  const [recording, setRecording] = useState<ShortcutRecording | null>(null);
+  // Closing the popover (or turning autocomplete off) ends any recording.
+  useEffect(() => {
+    if (!open || !autocompleteEnabled) setRecording(null);
+  }, [open, autocompleteEnabled]);
+  const isRecording = recording !== null;
+  const recordingChange = useRef(onRecordingShortcutChange);
+  recordingChange.current = onRecordingShortcutChange;
+  useEffect(() => {
+    if (!isRecording) return;
+    recordingChange.current?.(true);
+    return () => recordingChange.current?.(false);
+  }, [isRecording]);
   return (
     <div className="writing-assists-menu" ref={menuRef}>
       <button
@@ -337,19 +430,9 @@ export function WritingAssistsMenu({
           />
           {autocompleteEnabled ? <>
             {autocompleteShortcutActions.map((action) => (
-              <label className="writing-assist-row" key={action}>
-                <RowCopy label={shortcutActionLabels[action]} />
-                {/* The chip shows the compact key; the native select sits invisibly on top of it. */}
-                <span className="writing-assist-key-select">
-                  <span aria-hidden="true">{compactShortcutLabel(preferences.shortcuts[action])}</span>
-                  <ChevronDown size={11} aria-hidden="true" />
-                  <select value={preferences.shortcuts[action]} aria-label={shortcutActionLabels[action]}
-                    onChange={(event) => onPreferencesChange({ ...preferences, shortcuts: { ...preferences.shortcuts, [action]: event.target.value } })}>
-                    {autocompleteShortcutChoices.map((key) => <option key={key} value={key}
-                      disabled={key !== preferences.shortcuts[action] && Object.values(preferences.shortcuts).includes(key)}>{shortcutLabel(key)}</option>)}
-                  </select>
-                </span>
-              </label>
+              <ShortcutRow key={action} action={action} preferences={preferences} labels={labels}
+                rowLabels={shortcutActionLabels} recording={recording} onRecordingChange={setRecording}
+                onPreferencesChange={onPreferencesChange} />
             ))}
             <KeyTextRow label={labels.accept} keyText="Tab" />
             <KeyTextRow label={labels.alternatives} keyText={`${compactShortcutLabel("Alt")} ↑↓`} />
