@@ -10,28 +10,32 @@
  * value, add a semantic token here first — never a one-off elsewhere.
  */
 :root {
-  /* ---- Surfaces — one luminous canvas, three receding chrome planes ---- */
-  --editor: #fffefa; /* writing canvas + true inputs + chrome panels (the bright page) */
-  /* Chrome recedes: panels/rails sit just a hair off the canvas so the document
-     text — not the support around it — holds the eye. Near-white, like the
-     typography popover. */
-  --card: #fbfaf4; /* chrome panels & rails: file tree, agent panel, topbar, headers */
-  --paper: #f4f3ec; /* app ground behind everything + neutral hovers */
-  --sidebar: #fbfaf4; /* alias of --card; kept for any legacy refs */
+  /* ---- Surfaces — paper premium: a warm page, neutral light chrome ---- */
+  --editor: #fdfcf8; /* the page: writing canvas + true inputs */
+  /* Chrome recedes by tone, not lines: panels/rails sit a hair off the page so
+     the document text — not the support around it — holds the eye. */
+  --card: #faf9f6; /* chrome panels & rails: file tree, topbar, headers */
+  --paper: #f3f2ef; /* app ground behind everything + neutral hovers */
+  --sidebar: #faf9f6; /* the sidebar plane; same value as --card */
 
-  /* ---- Ink — six steps, each with one job; --muted-2 is the legible floor ---- */
-  --ink-1: #1f211f; /* prose, primary headings, active filename */
-  --ink-2: #272a26; /* default chrome text */
-  --ink-3: #2f332e; /* soft: secondary headings, tree rows at rest */
-  --muted-1: #52584f; /* secondary text, icon glyphs */
-  --muted-2: #62675f; /* meta / caption floor (>=4.3:1) */
-  --muted-3: #767a72; /* decorative / disabled only */
+  /* ---- Ink — neutral greys (no olive), each with one job; --muted-2 is the legible floor ---- */
+  --ink-1: #1d1d1f; /* prose, primary headings, active filename */
+  --ink-2: #2c2c2e; /* default chrome text */
+  --ink-3: #37373a; /* soft: secondary headings, tree rows at rest */
+  --muted-1: #5f5f64; /* secondary text */
+  --muted-2: #6e6e73; /* meta / caption floor (>=4.3:1 on page and chrome) */
+  --muted-3: #9c9ca0; /* decorative / disabled only — never for text that must be read */
+  --icon: #8e8e93; /* icon glyphs at rest (>=3:1 on chrome, WCAG 1.4.11) */
   --ink-inverse: #fffdf6; /* text on inverse surfaces + on accent fills */
 
   /* ---- Borders — three hairlines, tuned to read on the surfaces above ---- */
-  --hairline: #e3e0d6; /* default 1px rule: dividers, panel edges, table cells */
-  --hairline-strong: #d9d7cc; /* popover / overlay edges */
-  --border-control: #cfcec3; /* input / button outlines (the interactive edge) */
+  --hairline: #ecebe7; /* default 1px rule: dividers, panel edges, table cells */
+  --hairline-strong: #e3e2dd; /* popover / overlay edges */
+  --border-control: #d9d8d3; /* input / button outlines (the interactive edge) */
+
+  /* ---- Scrollbars — thin, no track, a faint rounded thumb ---- */
+  --scrollbar-thumb: #dddcd7; /* thumb at rest, close to --hairline-strong */
+  --scrollbar-thumb-hover: #c8c7c2; /* one step darker on hover / drag */
 
   /* ---- Accent — graphite carries every interactive signal ---- */
   --accent: #3a3f47;
@@ -50,9 +54,10 @@
   --agent-pulse: rgba(232, 146, 10, 0.35);
 
   /* ---- Neutral interaction washes ---- */
-  --hover-wash: rgba(214, 211, 198, 0.32); /* hover/selection on cream chrome */
+  --hover-wash: rgba(60, 60, 64, 0.045); /* neutral hover on light chrome */
   --hover-wash-light: rgba(255, 255, 255, 0.7); /* hover on the file tree */
-  --row-wash: rgba(105, 107, 96, 0.13); /* subtle row tint (pending/active rows) */
+  --row-wash: rgba(100, 100, 104, 0.12); /* subtle row tint (pending/active rows) */
+  --row-selected: #f0efeb; /* selected / active row fill in chrome lists */
 
   /* ---- Focus (accessibility) — one ring everywhere ---- */
   --focus-ring: 0 0 0 2px rgba(60, 66, 74, 0.18);
@@ -104,7 +109,7 @@
   --shadow-launch: 0 18px 54px rgba(40, 42, 36, 0.07);
   --shadow-sm: 0 1px 3px rgba(36, 38, 34, 0.08);
   --ring-accent-soft: 0 0 0 2px rgba(60, 66, 74, 0.1); /* input focus inner */
-  --ring-paper: 0 0 0 2px rgba(243, 242, 236, 0.9); /* selected-on-cream ring */
+  --ring-paper: 0 0 0 2px rgba(243, 242, 239, 0.9); /* selected-on-ground ring */
   --glow-off: inset 0 0 0 0 rgba(232, 146, 10, 0); /* working-glow keyframe start */
   --glow-on: inset 0 0 26px 1px var(--agent-pulse); /* working-glow peak */
   --rail: inset 2px 0 0 var(--accent-rail); /* active-file left rail */
@@ -117,15 +122,16 @@
 
   /* ---- Type families — one each ---- */
   --font-serif: "Iowan Old Style", "New York", ui-serif, Georgia, Cambria, "Times New Roman", serif;
-  --font-sans: "Avenir Next", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif; /* the system UI font */
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
-  /* ---- Type scale — chrome/sans (6 sizes) ---- */
+  /* ---- Type scale — chrome/sans (7 sizes) ---- */
   --text-display: 3rem; /* launch H1 */
   --text-title: 1.5rem; /* empty-state title / large headings */
   --text-lg: 1.05rem; /* subsection, assistant H1 */
   --text-md: 0.9rem; /* chrome body default */
   --text-sm: 0.8rem; /* secondary / dense rows */
+  --text-ui: 0.8125rem; /* 13px: sidebar rows and chrome labels */
   --text-xs: 0.72rem; /* meta, caption, eyebrow, tooltip, timestamp */
 
   /* ---- Type scale — serif canvas headings (a separate prose system) ---- */

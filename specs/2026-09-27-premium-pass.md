@@ -265,9 +265,9 @@ State is tracked in this file's "Progress" section below.
 
 ## Progress
 
-- [ ] Stage 1 — foundations
+- [x] Stage 1 — foundations (tokens, system font, `Icon` 16/1.5, overflow clip on `.app-shell`/`.app-content`/`.editor-shell` only — `.sidebar` stays visible so its menus aren't cut, light scrollbars)
 - [ ] Stage 2 — window chrome
 - [ ] Stage 3 — sidebar
 - [ ] Stage 4 — settings panel
-- [ ] Stage 5 — review in the top row, rendered suggestions
+- [ ] Stage 5 — review in the top row, rendered suggestions (5.2–5.4 rendered + continuous block done early: `renderedInsert.ts`; wholly new lines get no per-word emphasis; quote bar green inside the block)
 - [ ] Stage 6 — empty state G

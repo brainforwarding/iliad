@@ -1,4 +1,5 @@
 import { Languages } from "lucide-react";
+import { Icon } from "./Icon";
 import type { RefObject } from "react";
 import type { AppLanguage } from "../i18n/appLanguage";
 
@@ -37,7 +38,7 @@ export function LanguageMenu({
         aria-expanded={open}
         onClick={onToggleOpen}
       >
-        <Languages size={16} />
+        <Icon icon={Languages} />
       </button>
 
       {open ? (

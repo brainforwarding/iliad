@@ -12,6 +12,7 @@ import {
   Search,
   X
 } from "lucide-react";
+import { Icon } from "./Icon";
 import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode, RefObject } from "react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { WorkspaceMenu } from "./WorkspaceMenu";
@@ -316,24 +317,24 @@ export function fileTreeNodeShowsPendingIndicator(node: FileTreeDisplayNode, isE
 
 function FileIcon({ node, isExpanded }: { node: FileTreeDisplayNode; isExpanded: boolean }) {
   if (node.source === "pending-create" || (node.source === "real" && node.pendingTarget?.kind === "create_file")) {
-    return <FilePlus size={16} />;
+    return <Icon icon={FilePlus} />;
   }
 
   if (node.source === "pending-delete" || (node.source === "real" && node.pendingTarget?.kind === "delete_file")) {
-    return <FileX size={16} />;
+    return <Icon icon={FileX} />;
   }
 
   const kind = displayNodeKind(node);
 
   if (kind === "directory") {
-    return isExpanded ? <FolderOpen size={16} /> : <Folder size={16} />;
+    return isExpanded ? <Icon icon={FolderOpen} /> : <Icon icon={Folder} />;
   }
 
   if (kind === "markdown") {
-    return <FileText size={16} strokeWidth={1.5} />;
+    return <Icon icon={FileText} />;
   }
 
-  return <File size={16} strokeWidth={1.6} />;
+  return <Icon icon={File} />;
 }
 
 export function PendingReviewStrip({
@@ -380,14 +381,14 @@ export function PendingReviewStrip({
 
 function RealFileIcon({ node, isExpanded }: { node: FileTreeNode; isExpanded: boolean }) {
   if (node.kind === "directory") {
-    return isExpanded ? <FolderOpen size={16} /> : <Folder size={16} />;
+    return isExpanded ? <Icon icon={FolderOpen} /> : <Icon icon={Folder} />;
   }
 
   if (node.kind === "markdown") {
-    return <FileText size={16} strokeWidth={1.5} />;
+    return <Icon icon={FileText} />;
   }
 
-  return <File size={16} strokeWidth={1.6} />;
+  return <Icon icon={File} />;
 }
 
 function nodeFileNameFromInput(node: FileTreeNode, value: string) {
@@ -587,7 +588,7 @@ function FileTreeSearchControl({
     <div className="file-tree-search" role="search" aria-label={labels.findInFileTree}>
       <div className="file-tree-search-input-row">
         <div className="file-tree-search-input-wrap">
-          <Search size={14} aria-hidden="true" />
+          <Icon icon={Search} />
           <input
             ref={inputRef}
             id={inputId}
@@ -608,7 +609,7 @@ function FileTreeSearchControl({
             disabled={!query}
             onClick={onClear}
           >
-            <X size={13} />
+            <Icon icon={X} />
           </button>
         </div>
       </div>
@@ -703,7 +704,7 @@ function FileTreeSearchControl({
             disabled={activeNavigationCount === 0}
             onClick={onPrevious}
           >
-            <ChevronUp size={14} />
+            <Icon icon={ChevronUp} />
           </button>
           <button
             type="button"
@@ -713,7 +714,7 @@ function FileTreeSearchControl({
             disabled={activeNavigationCount === 0}
             onClick={onNext}
           >
-            <ChevronDown size={14} />
+            <Icon icon={ChevronDown} />
           </button>
           <button
             type="button"
@@ -967,7 +968,7 @@ function TreeRow({
               </span>
               {opensExternally && !hasPendingIndicator ? (
                 <span className="tree-external-hint" aria-hidden="true">
-                  <ExternalLink size={13} strokeWidth={1.7} />
+                  <Icon icon={ExternalLink} />
                 </span>
               ) : null}
               {hasPendingIndicator ? (
@@ -2292,7 +2293,7 @@ export function FileTree({
             aria-label={labels.findInFileTree}
             onClick={(event) => openSearch(event.currentTarget)}
           >
-            <Search size={17} />
+            <Icon icon={Search} />
           </button>
           <button
             type="button"
@@ -2302,7 +2303,7 @@ export function FileTree({
             disabled={creatingFile}
             onClick={onCreateFile}
           >
-            <FilePlus size={17} />
+            <Icon icon={FilePlus} />
           </button>
           <button
             type="button"
@@ -2312,7 +2313,7 @@ export function FileTree({
             disabled={creatingFolder}
             onClick={onCreateFolder}
           >
-            <FolderPlus size={17} />
+            <Icon icon={FolderPlus} />
           </button>
         </div>
       </div>

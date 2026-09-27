@@ -2,6 +2,7 @@ import { StateField, type EditorState, type Range } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
 import type { DisplayReviewHunk } from "./diff";
 import { intralineTokenDiff, type IntralineRange } from "./intralineDiff";
+import { fencedCodeLines, renderInsertedLines, type InsertedLineRender } from "./renderedInsert";
 
 interface ReviewExtensionOptions {
   mode: "edit_file" | "create_file" | "delete_file";
@@ -56,7 +57,9 @@ class InsertedTextWidget extends WidgetType {
     private readonly active: boolean,
     private readonly onAcceptHunk: ((hunkId: string) => void) | undefined,
     private readonly onRejectHunk: ((hunkId: string) => void) | undefined,
-    private readonly buttons: ReviewButtonOptions
+    private readonly buttons: ReviewButtonOptions,
+    /** The lines are added inside a code fence: show them as source. */
+    private readonly forceRaw = false
   ) {
     super();
     this.text = lines.join("\n");
@@ -66,12 +69,18 @@ class InsertedTextWidget extends WidgetType {
     return (
       this.hunkId === other.hunkId &&
       this.active === other.active &&
+      this.forceRaw === other.forceRaw &&
       sameLineRanges(this.changedRangesByLine, other.changedRangesByLine) &&
       this.onAcceptHunk === other.onAcceptHunk &&
       this.onRejectHunk === other.onRejectHunk &&
       sameButtonOptions(this.buttons, other.buttons) &&
       this.text === other.text
     );
+  }
+
+  /** How each added line is shown: rendered Markdown, or source where rendering could hide a change. */
+  renderedLines(): InsertedLineRender[] {
+    return renderInsertedLines(this.lines, this.changedRangesByLine, { forceRaw: this.forceRaw });
   }
 
   toDOM() {
@@ -83,19 +92,38 @@ class InsertedTextWidget extends WidgetType {
     content.className = "cm-ai-review-source-block";
     wrapper.append(content);
 
-    for (let index = 0; index < this.lines.length; index += 1) {
+    for (const line of this.renderedLines()) {
       const row = document.createElement("div");
-      row.className = `cm-ai-review-source-row ${reviewSourceLineClasses(this.lines[index])}`;
+      let empty: boolean;
 
-      const sourceText = document.createElement("span");
-      sourceText.className = `cm-ai-review-line-inserted${this.active ? " is-active" : ""}`;
-      appendSourceParts(sourceText, this.lines[index], this.changedRangesByLine[index] ?? [], "cm-ai-review-inserted-token");
+      if (line.kind === "raw") {
+        row.className = `cm-ai-review-source-row ${reviewSourceLineClasses(line.text)}`;
+        appendSourceParts(row, line.text, line.changedRanges, "cm-ai-review-inserted-token");
+        empty = line.text.length === 0;
+      } else {
+        row.className = ["cm-ai-review-source-row", "cm-ai-review-rendered-line", ...line.lineClasses].join(" ");
 
-      if (this.lines[index].length === 0) {
-        sourceText.append(document.createTextNode("\u00a0"));
+        for (const segment of line.segments) {
+          const classes = segment.changed ? [...segment.classes, "cm-ai-review-inserted-token"] : segment.classes;
+
+          if (classes.length === 0) {
+            row.append(document.createTextNode(segment.text));
+            continue;
+          }
+
+          const span = document.createElement("span");
+          span.className = classes.join(" ");
+          span.textContent = segment.text;
+          row.append(span);
+        }
+
+        empty = line.segments.length === 0;
       }
 
-      row.append(sourceText);
+      if (empty) {
+        row.append(document.createTextNode("\u00a0"));
+      }
+
       content.append(row);
     }
 
@@ -373,6 +401,16 @@ function buildDecorations(state: EditorState, options: ReviewExtensionOptions): 
     return Decoration.set(ranges, true);
   }
 
+  let fencedLines: Set<number> | null = null;
+  const anchorInFence = (lineNumber: number) => {
+    if (lineNumber <= 0) {
+      return false;
+    }
+
+    fencedLines ??= fencedCodeLines(state.doc.toString().split("\n"));
+    return fencedLines.has(lineNumber);
+  };
+
   for (const hunk of options.hunks) {
     const active = hunk.id === options.activeHunkId;
     const lineDiffs = hunkLineDiffs(hunk);
@@ -437,7 +475,8 @@ function buildDecorations(state: EditorState, options: ReviewExtensionOptions): 
             active,
             options.onAcceptHunk,
             options.onRejectHunk,
-            options
+            options,
+            anchorInFence(hunk.displayAnchorLine) || (hunk.oldLines.length > 0 && anchorInFence(hunk.displayOldStartLine))
           ),
           side: hunk.displayAnchorLine <= 0 ? -1 : 1,
           block: true

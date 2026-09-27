@@ -14,6 +14,7 @@ import { imageDropPasteExtension } from "../editor/imageDropPaste";
 import { ideaAutocompleteExtension, runAutocompleteAction, type IdeaAutocompleteStatus, type IdeaAutocompleteSuggestionKind } from "../editor/ideaAutocomplete/extension";
 import { compactShortcutLabel, defaultAutocompletePreferences, type AutocompletePreferences } from "../editor/ideaAutocomplete/options";
 import { Check, ChevronLeft, ChevronRight, RotateCw, X } from "lucide-react";
+import { Icon } from "./Icon";
 import {
   selectionCommentsExtension,
   type SelectionCommentPositionUpdate,
@@ -1106,7 +1107,7 @@ export function EditorPane({
           <h1>{labels.emptyTitle}</h1>
           {onCreateDocument ? (
             <button type="button" className="editor-empty__action" onClick={onCreateDocument}>
-              <FilePlus size={16} />
+              <Icon icon={FilePlus} />
               {labels.emptyNewDocument}
             </button>
           ) : null}
@@ -1320,7 +1321,7 @@ export function EditorPane({
             style={{ left: autocompleteStatusAnchor.left, top: autocompleteStatusAnchor.top }}
             onMouseDown={(event) => event.preventDefault()}>
             <button type="button" onClick={() => editorView && runAutocompleteAction(editorView, "accept")}>
-              <Check size={13} />{writingAssists.labels.autocomplete.accept}<kbd>Tab</kbd>
+              <Icon icon={Check} />{writingAssists.labels.autocomplete.accept}<kbd>Tab</kbd>
             </button>
             {autocompleteStatus.kind !== "idea" ? (
               <button type="button" onClick={() => editorView && runAutocompleteAction(editorView, "longer")}>
@@ -1329,18 +1330,18 @@ export function EditorPane({
               </button>
             ) : null}
             <button type="button" onClick={() => editorView && runAutocompleteAction(editorView, "new")}>
-              <RotateCw size={13} />{writingAssists.labels.autocomplete.another}
+              <Icon icon={RotateCw} />{writingAssists.labels.autocomplete.another}
             </button>
             {(autocompleteStatus.alternativeCount ?? 0) > 1 ? <>
-              <button type="button" aria-label={writingAssists.labels.autocomplete.previous} onClick={() => editorView && runAutocompleteAction(editorView, "previous")}><ChevronLeft size={13} /></button>
+              <button type="button" aria-label={writingAssists.labels.autocomplete.previous} onClick={() => editorView && runAutocompleteAction(editorView, "previous")}><Icon icon={ChevronLeft} /></button>
               <span>{(autocompleteStatus.alternativeIndex ?? 0) + 1}/{autocompleteStatus.alternativeCount}</span>
-              <button type="button" aria-label={writingAssists.labels.autocomplete.next} onClick={() => editorView && runAutocompleteAction(editorView, "next")}><ChevronRight size={13} /></button>
+              <button type="button" aria-label={writingAssists.labels.autocomplete.next} onClick={() => editorView && runAutocompleteAction(editorView, "next")}><Icon icon={ChevronRight} /></button>
             </> : null}
             <button type="button" onClick={() => {
               setAutocompleteSteerDraft("");
               setAutocompleteSteer({ kind: autocompleteStatus.kind ?? "sentence", ...autocompleteStatusAnchor });
             }}>{writingAssists.labels.autocomplete.steer}</button>
-            <button type="button" aria-label={writingAssists.labels.autocomplete.dismiss} onClick={() => editorView && runAutocompleteAction(editorView, "dismiss")}><X size={13} /></button>
+            <button type="button" aria-label={writingAssists.labels.autocomplete.dismiss} onClick={() => editorView && runAutocompleteAction(editorView, "dismiss")}><Icon icon={X} /></button>
           </div>
         ) : null}
         {autocompleteSteer && writingAssists ? (

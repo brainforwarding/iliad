@@ -1,4 +1,5 @@
 import { PenLine } from "lucide-react";
+import { Icon } from "./Icon";
 import { useEffect, useRef, useState, type Dispatch, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject, type SetStateAction } from "react";
 import {
   autocompleteShortcutActions,
@@ -411,7 +412,7 @@ export function WritingAssistsMenu({
         aria-expanded={open}
         onClick={onToggleOpen}
       >
-        <PenLine size={16} />
+        <Icon icon={PenLine} />
       </button>
 
       {open ? (

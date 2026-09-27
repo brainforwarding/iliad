@@ -10,6 +10,7 @@ import {
   PanelLeftOpen,
   X
 } from "lucide-react";
+import { Icon } from "./components/Icon";
 import { useCliBridge, type CliOpenSteps } from "./app/useCliBridge";
 import { useDocumentHistory, type DocumentHistoryDirection } from "./app/useDocumentHistory";
 import {
@@ -1453,7 +1454,7 @@ export default function App() {
           <span className="launch-name">{strings.appName}</span>
           <h1>{isInitializing ? strings.launch.openingWorkspace : strings.launch.localMarkdownWriting}</h1>
           <button type="button" className="primary-button" onClick={openWorkspace} disabled={isInitializing}>
-            <FolderOpen size={18} />
+            <Icon icon={FolderOpen} />
             {strings.launch.openFolder}
           </button>
           {error ? <p className="error-text">{error}</p> : null}
@@ -1506,7 +1507,7 @@ export default function App() {
                 aria-label={sidebarToggleLabel}
                 onClick={() => setSidebarOpen((open) => !open)}
               >
-                {sidebarOpen ? <PanelLeftClose size={17} /> : <PanelLeftOpen size={17} />}
+                {sidebarOpen ? <Icon icon={PanelLeftClose} /> : <Icon icon={PanelLeftOpen} />}
               </button>
             )}
             <button
@@ -1517,7 +1518,7 @@ export default function App() {
               disabled={!canGoBack}
               onClick={() => void navigateDocumentHistory("back")}
             >
-              <ChevronLeft size={17} />
+              <Icon icon={ChevronLeft} />
             </button>
             <button
               type="button"
@@ -1527,7 +1528,7 @@ export default function App() {
               disabled={!canGoForward}
               onClick={() => void navigateDocumentHistory("forward")}
             >
-              <ChevronRight size={17} />
+              <Icon icon={ChevronRight} />
             </button>
           </div>
 
@@ -1540,7 +1541,7 @@ export default function App() {
                 aria-label={strings.documentClose.close}
                 onClick={requestCloseDocument}
               >
-                <X size={13} strokeWidth={2.2} />
+                <Icon icon={X} />
               </button>
             </div>
           ) : (
@@ -1608,7 +1609,7 @@ export default function App() {
               aria-label={focusModeLabel}
               onClick={() => setFocusMode((enabled) => !enabled)}
             >
-              {focusMode ? <Minimize2 size={16} /> : <Focus size={16} />}
+              {focusMode ? <Icon icon={Minimize2} /> : <Icon icon={Focus} />}
             </button>
           </div>
         </div>

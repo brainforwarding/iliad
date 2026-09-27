@@ -1,4 +1,5 @@
 import { ALargeSmall } from "lucide-react";
+import { Icon } from "./Icon";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import {
   defaultEditorFontPreset,
@@ -51,7 +52,7 @@ export function TypographyMenu({
         aria-expanded={open}
         onClick={onToggleOpen}
       >
-        <ALargeSmall size={17} />
+        <Icon icon={ALargeSmall} />
       </button>
 
       {open ? (

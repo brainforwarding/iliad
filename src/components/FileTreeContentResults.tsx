@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
+import { Icon } from "./Icon";
 import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 import {
   contentSearchFileRows,
@@ -92,7 +93,7 @@ function ContentFolderRow({
         aria-label={node.relativePath}
         onClick={() => onToggleExpanded(node.id)}
       >
-        {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        {expanded ? <Icon icon={ChevronDown} size={12} /> : <Icon icon={ChevronRight} size={12} />}
       </button>
       <button
         type="button"
@@ -102,7 +103,7 @@ function ContentFolderRow({
         onClick={() => onToggleExpanded(node.id)}
       >
         <span className="content-search-icon" aria-hidden="true">
-          {expanded ? <FolderOpen size={15} /> : <Folder size={15} />}
+          {expanded ? <Icon icon={FolderOpen} /> : <Icon icon={Folder} />}
         </span>
         <span className="content-search-name">{node.name}</span>
         <span className="content-search-count-badge" aria-hidden="true">
@@ -148,7 +149,7 @@ function ContentFileRow({
         aria-label={node.file.relativePath}
         onClick={() => onToggleExpanded(node.id)}
       >
-        {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        {expanded ? <Icon icon={ChevronDown} size={12} /> : <Icon icon={ChevronRight} size={12} />}
       </button>
       <button
         type="button"
@@ -163,7 +164,7 @@ function ContentFileRow({
         }}
       >
         <span className="content-search-icon" aria-hidden="true">
-          <FileText size={15} strokeWidth={1.5} />
+          <Icon icon={FileText} />
         </span>
         <span className="content-search-name">{node.displayName}</span>
         <span className="content-search-count-badge" aria-hidden="true">

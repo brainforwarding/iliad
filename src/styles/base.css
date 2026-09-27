@@ -31,6 +31,30 @@ button {
   color: inherit;
 }
 
+/* Light scrollbars everywhere (tree, editor surface, popovers, search
+   results): thin, no track, a faint rounded thumb that darkens on hover. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background-color: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

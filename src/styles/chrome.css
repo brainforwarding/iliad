@@ -4,6 +4,9 @@
   height: 100%;
   grid-template-rows: 44px minmax(0, 1fr);
   background: var(--editor);
+  /* clip, not hidden: an outer wrapper must never be a scroll container that
+     focus or scrollIntoView can shift. Inner scroll owners stay scrollable. */
+  overflow: clip;
 }
 
 .app-topbar {
@@ -131,7 +134,7 @@
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   background: transparent;
-  color: var(--muted-1);
+  color: var(--icon);
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
@@ -255,7 +258,7 @@
   height: calc(100vh - 44px);
   min-height: 0;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-  overflow: hidden;
+  overflow: clip; /* see .app-shell */
 }
 
 .sidebar-is-collapsed .app-content {

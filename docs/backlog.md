@@ -154,3 +154,11 @@ an `iliad status` hint when the installed copy is older than the bundle's.
 
 The cask ships from the own tap `brainforwarding/homebrew-tap`. Submit to
 `homebrew/cask` once the project meets Homebrew's notability bar.
+
+## From the premium pass (2026-09-27, `specs/2026-09-27-premium-pass.md`)
+
+- Review: a one-line word insertion is still drawn by `SourceLineWidget` as raw source; render it like the inserted block.
+- Review: a word change next to `**`/backticks (e.g. `**big dog**` → `**big cat**`) touches the mark, so that line falls back to source; a mark-aware word diff would keep it rendered.
+- Review: when a hunk edits a line and adds lines before it, the intraline diff pairs the old line with the first new line, so the whole removed line is marked word by word.
+- Tree: keyboard access to the context menu (review finding, deferred).
+

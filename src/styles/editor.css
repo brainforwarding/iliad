@@ -5,7 +5,7 @@
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr);
   background: var(--editor);
-  overflow: hidden;
+  overflow: clip; /* never a scroll container; .editor-surface owns scrolling */
 }
 
 .editor-review-toolbar {
@@ -359,7 +359,7 @@
 .editor-ai-notice-dismiss {
   padding: 4px;
   background: transparent;
-  color: var(--muted-2);
+  color: var(--icon);
 }
 
 .editor-ai-notice-action:hover,
@@ -863,12 +863,21 @@
   padding: 0;
 }
 
+/* Added text is one continuous block: the green and the rail span the whole
+   block at full width, with no gaps between lines (spec 2026-09-27 stage 5). */
 .cm-ai-review-source-block {
   display: block;
   box-sizing: border-box;
   width: 100%;
-  padding: 1px 0;
+  padding: 2px 0;
+  border-radius: 2px;
+  background-color: var(--diff-ins-soft);
+  box-shadow: inset 2px 0 0 var(--diff-ins-strong);
   color: var(--diff-ins-ink);
+}
+
+.cm-ai-review-inserted-block.is-active .cm-ai-review-source-block {
+  box-shadow: inset 2px 0 0 var(--diff-ins-ink);
 }
 
 .cm-ai-review-source-row {
@@ -876,7 +885,17 @@
   box-sizing: border-box;
   width: 100%;
   margin: 0;
+  padding: 0 2px 0 6px;
   white-space: pre-wrap;
+}
+
+/* Rendered rows reuse the visual-Markdown line classes; keep the review ink. */
+.cm-ai-review-source-block .cm-ai-review-rendered-line {
+  color: inherit;
+}
+
+.cm-ai-review-source-block .cm-md-link {
+  cursor: inherit;
 }
 
 .cm-ai-review-inline-source {
@@ -900,4 +919,10 @@
   border-color: var(--hairline-strong);
   color: var(--muted-1);
   font-size: var(--text-xs);
+}
+
+/* A quote inside the green block takes the review green, not the document's
+   quote bar colour, so the block reads as one change. */
+.cm-ai-review-source-block .cm-md-blockquote-line {
+  border-left-color: var(--diff-ins-strong);
 }

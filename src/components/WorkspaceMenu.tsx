@@ -1,4 +1,5 @@
 import { ChevronDown, Download, ExternalLink, FolderOpen, RefreshCw } from "lucide-react";
+import { Icon } from "./Icon";
 import { useEffect, useRef, useState } from "react";
 import type { UpdateCheckResult, WorkspaceInfo } from "../types/iliad";
 
@@ -96,7 +97,7 @@ export function WorkspaceMenu({
         <span className="workspace-name" title={workspace.path}>
           {workspace.name}
         </span>
-        <ChevronDown size={14} className="workspace-chevron" aria-hidden="true" />
+        <Icon icon={ChevronDown} className="workspace-chevron" />
       </button>
 
       {open ? (
@@ -125,7 +126,7 @@ export function WorkspaceMenu({
               void onOpenFolder();
             }}
           >
-            <FolderOpen size={15} aria-hidden="true" />
+            <Icon icon={FolderOpen} />
             <span>{labels.openFolder}</span>
             <kbd>⌘O</kbd>
           </button>
@@ -164,7 +165,7 @@ export function WorkspaceMenu({
               void onCheckForUpdates();
             }}
           >
-            <RefreshCw size={15} aria-hidden="true" />
+            <Icon icon={RefreshCw} />
             <span>{updateChecking ? updateLabels.checking : updateLabels.checkForUpdates}</span>
           </button>
 
@@ -182,12 +183,12 @@ export function WorkspaceMenu({
                 <div className="workspace-update-actions">
                   {updateStatus.downloadUrl ? (
                     <button type="button" onClick={() => void onDownloadUpdate()}>
-                      <Download size={14} aria-hidden="true" />
+                      <Icon icon={Download} />
                       <span>{updateLabels.download}</span>
                     </button>
                   ) : null}
                   <button type="button" onClick={() => void onViewUpdateRelease()}>
-                    <ExternalLink size={14} aria-hidden="true" />
+                    <Icon icon={ExternalLink} />
                     <span>{updateLabels.viewRelease}</span>
                   </button>
                 </div>

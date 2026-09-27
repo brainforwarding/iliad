@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { Icon } from "./Icon";
 import type { CSSProperties } from "react";
 import type { AiNotice, AiNoticeLabels } from "../editor/aiNotice";
 
@@ -37,7 +38,7 @@ export function AiNoticeBar({
         </button>
       ) : null}
       <button type="button" className="editor-ai-notice-dismiss" aria-label={labels.dismiss} onClick={onDismiss}>
-        <X size={12} aria-hidden="true" />
+        <Icon icon={X} />
       </button>
     </div>
   );
