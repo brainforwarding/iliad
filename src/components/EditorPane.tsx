@@ -935,10 +935,8 @@ export function EditorPane({
       return null;
     }
 
-    if (autocompleteStatus.state === "requesting") {
-      return writingAssists.labels.autocomplete.working;
-    }
-
+    // While requesting, the ✦ working mark at the cursor is the visible cue;
+    // the "Suggesting…" text is announced to screen readers only (below).
     if (autocompleteStatus.state !== "failed") {
       return null;
     }
@@ -1425,6 +1423,9 @@ export function EditorPane({
               setAutocompleteStatusAnchor(null);
             }}
           />
+        ) : null}
+        {writingAssists?.autocompleteEnabled && autocompleteStatus.state === "requesting" ? (
+          <div className="sr-only" role="status">{writingAssists.labels.autocomplete.working}</div>
         ) : null}
         {autocompleteStatusMessage ? (
           <div
