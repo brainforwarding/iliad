@@ -926,7 +926,7 @@
 }
 
 /* A quote inside the green block: its bar sits at the text inset (8px), in
-   the review green, so it never doubles up with the block's rail at the
+   the dark review green and 3px like a kept quote, so it never doubles up with the block's rail at the
    left edge and the rail stays one even line. */
 .cm-ai-review-source-block .cm-md-blockquote-line {
   padding-left: 22px !important;
@@ -934,9 +934,9 @@
   background-image: linear-gradient(
     to right,
     transparent 8px,
-    var(--diff-ins-strong) 8px,
-    var(--diff-ins-strong) 10px,
-    transparent 10px
+    var(--diff-ins-ink) 8px,
+    var(--diff-ins-ink) 11px,
+    transparent 11px
   );
 }
 
