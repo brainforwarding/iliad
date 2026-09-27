@@ -231,7 +231,7 @@ describe("whole-document context and preferences per route (spec 2026-09-27)", (
     expect(user).toContain("<<<PREFERENCES>>>\nShort sentences.\n<<<END_PREFERENCES>>>");
   });
 
-  it("free route: autocomplete and selection still send v1 tasks, exactly as before", async () => {
+  it("free route: autocomplete and selection send v2 tasks with the document, the outline and the preferences", async () => {
     const proxy = await startFakeAiProxy();
     cleanups.push(() => proxy.close());
     const service = new WritingAiService(await userDataDir(), {
@@ -241,10 +241,20 @@ describe("whole-document context and preferences per route (spec 2026-09-27)", (
       diagnostics: quietDiagnostics()
     });
     await handleAutocompleteIpc(event, contextRequest, deps(service));
-    const generate = proxy.requests.find((request) => request.path === "/v1/generate");
-    expect(generate?.body).toEqual({
-      v: 1, task: "autocomplete", language: "en", kind: "sentence", extend: false, prefix: "She walked into the ", suffix: "",
-      documentTitle: "a", headingPath: ["Harbor", "Morning"], nearbyHeadings: [], direction: "", avoid: []
+    const selectionFrom = DOC.indexOf("Mara");
+    await handleTightenIpc(event, {
+      requestId: "t", text: "Mara Quint ran the Kestrel ferry.", selection: { from: 0, to: 33 }, language: "en", mode: "edit", instruction: "Expand.",
+      document: { text: DOC, selectionFrom, selectionTo: selectionFrom + 33 }, preferences: "  Short sentences.  "
+    }, { service, controllers: new Map() });
+    const generated = proxy.requests.filter((request) => request.path === "/v1/generate").map((request) => request.body);
+    expect(generated[0]).toEqual({
+      v: 2, task: "autocomplete", language: "en", kind: "sentence", extend: false, document: `${DOC}<<<CURSOR>>>`,
+      outline: "# Harbor\n## Morning  ← cursor", preferences: "Short sentences.",
+      documentTitle: "a", headingPath: ["Harbor", "Morning"], direction: "", avoid: []
+    });
+    expect(generated[1]).toEqual({
+      v: 2, task: "selection", language: "en", mode: "edit", instruction: "Expand.", text: "Mara Quint ran the Kestrel ferry.",
+      selection: { from: 0, to: 33 }, document: "# Harbor\n\n<<<PASSAGE>>>\n\n## Morning\n\nShe walked into the ", preferences: "Short sentences."
     });
   });
 

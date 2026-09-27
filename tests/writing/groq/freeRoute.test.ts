@@ -105,7 +105,7 @@ describe("free route (Iliad AI proxy)", () => {
     expect(generate.contentType).toBe("application/json");
     expect(generate.authorization).toMatch(/^Bearer v1\.fake\./);
     // A structured task: never messages, model or params.
-    expect(generate.body).toMatchObject({ v: 1, task: "autocomplete", language: "en", kind: "sentence", prefix: "She walked into the " });
+    expect(generate.body).toMatchObject({ v: 2, task: "autocomplete", language: "en", kind: "sentence" });
     expect(generate.body).not.toHaveProperty("messages");
     expect(generate.body).not.toHaveProperty("model");
 

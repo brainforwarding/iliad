@@ -78,8 +78,10 @@ export type WritingAiRouteKind = "free" | "own-key";
  * (specs 2026-09-27 name-untitled-documents and ai-context-and-preferences).
  */
 export const FREE_ROUTE_PROMPT_VERSIONS = Object.freeze({
-  autocomplete: 1,
-  selection: 1,
+  // 0.5.0: the Worker serving v2 is deployed first, so the free route sends v2
+  // for every task. This map and `promptVersionFor` can go in a later cleanup.
+  autocomplete: 2,
+  selection: 2,
   name: 2
 } as const satisfies Record<WritingAiTaskKind, PromptVersion>);
 

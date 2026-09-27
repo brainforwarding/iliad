@@ -75,9 +75,9 @@ describe("prompt versions", () => {
     expect(PROMPT_VERSIONS).toEqual([1, 2]);
   });
 
-  it("free route: only the name task as v2 (autocomplete and selection stay on v1 until the Worker with v2 ships)", () => {
-    expect(FREE_ROUTE_PROMPT_VERSIONS).toEqual({ autocomplete: 1, selection: 1, name: 2 });
-    expect(["autocomplete", "selection", "name"].map((task) => promptVersionFor("free", task as "name"))).toEqual([1, 1, 2]);
+  it("free route: v2 for every task (0.5.0 ships with the Worker serving v2)", () => {
+    expect(FREE_ROUTE_PROMPT_VERSIONS).toEqual({ autocomplete: 2, selection: 2, name: 2 });
+    expect(["autocomplete", "selection", "name"].map((task) => promptVersionFor("free", task as "name"))).toEqual([2, 2, 2]);
   });
 
   it("own key: v2 for every task", () => {

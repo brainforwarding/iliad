@@ -51,7 +51,9 @@ Built-in AI works on first launch with no account and no key. It runs on Groq
 (`openai/gpt-oss-120b`) through Iliad's server (the Iliad AI proxy), with a
 daily limit; when today's free AI runs out, Iliad says when it is back (00:00
 UTC, shown in your local time). Text is sent only when you ask (a length key
-or the ✦ AI menu); see https://iliad.md/privacy/ for what each service sees.
+or the ✦ AI menu), or once to name an untitled document you created: the
+current document (trimmed for long ones) and your writing preferences, if you
+set any. See https://iliad.md/privacy/ for what each service sees.
 
 To skip Iliad's server and its limit, open **Writing assists** and use **Use my
 key** in the AI row: paste a Groq API key (https://console.groq.com/keys). It

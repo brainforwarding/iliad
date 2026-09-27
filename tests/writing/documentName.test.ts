@@ -134,7 +134,7 @@ describe("cleanDocumentNameOutput", () => {
 });
 
 describe("ai-name:run", () => {
-  it("sends the name task as v2 on the free route while autocomplete and selection stay on v1", async () => {
+  it("sends the name, autocomplete and selection tasks as v2 on the free route", async () => {
     const server = await proxy();
     const { service } = await freeService(server);
 
@@ -150,10 +150,13 @@ describe("ai-name:run", () => {
 
     const generated = server.requests.filter((request) => request.path === "/v1/generate").map((request) => request.body);
     expect(generated[0]).toEqual({ v: 2, task: "name", language: "en", text: TEXT });
-    expect(generated.slice(1).map((body) => (body as { v: number; task: string }).v)).toEqual([1, 1]);
+    expect(generated.slice(1).map((body) => {
+      const { v, task } = body as { v: number; task: string };
+      return { v, task };
+    })).toEqual([{ v: 2, task: "autocomplete" }, { v: 2, task: "selection" }]);
   });
 
-  it("answers client_outdated when the Worker does not serve v2 yet (autocomplete keeps working)", async () => {
+  it("answers client_outdated on every free-route task when the Worker does not serve v2", async () => {
     const server = await proxy();
     server.state.supportedPromptVersions = [1];
     const { service } = await freeService(server);
@@ -164,7 +167,13 @@ describe("ai-name:run", () => {
         requestId: "a1", workspaceSessionId: "s", documentRelativePath: "a.md", language: "en", prefix: "She walked into the ",
         suffix: "", headingPath: [], documentTitle: "a", nearbyHeadings: [], suggestionKind: "sentence"
       }, { service, controllers: new Map(), resolveWorkspaceRootForSession: () => "/ws" })
-    ).toEqual({ ok: true, insert: "a quiet line from the fake proxy." });
+    ).toEqual({ ok: false, reason: "client_outdated" });
+    expect(
+      await handleTightenIpc(event, { requestId: "t1", text: "This is really wordy.", selection: { from: 0, to: 21 }, language: "en" }, {
+        service,
+        controllers: new Map()
+      })
+    ).toMatchObject({ ok: false, reason: "client_outdated" });
   });
 
   it("passes resetAt with free_exhausted", async () => {
