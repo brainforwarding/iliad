@@ -533,34 +533,57 @@ export interface AgentApi {
   restoreChunk: (request: ReviewChunkActionRequest) => Promise<ReviewChunkActionResponse>;
 }
 
-export type UpdateCheckResult =
-  | {
-      status: "available";
-      currentVersion: string;
-      latestVersion: string;
-      releaseName: string;
-      releaseDate: string;
-      releaseUrl: string;
-      downloadUrl?: string;
-      notes?: string;
-    }
-  | {
-      status: "current";
-      currentVersion: string;
-      latestVersion: string;
-      releaseUrl?: string;
-    }
-  | {
-      status: "error";
-      currentVersion: string;
-      message: string;
-      detail?: string;
-    };
+/** Mirrors electron/updates/appUpdateState.ts (main owns it; every window mirrors it). */
+export type AppUpdateStatus =
+  | "idle"
+  | "checking"
+  | "current"
+  | "available"
+  | "downloading"
+  | "ready"
+  | "installing"
+  | "error"
+  | "unsupported";
+
+export interface AppUpdateState {
+  status: AppUpdateStatus;
+  currentVersion: string;
+  /** The newer version (available … installing, unsupported). */
+  version?: string;
+  /** Download progress, 0–100. */
+  percent?: number;
+  releaseUrl?: string;
+  /** The DMG to download by hand (unsupported only). */
+  downloadUrl?: string;
+  /** Update was clicked before the download finished: restart when it does. */
+  installWhenReady: boolean;
+  /** Windows are saving (and maybe confirming) before the restart. */
+  restartPending: boolean;
+}
+
+export type UpdatePrepareMode = "restart" | "quit";
+export type UpdatePrepareResponse = { ok: true } | { ok: false; reason: string };
 
 export interface UpdatesApi {
-  check: () => Promise<UpdateCheckResult>;
+  getState: () => Promise<AppUpdateState>;
+  /** A manual check (Check now, the app menu); resolves with the state after it. */
+  check: () => Promise<AppUpdateState>;
+  /** Update clicked: restart now, or when the download finishes. */
+  install: () => Promise<void>;
   consumePendingCheckRequest: () => Promise<boolean>;
   onCheckRequested: (listener: () => void) => () => void;
+  onStateChanged: (listener: (state: AppUpdateState) => void) => () => void;
+  /**
+   * Main asks before quitting for an update: flush saves and (for "restart")
+   * confirm a pending outside-change review. Call `waitingForWriter` while the
+   * confirmation is open, so main doesn't time the window out.
+   */
+  onPrepareRestart: (
+    listener: (
+      request: { mode: UpdatePrepareMode },
+      controls: { waitingForWriter: () => void }
+    ) => Promise<UpdatePrepareResponse>
+  ) => () => void;
 }
 
 /** Commands the app menu sends to the window it was used in. */

@@ -235,16 +235,19 @@ export function useSelectionComments({
   const flushPersist = useCallback(async () => {
     const session = sessionRef.current;
 
-    if (!session) {
-      return;
-    }
-
     try {
-      await persistSession(session);
+      if (session) {
+        await persistSession(session);
+      }
     } catch (error) {
       reportError(error);
       throw error;
     }
+
+    // Also wait for writes still in flight for documents switched away from
+    // (their failures were already reported), so a flush before quitting for an
+    // update leaves no comment write behind.
+    await Promise.all([...pendingWritesRef.current.values()]);
   }, [persistSession, reportError]);
 
   // Document open / switch: write the switched-away session, then read the

@@ -201,7 +201,7 @@ describe("FileTree sidebar chrome", () => {
     expect(html).not.toContain("lucide-file-plus");
   });
 
-  it("renders the Settings footer row with its selected state and update dot", () => {
+  it("renders the Settings footer row with its selected state and the footer accessory (no amber dot)", () => {
     const plain = renderFileTree({ pendingChanges: [], pendingReviewCount: 0 });
 
     expect(plain).toContain('class="sidebar-footer"');
@@ -210,13 +210,20 @@ describe("FileTree sidebar chrome", () => {
     expect(plain).not.toContain("sidebar-settings-dot");
     expect(plain.indexOf("sidebar-footer")).toBeGreaterThan(plain.indexOf("tree-scroll"));
 
-    const open = renderFileTree({ pendingChanges: [], pendingReviewCount: 0, settingsOpen: true, updateAvailable: true, onOpenSettings: () => undefined });
+    const open = renderFileTree({
+      pendingChanges: [],
+      pendingReviewCount: 0,
+      settingsOpen: true,
+      onOpenSettings: () => undefined,
+      footerAccessory: <span className="footer-accessory-probe" />
+    });
 
     expect(open).toContain("sidebar-settings-row is-open");
     expect(open).toContain('aria-expanded="true"');
-    expect(open).toContain("sidebar-settings-dot");
-    expect(open).toContain('aria-label="Settings, update available"');
+    expect(open).not.toContain("sidebar-settings-dot");
+    expect(open).toMatch(/sidebar-settings-row[\s\S]*footer-accessory-probe/);
   });
+
 });
 
 describe("FileTree pending review indicators", () => {

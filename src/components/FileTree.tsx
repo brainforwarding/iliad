@@ -102,8 +102,8 @@ interface FileTreeProps {
   onOpenSettings?: () => void;
   /** Shows the Settings row in its selected (soft fill) state. */
   settingsOpen?: boolean;
-  /** Shows a small amber dot on the Settings row. */
-  updateAvailable?: boolean;
+  /** Rendered at the right end of the footer line (the update button). */
+  footerAccessory?: ReactNode;
 }
 
 interface FileTreeLabels {
@@ -118,7 +118,6 @@ interface FileTreeLabels {
   noFiles: string;
   workspaceRoot: string;
   settings: string;
-  settingsUpdateAvailable: string;
   fileTreeMoveStarted: (path: string) => string;
   fileTreeMoveTarget: (path: string) => string;
   fileTreeMoveRootTarget: string;
@@ -1107,7 +1106,7 @@ export function FileTree({
   companionCommentCount,
   onOpenSettings,
   settingsOpen = false,
-  updateAvailable = false
+  footerAccessory = null
 }: FileTreeProps) {
   const [durableExpanded, setDurableExpanded] = useState<Set<string>>(new Set());
   const [searchOpen, setSearchOpen] = useState(false);
@@ -2430,7 +2429,6 @@ export function FileTree({
         <button
           type="button"
           className={`sidebar-settings-row${settingsOpen ? " is-open" : ""}`}
-          aria-label={updateAvailable ? labels.settingsUpdateAvailable : labels.settings}
           aria-expanded={onOpenSettings ? settingsOpen : undefined}
           aria-haspopup={onOpenSettings ? "dialog" : undefined}
           data-settings-opener=""
@@ -2438,8 +2436,8 @@ export function FileTree({
         >
           <Icon icon={Settings} />
           <span>{labels.settings}</span>
-          {updateAvailable ? <span className="sidebar-settings-dot" aria-hidden="true" /> : null}
         </button>
+        {footerAccessory}
       </div>
       <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {moveStatusText}

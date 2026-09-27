@@ -97,8 +97,12 @@ const api = {
   diagnostics: {
     log: (request: unknown) => invoke("diagnostics:log", request)
   },
+  // In-app updates (spec 2026-09-27): main owns the state; windows mirror it
+  // and answer the save preflight before a restart for an update.
   updates: {
+    getState: () => invoke("updates:get-state"),
     check: () => invoke("updates:check"),
+    install: () => invoke("updates:install"),
     consumePendingCheckRequest: () => invoke("updates:consume-pending-check-request"),
     onCheckRequested: (listener: () => void) => {
       const handler = () => listener();
@@ -107,6 +111,52 @@ const api = {
 
       return () => {
         ipcRenderer.removeListener("updates:check-requested", handler);
+      };
+    },
+    onStateChanged: (listener: (state: unknown) => void) => {
+      const handler = (_event: IpcRendererEvent, state: unknown) => {
+        if (state && typeof state === "object") {
+          listener(state);
+        }
+      };
+
+      ipcRenderer.on("updates:state", handler);
+
+      return () => {
+        ipcRenderer.removeListener("updates:state", handler);
+      };
+    },
+    onPrepareRestart: (
+      listener: (
+        request: { mode: "restart" | "quit" },
+        controls: { waitingForWriter: () => void }
+      ) => Promise<{ ok: true } | { ok: false; reason: string }>
+    ) => {
+      const handler = (_event: IpcRendererEvent, payload: unknown) => {
+        if (!payload || typeof payload !== "object") {
+          return;
+        }
+
+        const { requestId, mode } = payload as { requestId?: unknown; mode?: unknown };
+
+        if (typeof requestId !== "string" || (mode !== "restart" && mode !== "quit")) {
+          return;
+        }
+
+        const respond = (response: unknown) => invoke("updates:prepare-restart-response", requestId, response).catch(() => undefined);
+
+        void Promise.resolve()
+          .then(() => listener({ mode }, { waitingForWriter: () => void respond({ waiting: true }) }))
+          .then(
+            (response) => respond(response),
+            (error: unknown) => respond({ ok: false, reason: error instanceof Error ? error.message : "failed" })
+          );
+      };
+
+      ipcRenderer.on("updates:prepare-restart", handler);
+
+      return () => {
+        ipcRenderer.removeListener("updates:prepare-restart", handler);
       };
     }
   },

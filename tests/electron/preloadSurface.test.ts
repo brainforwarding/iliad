@@ -103,4 +103,58 @@ describe("preload API surface", () => {
     expect(fullscreen.mock.calls).toEqual([[true]]);
     expect(commands.mock.calls).toEqual([["toggle-sidebar"], ["open-settings"]]);
   });
+
+  it("exposes in-app updates: state, check, install, menu check, and the restart preflight", async () => {
+    const updates = exposed.api?.updates as Record<string, (...args: unknown[]) => unknown>;
+    expect(Object.keys(updates).sort()).toEqual([
+      "check",
+      "consumePendingCheckRequest",
+      "getState",
+      "install",
+      "onCheckRequested",
+      "onPrepareRestart",
+      "onStateChanged"
+    ]);
+
+    const { ipcRenderer } = await import("electron");
+    const invoke = vi.mocked(ipcRenderer.invoke);
+    const on = vi.mocked(ipcRenderer.on);
+    invoke.mockClear();
+    on.mockClear();
+    await updates.getState();
+    await updates.check();
+    await updates.install();
+    await updates.consumePendingCheckRequest();
+    expect(invoke.mock.calls.map((call) => call[0])).toEqual([
+      "updates:get-state",
+      "updates:check",
+      "updates:install",
+      "updates:consume-pending-check-request"
+    ]);
+
+    const states = vi.fn();
+    updates.onStateChanged(states);
+    const prepare = vi.fn(async (_request: unknown, controls: { waitingForWriter: () => void }) => {
+      controls.waitingForWriter();
+      return { ok: true };
+    });
+    updates.onPrepareRestart(prepare);
+    const handlers = Object.fromEntries(on.mock.calls.map(([channel, handler]) => [channel, handler as (...args: unknown[]) => void]));
+    expect(Object.keys(handlers).sort()).toEqual(["updates:prepare-restart", "updates:state"]);
+
+    handlers["updates:state"]({}, { status: "ready" });
+    handlers["updates:state"]({}, "junk");
+    expect(states.mock.calls).toEqual([[{ status: "ready" }]]);
+
+    invoke.mockClear();
+    handlers["updates:prepare-restart"]({}, { requestId: "r1", mode: "restart" });
+    handlers["updates:prepare-restart"]({}, { requestId: 5, mode: "restart" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(prepare.mock.calls[0]?.[0]).toEqual({ mode: "restart" });
+    expect(invoke.mock.calls).toEqual([
+      ["updates:prepare-restart-response", "r1", { waiting: true }],
+      ["updates:prepare-restart-response", "r1", { ok: true }]
+    ]);
+  });
 });

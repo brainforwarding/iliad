@@ -16,8 +16,8 @@ interface UseWorkspaceOptions {
   onError: (message: string) => void;
 }
 
-const workspaceStorageKey = "iliad:last-workspace";
-const recentWorkspacesStorageKey = "iliad:recent-workspaces";
+export const workspaceStorageKey = "iliad:last-workspace";
+export const recentWorkspacesStorageKey = "iliad:recent-workspaces";
 const recentWorkspacesCap = 6;
 
 function recentKey(path: string) {

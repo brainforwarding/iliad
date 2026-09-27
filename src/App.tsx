@@ -11,6 +11,7 @@ import {
 } from "./app/useDocumentHistory";
 import {
   documentCloseRequiresChoice,
+  DocumentConflictError,
   useDocumentPersistence,
   type SaveStatus
 } from "./app/useDocumentPersistence";
@@ -19,7 +20,11 @@ import { useSelectionComments } from "./app/useSelectionComments";
 import { useSettingsPanel } from "./app/useSettingsPanel";
 import { useSidebarPeek } from "./app/useSidebarPeek";
 import { useWindowChrome } from "./app/useWindowChrome";
-import { useWorkspace } from "./app/useWorkspace";
+import { recentWorkspacesStorageKey, useWorkspace, workspaceStorageKey } from "./app/useWorkspace";
+import { useAppUpdate } from "./app/useAppUpdate";
+import { UpdateButton, UpdateConfirmPopover } from "./components/UpdateButton";
+import { WhatsNewCard } from "./components/WhatsNewCard";
+import { releaseNotesUrl, takeWhatsNew } from "./whatsNew/whatsNew";
 import { useDocumentNaming } from "./app/useDocumentNaming";
 import { applyPathRelocation } from "./app/pathRelocation";
 import { BreadcrumbName } from "./components/BreadcrumbName";
@@ -71,7 +76,6 @@ import type { EditorView } from "@codemirror/view";
 import type {
   FileTreeNode,
   MarkdownContentSearchResponse,
-  UpdateCheckResult,
   WorkspaceInfo,
   WritingAssistStatus
 } from "./types/iliad";
@@ -623,9 +627,6 @@ export default function App() {
   // The AI route (free / own key / blocked) and key state; main picks the route on each request.
   const [writingAssistStatus, setWritingAssistStatus] = useState<WritingAssistStatus | null>(null);
   const aiRoute = writingAssistStatus?.ai.route ?? null;
-  const [updateStatus, setUpdateStatus] = useState<UpdateCheckResult | null>(null);
-  const [updateChecking, setUpdateChecking] = useState(false);
-  const updateCheckRequestIdRef = useRef(0);
   const refreshWritingAssistStatus = useCallback(async () => {
     try {
       setWritingAssistStatus(await window.iliad.getWritingAssistStatus());
@@ -664,82 +665,47 @@ export default function App() {
     }
   }, [refreshWritingAssistStatus, writingSettingsShown]);
 
-  const checkForUpdates = useCallback(async () => {
-    const requestId = updateCheckRequestIdRef.current + 1;
-    updateCheckRequestIdRef.current = requestId;
-    setUpdateChecking(true);
-
-    try {
-      const result = await window.iliad.updates.check();
-
-      if (updateCheckRequestIdRef.current !== requestId) {
-        return;
+  // In-app updates (spec 2026-09-27): the footer button, Settings → General,
+  // and this window's save preflight before Iliad restarts for an update.
+  const pendingReviewCountRef = useRef(pendingReviewFileCount);
+  pendingReviewCountRef.current = pendingReviewFileCount;
+  const openGeneralSettingsForUpdateCheck = useCallback(() => openSettings("general"), [openSettings]);
+  const handleUpdateSaveFailed = useCallback(
+    (saveError: unknown) => {
+      // Save and comment failures already show their own message; a conflict doesn't.
+      if (saveError instanceof DocumentConflictError) {
+        setError(strings.updates.restartSaveFailed);
       }
-
-      setUpdateStatus(result);
-
-      // Settings' General tab shows the result; an available update also gets the toast.
-      if (result.status === "available") {
-        setNotice(null);
-      }
-    } catch {
-      if (updateCheckRequestIdRef.current !== requestId) {
-        return;
-      }
-
-      setUpdateStatus({
-        status: "error",
-        currentVersion: "",
-        message: strings.updates.checkFailed
-      });
-    } finally {
-      if (updateCheckRequestIdRef.current === requestId) {
-        setUpdateChecking(false);
-      }
-    }
-  }, [strings.updates]);
-
-  const downloadUpdate = useCallback(async () => {
-    if (updateStatus?.status !== "available" || !updateStatus.downloadUrl) {
-      return;
-    }
-
-    await window.iliad.openUrl(updateStatus.downloadUrl);
-  }, [updateStatus]);
-
-  const viewUpdateRelease = useCallback(async () => {
-    if (!updateStatus || updateStatus.status === "error") {
-      return;
-    }
-
-    if (updateStatus.releaseUrl) {
-      await window.iliad.openUrl(updateStatus.releaseUrl);
-    }
-  }, [updateStatus]);
-
-  // The app menu's "Check for Updates…" shows the result in Settings → General.
-  const checkForUpdatesFromMenu = useCallback(() => {
-    openSettings("general");
-    void checkForUpdates();
-  }, [checkForUpdates, openSettings]);
-
-  useEffect(() => window.iliad.updates.onCheckRequested(checkForUpdatesFromMenu), [checkForUpdatesFromMenu]);
-  useEffect(() => {
-    let cancelled = false;
-
-    void window.iliad.updates
-      .consumePendingCheckRequest()
-      .then((pending) => {
-        if (pending && !cancelled) {
-          checkForUpdatesFromMenu();
-        }
-      })
-      .catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [checkForUpdatesFromMenu]);
+    },
+    [strings.updates.restartSaveFailed]
+  );
+  const appUpdate = useAppUpdate({
+    flushSave,
+    hasPendingReview: () => pendingReviewCountRef.current > 0,
+    onSaveFailed: handleUpdateSaveFailed,
+    onMenuCheck: openGeneralSettingsForUpdateCheck
+  });
+  const [whatsNewEntry, setWhatsNewEntry] = useState(() =>
+    takeWhatsNew({
+      currentVersion: APP_VERSION,
+      storage: window.localStorage,
+      usedBefore: () =>
+        localStorage.getItem(workspaceStorageKey) !== null || localStorage.getItem(recentWorkspacesStorageKey) !== null
+    })
+  );
+  const whatsNewCard = whatsNewEntry ? (
+    <WhatsNewCard
+      entry={whatsNewEntry}
+      language={language}
+      labels={strings.whatsNew}
+      illustrationLabels={{ settings: strings.sidebar.settings, update: strings.updates.update }}
+      onClose={() => setWhatsNewEntry(null)}
+      onOpenReleaseNotes={() => void window.iliad.openUrl(releaseNotesUrl(whatsNewEntry.version)).catch(() => undefined)}
+    />
+  ) : null;
+  const updateConfirm = appUpdate.confirmOpen ? (
+    <UpdateConfirmPopover labels={strings.updates} onResolve={appUpdate.resolveConfirm} />
+  ) : null;
 
   const handleManualReviewTargetChange = useCallback(
     (target: Parameters<typeof selectAgentReviewTarget>[0]) => {
@@ -1655,24 +1621,7 @@ export default function App() {
           </div>
         ) : null}
 
-        {!error && !notice && updateStatus?.status === "available" ? (
-          <div className="toast is-notice update-toast" role="status">
-            <span>{strings.updates.available(updateStatus.latestVersion)}</span>
-            <div className="update-toast-actions">
-              {updateStatus.downloadUrl ? (
-                <button type="button" onClick={() => void downloadUpdate()}>
-                  {strings.updates.download}
-                </button>
-              ) : null}
-              <button type="button" onClick={() => void viewUpdateRelease()}>
-                {strings.updates.viewRelease}
-              </button>
-              <button type="button" onClick={() => setUpdateStatus(null)}>
-                {strings.updates.dismiss}
-              </button>
-            </div>
-          </div>
-        ) : null}
+        {whatsNewCard}
       </div>
     );
   }
@@ -1755,7 +1704,15 @@ export default function App() {
       companionCommentCount={activeFile && commentsEnabled ? { documentPath: activeFile.path, count: commentCount } : null}
       onOpenSettings={toggleSettings}
       settingsOpen={settingsOpen}
-      updateAvailable={updateStatus?.status === "available"}
+      footerAccessory={
+        <UpdateButton
+          state={appUpdate.state}
+          labels={strings.updates}
+          confirming={appUpdate.confirmOpen}
+          onInstall={appUpdate.install}
+          onOpenDownload={appUpdate.openDownload}
+        />
+      }
     />
   );
 
@@ -1909,7 +1866,6 @@ export default function App() {
           labels={strings.settings}
           tab={settingsTab}
           onSelectTab={selectSettingsTab}
-          updateAvailable={updateStatus?.status === "available"}
           panelRef={settingsPanelRef}
         >
           {settingsTab === "general" ? (
@@ -1918,11 +1874,11 @@ export default function App() {
               language={language}
               onSetLanguage={setLanguage}
               version={APP_VERSION}
-              updateStatus={updateStatus}
-              updateChecking={updateChecking}
-              onCheckForUpdates={checkForUpdates}
-              onDownloadUpdate={downloadUpdate}
-              onViewUpdateRelease={viewUpdateRelease}
+              update={appUpdate.state}
+              onCheckForUpdates={appUpdate.check}
+              onInstallUpdate={appUpdate.install}
+              onOpenDownload={appUpdate.openDownload}
+              onOpenReleaseNotes={appUpdate.openReleaseNotes}
             />
           ) : settingsTab === "typography" ? (
             <TypographySettings
@@ -2034,24 +1990,8 @@ export default function App() {
         </div>
       ) : null}
 
-      {!error && !notice && updateStatus?.status === "available" ? (
-        <div className="toast is-notice update-toast" role="status">
-          <span>{strings.updates.available(updateStatus.latestVersion)}</span>
-          <div className="update-toast-actions">
-            {updateStatus.downloadUrl ? (
-              <button type="button" onClick={() => void downloadUpdate()}>
-                {strings.updates.download}
-              </button>
-            ) : null}
-            <button type="button" onClick={() => void viewUpdateRelease()}>
-              {strings.updates.viewRelease}
-            </button>
-            <button type="button" onClick={() => setUpdateStatus(null)}>
-              {strings.updates.dismiss}
-            </button>
-          </div>
-        </div>
-      ) : null}
+      {updateConfirm}
+      {whatsNewCard}
     </div>
   );
 }

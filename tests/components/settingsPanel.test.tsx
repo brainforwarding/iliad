@@ -1,49 +1,43 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { GeneralSettings, updateRowNote } from "../../src/components/settings/GeneralSettings";
+import { GeneralSettings, updateRowView } from "../../src/components/settings/GeneralSettings";
 import { SettingsPanel } from "../../src/components/settings/SettingsPanel";
 import { TypographySettings } from "../../src/components/settings/TypographySettings";
 import { WorkspaceMenu } from "../../src/components/WorkspaceMenu";
 import { appStrings } from "../../src/i18n/strings";
 import type { SettingsTab } from "../../src/preferences/settingsTab";
-import type { UpdateCheckResult } from "../../src/types/iliad";
+import type { AppUpdateState } from "../../src/types/iliad";
 
 const noop = () => undefined;
 
-function panel({ tab = "general" as SettingsTab, language = "en" as "en" | "es", updateAvailable = false } = {}) {
+function panel({ tab = "general" as SettingsTab, language = "en" as "en" | "es" } = {}) {
   return renderToStaticMarkup(
-    <SettingsPanel labels={appStrings[language].settings} tab={tab} onSelectTab={noop} updateAvailable={updateAvailable}>
+    <SettingsPanel labels={appStrings[language].settings} tab={tab} onSelectTab={noop}>
       <p>body</p>
     </SettingsPanel>
   );
 }
 
-function general({ status = null as UpdateCheckResult | null, checking = false, language = "en" as "en" | "es" } = {}) {
+function general({ state = null as AppUpdateState | null, language = "en" as "en" | "es" } = {}) {
   const strings = appStrings[language];
   return renderToStaticMarkup(
     <GeneralSettings
       labels={{ ...strings.settings, english: strings.language.english, spanish: strings.language.spanish }}
       language={language}
       onSetLanguage={noop}
-      version="0.4.0"
-      updateStatus={status}
-      updateChecking={checking}
+      version="0.6.0"
+      update={state}
       onCheckForUpdates={noop}
-      onDownloadUpdate={noop}
-      onViewUpdateRelease={noop}
+      onInstallUpdate={noop}
+      onOpenDownload={noop}
+      onOpenReleaseNotes={noop}
     />
   );
 }
 
-const AVAILABLE: UpdateCheckResult = {
-  status: "available",
-  currentVersion: "0.4.0",
-  latestVersion: "0.5.0",
-  releaseName: "0.5.0",
-  releaseDate: "2026-09-27",
-  releaseUrl: "https://example.test/release",
-  downloadUrl: "https://example.test/dmg"
-};
+function update(patch: Partial<AppUpdateState>): AppUpdateState {
+  return { status: "idle", currentVersion: "0.6.0", installWhenReady: false, restartPending: false, ...patch };
+}
 
 function tabLabels(html: string) {
   return [...html.matchAll(/role="tab"[^>]*>([^<]*)</g)].map((match) => match[1]);
@@ -78,12 +72,9 @@ describe("Settings panel", () => {
     expect(html).toContain(`aria-controls="${panelId}"`);
   });
 
-  it("shows the update dot on the General tab only when an update is available", () => {
+  it("has no update dot on the General tab (the footer button replaces it)", () => {
     expect(panel()).not.toContain("settings-tab-dot");
-    const html = panel({ updateAvailable: true });
-    expect(html.match(/settings-tab-dot/g)).toHaveLength(1);
-    expect(html).toContain('aria-label="General, update available"');
-    expect(panel({ updateAvailable: true, language: "es" })).toContain('aria-label="General, actualización disponible"');
+    expect(panel()).not.toMatch(/update available|actualización disponible/);
   });
 });
 
@@ -91,7 +82,7 @@ describe("General settings", () => {
   it("shows App language, Version and Updates rows (EN/ES)", () => {
     const html = general();
     expect(rowLabels(html)).toEqual(["App language", "Version", "Updates"]);
-    expect(html).toContain(">Iliad MD 0.4.0<");
+    expect(html).toContain(">Iliad MD 0.6.0<");
     expect(html).toMatch(/aria-pressed="true"[^>]*>English</);
     expect(html).toMatch(/aria-pressed="false"[^>]*>Español</);
     expect(html).toMatch(/class="writing-assist-link"[^>]*>Check now</);
@@ -99,28 +90,44 @@ describe("General settings", () => {
     expect(general({ language: "es" })).toContain(">Buscar ahora<");
   });
 
-  it("walks through the update states", () => {
-    const checking = general({ checking: true });
+  it("walks through the update states (Figma frame 7)", () => {
+    const checking = general({ state: update({ status: "checking" }) });
     expect(checking).toContain(">Checking…<");
     expect(checking).toMatch(/disabled=""[^>]*>Check now</);
 
-    expect(general({ status: { status: "current", currentVersion: "0.4.0", latestVersion: "0.4.0" } })).toContain(">Up to date<");
+    expect(general({ state: update({ status: "current" }) })).toContain(">Up to date<");
 
-    const failed = general({ status: { status: "error", currentVersion: "0.4.0", message: "x" } });
+    const failed = general({ state: update({ status: "error" }) });
     expect(failed).toContain("writing-assist-row-note is-error");
-    expect(failed).toContain(">Couldn&#x27;t check for updates<");
+    expect(failed).toContain(">Couldn&#x27;t check for updates.<");
+    expect(failed).toMatch(/>Check now</);
 
-    const ready = general({ status: AVAILABLE });
-    expect(ready).toContain(">Iliad MD 0.5.0 is ready<");
-    expect(ready).toMatch(/class="writing-assist-link"[^>]*>Download</);
-    expect(ready).toMatch(/class="writing-assist-link"[^>]*>What&#x27;s new</);
+    const downloading = general({ state: update({ status: "downloading", version: "0.6.1", percent: 42 }) });
+    expect(downloading).toContain(">Downloading 0.6.1… 42%<");
+    expect(downloading).not.toContain("Check now");
+    expect(general({ state: update({ status: "available", version: "0.6.1", percent: 0 }) })).toContain(">Downloading 0.6.1… 0%<");
+
+    const ready = general({ state: update({ status: "ready", version: "0.6.1", releaseUrl: "https://example.test/r" }) });
+    expect(ready).toContain(">Iliad 0.6.1 is ready<");
+    expect(ready).toMatch(/class="writing-assist-link"[^>]*>Restart to update</);
+    expect(ready).toMatch(/settings-updates-whats-new"[^>]*>What&#x27;s new</);
     expect(ready).not.toContain("Check now");
-    expect(general({ status: AVAILABLE, language: "es" })).toContain(">Iliad MD 0.5.0 está lista<");
+    expect(general({ state: update({ status: "ready", version: "0.6.1", restartPending: true }) })).toContain(">Restarting…<");
+    expect(general({ state: update({ status: "ready", version: "0.6.1" }), language: "es" })).toContain(">Iliad 0.6.1 está lista<");
+
+    const unsupported = general({ state: update({ status: "unsupported", version: "0.6.1", downloadUrl: "https://example.test/dmg" }) });
+    expect(unsupported).toContain(">Iliad 0.6.1 is available<");
+    expect(unsupported).toContain(">This copy can&#x27;t update itself.<");
+    expect(unsupported).toMatch(/class="writing-assist-link"[^>]*>Download</);
+    expect(general({ state: update({ status: "unsupported", version: "0.6.1" }), language: "es" })).toContain(
+      ">Esta copia no puede actualizarse sola.<"
+    );
   });
 
   it("says nothing about updates before a check", () => {
-    expect(updateRowNote(null, false, appStrings.en.settings)).toBeNull();
-    expect(general()).toMatch(/role="status" aria-live="polite" hidden=""/);
+    expect(updateRowView(null, { ...appStrings.en.settings, english: "", spanish: "" }).note).toBeNull();
+    expect(updateRowView(update({ status: "idle" }), { ...appStrings.en.settings, english: "", spanish: "" }).action).toBe("check");
+    expect(general()).toMatch(/class="writing-assist-row-note" hidden=""/);
   });
 });
 

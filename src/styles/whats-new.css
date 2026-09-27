@@ -1,0 +1,138 @@
+/* The one-time "What's new" card after an update (spec 2026-09-27, Figma
+   frame 8): centred over the dimmed window. */
+.whats-new-backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: var(--scrim);
+}
+
+.whats-new-card {
+  display: grid;
+  overflow: hidden;
+  width: min(280px, 100%);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-panel);
+  background: var(--editor);
+  box-shadow: var(--shadow-overlay);
+  color: var(--ink-2);
+}
+
+/* A small mock of the sidebar footer with the Update pill (HTML, no image). */
+.whats-new-illustration {
+  display: flex;
+  align-items: flex-end;
+  height: 92px;
+  padding: 0 24px 0 24px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--paper);
+}
+
+.whats-new-footer-mock {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 12px;
+  border: 1px solid var(--hairline);
+  border-bottom: 0;
+  border-radius: var(--radius-surface) var(--radius-surface) 0 0;
+  background: var(--sidebar);
+  box-shadow: var(--shadow-sm);
+}
+
+.whats-new-footer-settings {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.whats-new-footer-settings svg {
+  color: var(--icon);
+}
+
+.whats-new-footer-pill {
+  display: inline-flex;
+  height: 18px;
+  align-items: center;
+  gap: 3px;
+  padding: 0 8px 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--ink-inverse);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.whats-new-copy {
+  display: grid;
+  gap: 6px;
+  padding: 16px 16px 4px;
+}
+
+.whats-new-copy h2 {
+  margin: 0;
+  color: var(--ink-1);
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.whats-new-copy p {
+  margin: 0;
+  color: var(--muted-1);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.whats-new-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px 14px;
+}
+
+.whats-new-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted-1);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.whats-new-link:hover {
+  color: var(--ink-2);
+}
+
+.whats-new-primary {
+  min-height: 24px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: var(--ink-inverse);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-ui);
+  font-weight: 500;
+}
+
+.whats-new-primary:hover {
+  background: var(--accent-deep);
+}
+
+.whats-new-link:focus-visible,
+.whats-new-primary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

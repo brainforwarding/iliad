@@ -46,6 +46,7 @@
     "@codemirror/view": "^6.38.5",
     "@lezer/highlight": "^1.2.1",
     "@uiw/codemirror-extensions-basic-setup": "^4.25.11",
+    "electron-updater": "^6.8.9",
     "harper.js": "^2.4.0",
     "katex": "^0.16.47",
     "lucide-react": "^0.468.0",

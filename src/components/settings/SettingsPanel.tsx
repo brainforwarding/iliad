@@ -8,15 +8,12 @@ interface SettingsPanelLabels {
   dialogLabel: string;
   tabsLabel: string;
   tabs: Record<SettingsTab, string>;
-  tabUpdateAvailable: (tab: string) => string;
 }
 
 interface SettingsPanelProps {
   labels: SettingsPanelLabels;
   tab: SettingsTab;
   onSelectTab: (tab: SettingsTab) => void;
-  /** Shows the amber dot on the General tab. */
-  updateAvailable?: boolean;
   panelRef?: RefObject<HTMLDivElement>;
   /** The active tab's body; only that tab is mounted. */
   children: ReactNode;
@@ -28,7 +25,7 @@ interface SettingsPanelProps {
  * put at the bottom (General · Typography · Writing). Only the active body is
  * mounted, so leaving a tab ends whatever it was doing (e.g. shortcut recording).
  */
-export function SettingsPanel({ labels, tab, onSelectTab, updateAvailable = false, panelRef, children }: SettingsPanelProps) {
+export function SettingsPanel({ labels, tab, onSelectTab, panelRef, children }: SettingsPanelProps) {
   const id = useId();
   const tabRefs = useRef(new Map<SettingsTab, HTMLButtonElement>());
   const localPanelRef = useRef<HTMLDivElement | null>(null);
@@ -81,7 +78,6 @@ export function SettingsPanel({ labels, tab, onSelectTab, updateAvailable = fals
       <div className="settings-tabs" role="tablist" aria-label={labels.tabsLabel}>
         {settingsTabs.map((item) => {
           const selected = item === tab;
-          const dot = item === "general" && updateAvailable;
 
           return (
             <button
@@ -99,13 +95,11 @@ export function SettingsPanel({ labels, tab, onSelectTab, updateAvailable = fals
               className={selected ? "settings-tab is-active" : "settings-tab"}
               aria-selected={selected}
               aria-controls={selected ? `${id}-panel` : undefined}
-              aria-label={dot ? labels.tabUpdateAvailable(labels.tabs[item]) : undefined}
               tabIndex={selected ? 0 : -1}
               onClick={() => onSelectTab(item)}
               onKeyDown={onTabKeyDown}
             >
               {labels.tabs[item]}
-              {dot ? <span className="settings-tab-dot" aria-hidden="true" /> : null}
             </button>
           );
         })}

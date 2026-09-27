@@ -23,6 +23,11 @@ import { parseLaunchWorkspacePath } from "./launch/argv.js";
 import { canonicalizeWorkspaceDirectory, type WorkspaceInfo } from "./launch/workspace.js";
 import { createDiagnosticsLogger } from "./diagnostics/logger.js";
 import { WorkspaceBaselineService } from "./review/workspaceBaseline.js";
+import { createAppUpdater } from "./updates/electronUpdater.js";
+import { AppUpdateController } from "./updates/appUpdater.js";
+import { updateChannels } from "./updates/appUpdateState.js";
+import { canSelfUpdate } from "./updates/canSelfUpdate.js";
+import { RestartCoordinator } from "./updates/restartCoordinator.js";
 import { UpdateService } from "./updates/updateService.js";
 import { migrateLegacyWritingSettings } from "./writing/groq/migration.js";
 import { WritingAiService } from "./writing/writingAiService.js";
@@ -385,14 +390,51 @@ app.whenReady().then(async () => {
       windowManager.cliOpenRequests.complete(webContentsId, requestId, result)
   });
   await startCliSocket((details) => diagnosticsLogger.info({ area: "app", event: "cli_socket_failed", details }));
+  const restartCoordinator = new RestartCoordinator();
+  const liveWindows = () => BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
+  const updateController = new AppUpdateController({
+    currentVersion: app.getVersion(),
+    isPackaged: app.isPackaged,
+    canSelfUpdate: async () => {
+      const support = await canSelfUpdate({
+        isPackaged: app.isPackaged,
+        platform: process.platform,
+        executablePath: process.execPath
+      });
+
+      if (!support.ok) {
+        diagnosticsLogger.info({ area: "app", event: "self_update_unsupported", details: { reason: support.reason } });
+      }
+
+      return support.ok;
+    },
+    createUpdater: createAppUpdater,
+    fallback: new UpdateService({ currentVersion: app.getVersion() }),
+    broadcast: (state) => {
+      for (const window of liveWindows()) {
+        window.webContents.send(updateChannels.state, state);
+      }
+    },
+    prepareWindows: (mode) =>
+      restartCoordinator.prepare(
+        liveWindows().map((window) => ({
+          id: window.webContents.id,
+          send: (request) => window.webContents.send(updateChannels.prepareRestart, request)
+        })),
+        mode
+      ),
+    quitApp: () => app.quit()
+  });
   registerUpdatesIpc({
-    service: new UpdateService({ currentVersion: app.getVersion() }),
+    controller: updateController,
+    coordinator: restartCoordinator,
     consumePendingCheckRequest: () => {
       const pending = pendingUpdateCheckRequest;
       pendingUpdateCheckRequest = false;
       return pending;
     }
   });
+  updateController.start();
 
   appReady = true;
   queueOrHandleLaunchRequest({
@@ -410,7 +452,21 @@ app.whenReady().then(async () => {
     windowManager.focusMostRecentWindow();
   });
 
-  app.on("before-quit", () => {
+  let quitCleanupDone = false;
+  app.on("before-quit", (event) => {
+    // With an update ready, the first Quit waits for every window to save and
+    // then installs on the way out; a failed save cancels the quit.
+    if (updateController.beforeQuit() === "prevent") {
+      event.preventDefault();
+      return;
+    }
+
+    if (quitCleanupDone) {
+      return;
+    }
+
+    quitCleanupDone = true;
+    updateController.dispose();
     writingAiService.dispose();
     baselineService.dispose();
     void cliServer?.close();
