@@ -6,6 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { externalReviewFileId } from "../../electron/review/externalReviewProjection";
+import type { AgentProposalFileChange } from "../../electron/review/types";
 import { WorkspaceBaselineService, type ExternalReviewSnapshot } from "../../electron/review/workspaceBaseline";
 
 const execFileAsync = promisify(execFile);
@@ -62,6 +63,33 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1500) {
 
 function itemPaths(snapshot: ExternalReviewSnapshot) {
   return (snapshot.proposal?.files ?? []).map((file) => `${file.kind}:${file.relativePath}`).sort();
+}
+
+/** The revision of one file as the renderer shows it (what file-level actions send). */
+function shown(baseline: WorkspaceBaselineService, root: string, relativePath: string) {
+  const file = baseline.currentReview(root).proposal?.files.find((candidate) => candidate.relativePath === relativePath);
+
+  if (!file) {
+    throw new Error(`expected a review item for ${relativePath}`);
+  }
+
+  return revisionOf(file);
+}
+
+function shownAll(baseline: WorkspaceBaselineService, root: string) {
+  return (baseline.currentReview(root).proposal?.files ?? []).map((file) => ({ fileId: file.id, ...revisionOf(file) }));
+}
+
+function revisionOf(file: AgentProposalFileChange) {
+  if (file.kind === "create_file") {
+    return { baselineHash: null, diskHash: file.reviewedContentHash ?? null };
+  }
+
+  if (file.kind === "delete_file") {
+    return { baselineHash: file.baselineContentHash ?? file.baseHash, diskHash: null };
+  }
+
+  return { baselineHash: file.baselineContentHash ?? file.baseHash, diskHash: file.reviewedContentHash ?? null };
 }
 
 async function tryGit(root: string, args: string[]) {
@@ -344,7 +372,7 @@ describe("WorkspaceBaselineService", { timeout: 20_000 }, () => {
     await waitFor(() => baseline.currentReview(root).proposal !== null);
     const before = await stat(path.join(root, "doc.md"));
 
-    const result = await baseline.keep(root, externalReviewFileId("doc.md"));
+    const result = await baseline.keep(root, externalReviewFileId("doc.md"), shown(baseline, root, "doc.md"));
     expect(result.status).toBe("applied");
     expect(result.content).toBe("two\n");
     expect(result.proposal.files[0]?.status).toBe("applied");
@@ -380,17 +408,17 @@ describe("WorkspaceBaselineService", { timeout: 20_000 }, () => {
     baseline.noteDiskChange(root, { relativePath: null, eventType: "unknown" });
     await waitFor(() => (baseline.currentReview(root).proposal?.files.length ?? 0) === 3);
 
-    const restored = await baseline.restore(root, externalReviewFileId("edit.md"));
+    const restored = await baseline.restore(root, externalReviewFileId("edit.md"), shown(baseline, root, "edit.md"));
     expect(restored.status).toBe("rejected");
     expect(await readFile(path.join(root, "edit.md"), "utf8")).toBe("one\n");
 
-    await baseline.restore(root, externalReviewFileId("gone.md"));
+    await baseline.restore(root, externalReviewFileId("gone.md"), shown(baseline, root, "gone.md"));
     expect(await readFile(path.join(root, "gone.md"), "utf8")).toBe("keep me\n");
 
     // The replaced original of the edit is never deleted: it goes to the Trash.
     expect(trashed.map((entry) => path.basename(entry))).toEqual(["edit.md"]);
 
-    await baseline.restore(root, externalReviewFileId("drafts/new.md"));
+    await baseline.restore(root, externalReviewFileId("drafts/new.md"), shown(baseline, root, "drafts/new.md"));
     // The file is held in a hidden sibling folder before it goes to the
     // Trash, under its own basename.
     expect(trashed).toHaveLength(2);
@@ -417,7 +445,7 @@ describe("WorkspaceBaselineService", { timeout: 20_000 }, () => {
     baseline.noteDiskChange(root, { relativePath: "made.md", eventType: "rename" });
     await waitFor(() => baseline.currentReview(root).proposal !== null);
 
-    const result = await baseline.restore(root, externalReviewFileId("made.md"));
+    const result = await baseline.restore(root, externalReviewFileId("made.md"), shown(baseline, root, "made.md"));
     expect(result.status).toBe("rejected");
     expect(path.basename(trashed[0])).toBe("made.md");
     expect(await readFile(path.join(root, "made.md"), "utf8")).toBe("C2 written after the click\n");
@@ -478,7 +506,7 @@ describe("WorkspaceBaselineService", { timeout: 20_000 }, () => {
       ["delete_file", "doc.md"]
     ]);
 
-    await expect(baseline.restore(root, externalReviewFileId("doc.md"))).rejects.toThrow(/folder has taken/);
+    await expect(baseline.restore(root, externalReviewFileId("doc.md"), shown(baseline, root, "doc.md"))).rejects.toThrow(/folder has taken/);
     expect((await stat(path.join(root, "doc.md"))).isDirectory()).toBe(true);
     expect(await readFile(path.join(root, "doc.md", "inner.md"), "utf8")).toBe("inside\n");
   });
@@ -495,7 +523,7 @@ describe("WorkspaceBaselineService", { timeout: 20_000 }, () => {
     baseline.noteDiskChange(root, { relativePath: "new.md", eventType: "rename" });
     await waitFor(() => baseline.currentReview(root).proposal !== null);
 
-    await expect(baseline.restore(root, externalReviewFileId("new.md"))).rejects.toThrow("Trash unavailable");
+    await expect(baseline.restore(root, externalReviewFileId("new.md"), shown(baseline, root, "new.md"))).rejects.toThrow("Trash unavailable");
     expect(await readFile(path.join(root, "new.md"), "utf8")).toBe("fresh\n");
     expect(baseline.currentReview(root).proposal?.files).toHaveLength(1);
   });
@@ -517,7 +545,7 @@ describe("WorkspaceBaselineService", { timeout: 20_000 }, () => {
     baseline.noteDiskChange(root, { relativePath: null, eventType: "unknown" });
     await waitFor(() => (baseline.currentReview(root).proposal?.files.length ?? 0) === 3);
 
-    const result = await baseline.restoreAll(root);
+    const result = await baseline.restoreAll(root, shownAll(baseline, root));
     expect(result.unrestored).toEqual([{ relativePath: "new.md", reason: "Trash unavailable" }]);
     expect(await readFile(path.join(root, "a.md"), "utf8")).toBe("a\n");
     expect(await readFile(path.join(root, "b.md"), "utf8")).toBe("b\n");
@@ -534,11 +562,12 @@ describe("WorkspaceBaselineService", { timeout: 20_000 }, () => {
     baseline.noteDiskChange(root, { relativePath: "doc.md", eventType: "change" });
     await waitFor(() => baseline.currentReview(root).proposal !== null);
 
-    // The other window wins the race.
-    expect((await baseline.restoreAll(root)).status).toBe("rejected");
+    // Both windows show the same review; the other window wins the race.
+    const seen = shownAll(baseline, root);
+    expect((await baseline.restoreAll(root, seen)).status).toBe("rejected");
     expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe("one\n");
 
-    const loser = await baseline.restoreAll(root);
+    const loser = await baseline.restoreAll(root, seen);
     expect(loser.status).toBe("stale");
     expect(loser.proposal.status).toBe("stale");
     expect(loser.unrestored).toEqual([]);
@@ -554,9 +583,10 @@ describe("WorkspaceBaselineService", { timeout: 20_000 }, () => {
     baseline.noteDiskChange(root, { relativePath: "doc.md", eventType: "change" });
     await waitFor(() => baseline.currentReview(root).proposal !== null);
     const fileId = externalReviewFileId("doc.md");
+    const seen = shown(baseline, root, "doc.md");
 
     await writeFile(path.join(root, "doc.md"), "one\n", "utf8");
-    const result = await baseline.restore(root, fileId);
+    const result = await baseline.restore(root, fileId, seen);
     expect(result.status).toBe("stale");
     expect(result.snapshot.proposal).toBeNull();
     expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe("one\n");
@@ -575,7 +605,7 @@ describe("WorkspaceBaselineService", { timeout: 20_000 }, () => {
 
     // A newer, never-shown version lands right before the writer clicks Restore.
     await writeFile(path.join(root, "doc.md"), "three\n", "utf8");
-    const result = await baseline.restore(root, externalReviewFileId("doc.md"));
+    const result = await baseline.restore(root, externalReviewFileId("doc.md"), shown(baseline, root, "doc.md"));
 
     expect(result.status).toBe("stale");
     expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe("three\n");
@@ -583,6 +613,108 @@ describe("WorkspaceBaselineService", { timeout: 20_000 }, () => {
     expect(refreshed.revision).toBeGreaterThan(reviewedRevision);
     const file = refreshed.proposal?.files[0];
     expect(file?.kind === "edit_file" && file.replacement).toBe("three\n");
+  });
+
+  it("answers stale for file-level Keep and Restore when the file changed between render and click", async () => {
+    const root = await workspace();
+    await writeFile(path.join(root, "doc.md"), "one\n", "utf8");
+    await writeFile(path.join(root, "gone.md"), "keep me\n", "utf8");
+    const trashed: string[] = [];
+    const baseline = service({
+      trashItem: async (absolutePath) => {
+        trashed.push(absolutePath);
+        await rm(absolutePath);
+      }
+    });
+    await baseline.attach(root, subscriber());
+
+    await writeFile(path.join(root, "doc.md"), "two\n", "utf8");
+    await writeFile(path.join(root, "made.md"), "draft one\n", "utf8");
+    await rm(path.join(root, "gone.md"));
+    baseline.noteDiskChange(root, { relativePath: null, eventType: "unknown" });
+    await waitFor(() => (baseline.currentReview(root).proposal?.files.length ?? 0) === 3);
+
+    // What the writer's window rendered.
+    const renderedEdit = shown(baseline, root, "doc.md");
+    const renderedCreate = shown(baseline, root, "made.md");
+    const renderedDelete = shown(baseline, root, "gone.md");
+    const renderedRevision = baseline.currentReview(root).revision;
+
+    // The outside tool writes again and main publishes the newer revision
+    // before the click arrives (file ids are stable across revisions).
+    await writeFile(path.join(root, "doc.md"), "three\n", "utf8");
+    await writeFile(path.join(root, "made.md"), "draft two\n", "utf8");
+    await writeFile(path.join(root, "gone.md"), "back, but different\n", "utf8");
+    baseline.noteDiskChange(root, { relativePath: null, eventType: "unknown" });
+    await waitFor(() => {
+      const files = baseline.currentReview(root).proposal?.files ?? [];
+      const made = files.find((file) => file.relativePath === "made.md");
+      return (
+        files.find((file) => file.relativePath === "gone.md")?.kind === "edit_file" &&
+        made?.kind === "create_file" &&
+        made.content === "draft two\n"
+      );
+    });
+
+    for (const [relativePath, rendered] of [
+      ["doc.md", renderedEdit],
+      ["made.md", renderedCreate],
+      ["gone.md", renderedDelete]
+    ] as const) {
+      const fileId = externalReviewFileId(relativePath);
+      expect((await baseline.keep(root, fileId, rendered)).status).toBe("stale");
+      expect((await baseline.restore(root, fileId, rendered)).status).toBe("stale");
+    }
+
+    // Nothing was kept or restored: disk holds the newest outside versions and
+    // all three still wait for review, now at the newer revision.
+    expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe("three\n");
+    expect(await readFile(path.join(root, "made.md"), "utf8")).toBe("draft two\n");
+    expect(await readFile(path.join(root, "gone.md"), "utf8")).toBe("back, but different\n");
+    expect(trashed).toEqual([]);
+    const refreshed = baseline.currentReview(root);
+    expect(refreshed.revision).toBeGreaterThan(renderedRevision);
+    expect(itemPaths(refreshed)).toEqual(["create_file:made.md", "edit_file:doc.md", "edit_file:gone.md"]);
+    const doc = refreshed.proposal?.files.find((file) => file.relativePath === "doc.md");
+    expect(doc?.kind === "edit_file" && doc.baseContent).toBe("one\n");
+
+    // With the revision now on screen, the same action goes through.
+    expect((await baseline.keep(root, externalReviewFileId("doc.md"), shown(baseline, root, "doc.md"))).status).toBe("applied");
+  });
+
+  it("answers stale for Restore all when the pending set changed after it was shown", async () => {
+    const root = await workspace();
+    await writeFile(path.join(root, "a.md"), "a\n", "utf8");
+    const baseline = service({ trashItem: async (absolutePath) => rm(absolutePath) });
+    await baseline.attach(root, subscriber());
+
+    await writeFile(path.join(root, "a.md"), "A\n", "utf8");
+    baseline.noteDiskChange(root, { relativePath: "a.md", eventType: "change" });
+    await waitFor(() => baseline.currentReview(root).proposal !== null);
+    const seen = shownAll(baseline, root);
+
+    // A file the writer never saw joins the review before the click.
+    await writeFile(path.join(root, "unseen.md"), "unseen\n", "utf8");
+    baseline.noteDiskChange(root, { relativePath: "unseen.md", eventType: "rename" });
+    await waitFor(() => (baseline.currentReview(root).proposal?.files.length ?? 0) === 2);
+
+    const result = await baseline.restoreAll(root, seen);
+    expect(result.status).toBe("stale");
+    expect(result.proposal.status).toBe("stale");
+    expect(await readFile(path.join(root, "a.md"), "utf8")).toBe("A\n");
+    expect(await readFile(path.join(root, "unseen.md"), "utf8")).toBe("unseen\n");
+    expect(itemPaths(baseline.currentReview(root))).toEqual(["create_file:unseen.md", "edit_file:a.md"]);
+
+    // A changed revision of a shown file is stale too.
+    const seenBoth = shownAll(baseline, root);
+    await writeFile(path.join(root, "a.md"), "A2\n", "utf8");
+    baseline.noteDiskChange(root, { relativePath: "a.md", eventType: "change" });
+    await waitFor(() => {
+      const file = baseline.currentReview(root).proposal?.files.find((candidate) => candidate.relativePath === "a.md");
+      return file?.kind === "edit_file" && file.replacement === "A2\n";
+    });
+    expect((await baseline.restoreAll(root, seenBoth)).status).toBe("stale");
+    expect(await readFile(path.join(root, "a.md"), "utf8")).toBe("A2\n");
   });
 
   it("blocks a destructive restore once when Git HEAD changed and refreshes the review", async () => {
@@ -609,10 +741,10 @@ describe("WorkspaceBaselineService", { timeout: 20_000 }, () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     await tryGit(root, ["commit", "-q", "-am", "outside commit"]);
-    await expect(baseline.restore(root, externalReviewFileId("doc.md"))).rejects.toThrow("Repository changed outside Iliad");
+    await expect(baseline.restore(root, externalReviewFileId("doc.md"), shown(baseline, root, "doc.md"))).rejects.toThrow("Repository changed outside Iliad");
     expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe("two\n");
 
-    await baseline.restore(root, externalReviewFileId("doc.md"));
+    await baseline.restore(root, externalReviewFileId("doc.md"), shown(baseline, root, "doc.md"));
     expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe("one\n");
   });
 
@@ -897,7 +1029,7 @@ describe("WorkspaceBaselineService per-chunk review", { timeout: 20_000 }, () =>
       }
     });
 
-    const result = await baseline.restore(root, externalReviewFileId("doc.md"));
+    const result = await baseline.restore(root, externalReviewFileId("doc.md"), shown(baseline, root, "doc.md"));
 
     expect(result.status).toBe("stale");
     expect(await readFile(path.join(root, "doc.md"), "utf8")).toBe("racing writer\n");
@@ -922,7 +1054,7 @@ describe("WorkspaceBaselineService per-chunk review", { timeout: 20_000 }, () =>
     baseline.noteDiskChange(root, { relativePath: "gone.md", eventType: "rename" });
     await waitFor(() => baseline.currentReview(root).proposal !== null);
 
-    const result = await baseline.restore(root, externalReviewFileId("gone.md"));
+    const result = await baseline.restore(root, externalReviewFileId("gone.md"), shown(baseline, root, "gone.md"));
     expect(result.status).toBe("stale");
     expect(await readFile(path.join(root, "gone.md"), "utf8")).toBe("appeared\n");
 

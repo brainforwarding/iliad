@@ -555,12 +555,23 @@ Rules that must hold:
   (`agent:keep-chunk` / `agent:restore-chunk`) when they no longer match.
   Keep all / Restore all act on the whole file. Creates and deletes stay
   file-level: Keep file / Move to Trash, Confirm deletion / Restore file.
+  File ids survive review revisions, so every file-level action
+  (`agent:apply-proposal-file` / `agent:reject-proposal-file`, from the top
+  row, the conflict banner or the tree's bulk Keep all) carries the revision
+  the writer saw (`baselineHash` / `diskHash`, `null` for an absent side) and
+  main answers `stale` when the item no longer matches; nothing is written.
+  The tree's bulk Restore all (`agent:reject-proposal`) sends every file it
+  showed with its hashes and is stale unless main's pending set is exactly
+  that set. A stale answer refreshes the review and shows the "That file
+  changed again outside Iliad" notice; the refreshed item replaces the old
+  one in place.
 - The open document's file-level review controls sit on the right of the
   window's top row ("{n} changes · ↑ ↓ · Keep all · Restore all"; a stale
   review shows only Restore all). EditorPane owns them and portals
   `ReviewControls` into the top-row slot App passes as `topbarSlot`. ↑ ↓ only
   scroll to the previous/next unresolved chunk and mark it active (a local
-  index keyed to the review, wrapping at the ends); they never act on it.
+  index keyed to the file and its reviewed disk content, so a new outside
+  revision resets it; wrapping at the ends); they never act on it.
   The conflict and detached-comments bars stay light bands above the text.
 - Every Restore uses a guarded replacement, never a truncating write: the
   current file is renamed to a hidden holding path and its bytes verified

@@ -88,6 +88,21 @@ export interface ExternalReviewChunkRequest {
   diskHash: string;
 }
 
+/**
+ * The revision of one review item as the renderer showed it: the baseline and
+ * disk hashes (null where that side is absent: a create has no baseline, a
+ * delete no disk). File ids survive review revisions, so every file-level
+ * action carries this and main answers `stale` when the item moved on.
+ */
+export interface ExternalReviewFileRevision {
+  baselineHash: string | null;
+  diskHash: string | null;
+}
+
+export interface ExternalReviewFileExpectation extends ExternalReviewFileRevision {
+  fileId: string;
+}
+
 export const externalReviewChangedChannel = "agent:external-review-changed";
 
 interface BaselineEntry {
@@ -538,12 +553,12 @@ export class WorkspaceBaselineService {
     });
   }
 
-  async keep(workspaceRoot: string, fileId: string): Promise<ExternalReviewActionResult> {
+  async keep(workspaceRoot: string, fileId: string, expected: ExternalReviewFileRevision): Promise<ExternalReviewActionResult> {
     const state = this.requireState(workspaceRoot);
 
     return this.enqueueWrite(state, async () => {
       const before = this.currentReview(state.workspaceRoot);
-      const located = await this.locateReviewItem(state, fileId);
+      const located = await this.locateReviewItem(state, fileId, expected);
 
       if (!located) {
         return this.staleResult(state, before, fileId);
@@ -573,12 +588,16 @@ export class WorkspaceBaselineService {
     });
   }
 
-  async restore(workspaceRoot: string, fileId: string): Promise<ExternalReviewActionResult> {
+  async restore(
+    workspaceRoot: string,
+    fileId: string,
+    expected: ExternalReviewFileRevision
+  ): Promise<ExternalReviewActionResult> {
     const state = this.requireState(workspaceRoot);
 
     return this.enqueueWrite(state, async () => {
       const before = this.currentReview(state.workspaceRoot);
-      const located = await this.locateReviewItem(state, fileId);
+      const located = await this.locateReviewItem(state, fileId, expected);
 
       if (!located) {
         return this.staleResult(state, before, fileId);
@@ -613,17 +632,23 @@ export class WorkspaceBaselineService {
     });
   }
 
-  async restoreAll(workspaceRoot: string): Promise<ExternalReviewActionResult> {
+  /**
+   * Restore every pending item, but only when the pending set is exactly the
+   * one the writer was shown (`expected`, one entry per file with the hashes
+   * of the revision on screen). Anything added, removed, or changed since
+   * makes the whole action stale; nothing is written.
+   */
+  async restoreAll(workspaceRoot: string, expected: ExternalReviewFileExpectation[]): Promise<ExternalReviewActionResult> {
     const state = this.requireState(workspaceRoot);
 
     return this.enqueueWrite(state, async () => {
       const before = this.currentReview(state.workspaceRoot);
       const items = [...state.review.values()];
 
-      if (items.length === 0) {
+      if (items.length === 0 || !reviewMatchesExpectations(items, expected)) {
         // The caller acted on items that are already gone (another window
-        // or action resolved them first): report stale, never a silent
-        // success.
+        // or action resolved them first) or on a set that changed since it
+        // was shown: report stale, never a silent success.
         state.pendingPaths = null;
         await this.refresh(state);
         return this.staleResult(state, before, null);
@@ -1085,10 +1110,13 @@ export class WorkspaceBaselineService {
    * again outside, the review is refreshed and the action is reported stale;
    * acting on the refreshed item would destroy content nobody reviewed.
    */
-  private async locateReviewItem(state: WorkspaceBaselineState, fileId: string) {
+  private async locateReviewItem(state: WorkspaceBaselineState, fileId: string, expected: ExternalReviewFileRevision) {
     const item = [...state.review.values()].find((candidate) => externalReviewFileId(candidate.relativePath) === fileId);
 
-    if (item) {
+    // The item must still be the revision the writer saw: file ids survive
+    // review revisions, so a refresh between render and click would otherwise
+    // act on content nobody reviewed.
+    if (item && itemMatchesRevision(item, expected)) {
       const current = await readDiskPathState(state.workspaceRoot, item.relativePath);
 
       if (current.status === "unsafe") {
@@ -1110,7 +1138,10 @@ export class WorkspaceBaselineService {
    * baseline and disk the renderer saw (chunk ids are positional, spec V3).
    */
   private async locateReviewChunk(state: WorkspaceBaselineState, request: ExternalReviewChunkRequest) {
-    const located = await this.locateReviewItem(state, request.fileId);
+    const located = await this.locateReviewItem(state, request.fileId, {
+      baselineHash: request.baselineHash,
+      diskHash: request.diskHash
+    });
 
     if (!located) {
       return null;
@@ -1118,7 +1149,7 @@ export class WorkspaceBaselineService {
 
     const { item } = located;
 
-    if (item.kind === "edit" && item.baselineHash === request.baselineHash && item.diskHash === request.diskHash) {
+    if (item.kind === "edit") {
       const hunks = buildLineReviewHunks(item.baselineContent ?? "", item.diskContent ?? "", request.fileId);
       const chunk = hunks.find((candidate) => candidate.id === request.chunkId);
 
@@ -1645,6 +1676,26 @@ function itemMatchesDisk(item: ExternalReviewItem, current: DiskPathState) {
   }
 
   return current.status === "present" && hashMarkdown(current.content) === item.diskHash;
+}
+
+function itemMatchesRevision(item: ExternalReviewItem, expected: ExternalReviewFileRevision) {
+  return item.baselineHash === expected.baselineHash && item.diskHash === expected.diskHash;
+}
+
+function reviewMatchesExpectations(items: ExternalReviewItem[], expected: ExternalReviewFileExpectation[]) {
+  if (items.length !== expected.length) {
+    return false;
+  }
+
+  const byFileId = new Map(expected.map((entry) => [entry.fileId, entry]));
+
+  return (
+    byFileId.size === expected.length &&
+    items.every((item) => {
+      const entry = byFileId.get(externalReviewFileId(item.relativePath));
+      return entry !== undefined && itemMatchesRevision(item, entry);
+    })
+  );
 }
 
 function sameReview(left: Map<string, ExternalReviewItem>, right: Map<string, ExternalReviewItem>) {

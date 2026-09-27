@@ -3,7 +3,7 @@ import type { AppStrings } from "../i18n/strings";
 import { findNode } from "../files/fileTree";
 import type { OpenNodeResult } from "../files/fileActions";
 import type { EditorReviewState } from "../editor/aiReview/types";
-import { fileHasMutableReview } from "../review/reviewFiles";
+import { fileHasMutableReview, reviewFileRevision } from "../review/reviewFiles";
 import { logReviewNavigation } from "../review/reviewDebug";
 import {
   buildPendingFileTreeChanges,
@@ -12,7 +12,14 @@ import {
   sameRelativePath
 } from "../review/pendingFileTree";
 import { isExternalFilesystemProposal, type ReviewTarget } from "../review/reviewQueue";
-import type { AgentChangeProposal, ExternalReviewSnapshot, FileTreeNode, WorkspaceInfo } from "../types/iliad";
+import type {
+  AgentChangeProposal,
+  ExternalReviewSnapshot,
+  FileTreeNode,
+  ReviewFileExpectation,
+  ReviewFileRevision,
+  WorkspaceInfo
+} from "../types/iliad";
 
 export type { ReviewTarget };
 
@@ -124,6 +131,24 @@ export function externalReviewTargetForActiveFile(
   }
 
   return null;
+}
+
+/**
+ * The active file's pending outside item together with the revision it was
+ * built from, so an action taken from it (the conflict banner) is bound to
+ * what the writer saw: main answers `stale` if a newer revision arrived.
+ */
+export function externalReviewTargetWithRevision(
+  proposals: AgentChangeProposal[],
+  workspacePath: string | undefined | null,
+  activeRelativePath: string | undefined | null
+): (ReviewTarget & { revision: ReviewFileRevision }) | null {
+  const target = externalReviewTargetForActiveFile(proposals, workspacePath, activeRelativePath);
+  const file = target
+    ? proposals.find((proposal) => proposal.id === target.proposalId)?.files.find((candidate) => candidate.id === target.fileId)
+    : undefined;
+
+  return target && file ? { ...target, revision: reviewFileRevision(file) } : null;
 }
 
 export function reviewTargetAfterActiveFileChange({
@@ -524,8 +549,17 @@ export function useOutsideReview({
     }
   }, []);
 
+  /**
+   * Keep one whole file. `revision` is the file as the writer saw it; main
+   * answers `stale` (nothing done, review refreshed) when it moved on.
+   */
   const applyAgentProposalFile = useCallback(
-    async (proposalId: string, fileId: string, options: { discardBuffer?: boolean } = {}) => {
+    async (
+      proposalId: string,
+      fileId: string,
+      revision: ReviewFileRevision,
+      options: { discardBuffer?: boolean } = {}
+    ) => {
       return runReviewAction(`apply-file:${proposalId}:${fileId}`, async () => {
         if (!workspace) {
           return;
@@ -539,7 +573,9 @@ export function useOutsideReview({
           const result = await window.iliad.agent.applyProposalFile({
             workspaceSessionId: workspace.sessionId ?? "",
             proposalId,
-            fileId
+            fileId,
+            baselineHash: revision.baselineHash,
+            diskHash: revision.diskHash
           });
 
         if (workspacePathRef.current !== workspace.path) {
@@ -581,7 +617,7 @@ export function useOutsideReview({
 
         await refreshExternalReview();
 
-        if (result.kind === "create_file" && result.file && result.content !== undefined) {
+        if (result.status !== "stale" && result.kind === "create_file" && result.file && result.content !== undefined) {
           const nextTree = await refreshTree(workspace.path);
           const nextFile = findNode(nextTree, result.file.path) ?? result.file;
 
@@ -601,7 +637,8 @@ export function useOutsideReview({
           }
         }
 
-        if (result.kind === "delete_file") {
+        // A stale Keep did nothing on disk: the deleted document's buffer stays.
+        if (result.status !== "stale" && result.kind === "delete_file") {
           const file = result.proposal.files.find((candidate) => candidate.id === result.fileId);
           const activeRelativePath = activeFileRelativePathRef.current;
 
@@ -626,17 +663,22 @@ export function useOutsideReview({
 
         const resultFile = result.proposal.files.find((candidate) => candidate.id === result.fileId);
 
+        if (result.status === "stale") {
+          // The outside tool changed the file again (or reverted it) after
+          // the writer saw it. Main already refreshed the review; the target
+          // stays so the refreshed item is what the editor shows next.
+          setNotice(strings.review.outsideChangeStale);
+          return "stale" as const;
+        }
+
         if (result.status === "applied" || (resultFile && !fileHasMutableReview(resultFile))) {
           setNotice(result.kind === "create_file" ? strings.review.created : strings.review.applied);
           setAgentReviewTarget(null);
-        } else if (result.status === "stale") {
-          // The outside tool changed the file again (or reverted it). Main
-          // already refreshed the review; the target stays so the refreshed
-          // item is what the editor shows next.
-          setNotice(strings.review.outsideChangeStale);
-        } else {
-          setError(resultFile?.error ?? strings.review.errorFallback);
+          return "applied" as const;
         }
+
+        setError(resultFile?.error ?? strings.review.errorFallback);
+        return "failed" as const;
         } catch (applyError) {
           setError(applyError instanceof Error ? applyError.message : strings.review.errorFallback);
           throw applyError;
@@ -663,8 +705,9 @@ export function useOutsideReview({
     ]
   );
 
+  /** Restore every pending file of the review; `files` is the set the writer was shown. */
   const rejectAgentProposal = useCallback(
-    async (proposalId: string) => {
+    async (proposalId: string, files: ReviewFileExpectation[]) => {
       return runReviewAction(`reject-proposal:${proposalId}`, async () => {
         if (!workspace) {
           return;
@@ -676,7 +719,8 @@ export function useOutsideReview({
         try {
           const proposal = await window.iliad.agent.rejectProposal({
             workspaceSessionId: workspace.sessionId ?? "",
-            proposalId
+            proposalId,
+            files
           });
 
           if (workspacePathRef.current !== workspace.path) {
@@ -735,8 +779,9 @@ export function useOutsideReview({
     ]
   );
 
+  /** Restore one whole file; `revision` is the file as the writer saw it (else stale). */
   const rejectAgentProposalFile = useCallback(
-    async (proposalId: string, fileId: string) => {
+    async (proposalId: string, fileId: string, revision: ReviewFileRevision) => {
       return runReviewAction(`reject-file:${proposalId}:${fileId}`, async () => {
         if (!workspace) {
           return;
@@ -753,7 +798,9 @@ export function useOutsideReview({
           const proposal = await window.iliad.agent.rejectProposalFile({
             workspaceSessionId: workspace.sessionId ?? "",
             proposalId,
-            fileId
+            fileId,
+            baselineHash: revision.baselineHash,
+            diskHash: revision.diskHash
           });
 
         if (workspacePathRef.current !== workspace.path) {
@@ -1352,6 +1399,9 @@ export function useOutsideReview({
       return null;
     }
 
+    // File-level Keep / Restore act on exactly the revision rendered here.
+    const revision = reviewFileRevision(activeReview.file);
+
     if (activeReview.file.kind === "edit_file") {
       return {
         mode: "edit_file",
@@ -1374,11 +1424,11 @@ export function useOutsideReview({
         },
         onAcceptFile: () => {
           onReviewNavigation?.();
-          void applyAgentProposalFile(activeReview.proposal.id, activeReview.file.id).catch(() => undefined);
+          void applyAgentProposalFile(activeReview.proposal.id, activeReview.file.id, revision).catch(() => undefined);
         },
         onRejectFile: () => {
           onReviewNavigation?.();
-          void rejectAgentProposalFile(activeReview.proposal.id, activeReview.file.id).catch(() => undefined);
+          void rejectAgentProposalFile(activeReview.proposal.id, activeReview.file.id, revision).catch(() => undefined);
         }
       };
     }
@@ -1395,11 +1445,11 @@ export function useOutsideReview({
         },
         onAcceptFile: () => {
           onReviewNavigation?.();
-          void applyAgentProposalFile(activeReview.proposal.id, activeReview.file.id).catch(() => undefined);
+          void applyAgentProposalFile(activeReview.proposal.id, activeReview.file.id, revision).catch(() => undefined);
         },
         onRejectFile: () => {
           onReviewNavigation?.();
-          void rejectAgentProposalFile(activeReview.proposal.id, activeReview.file.id).catch(() => undefined);
+          void rejectAgentProposalFile(activeReview.proposal.id, activeReview.file.id, revision).catch(() => undefined);
         }
       };
     }
@@ -1415,11 +1465,11 @@ export function useOutsideReview({
       },
       onAcceptFile: () => {
         onReviewNavigation?.();
-        void applyAgentProposalFile(activeReview.proposal.id, activeReview.file.id).catch(() => undefined);
+        void applyAgentProposalFile(activeReview.proposal.id, activeReview.file.id, revision).catch(() => undefined);
       },
       onRejectFile: () => {
         onReviewNavigation?.();
-        void rejectAgentProposalFile(activeReview.proposal.id, activeReview.file.id).catch(() => undefined);
+        void rejectAgentProposalFile(activeReview.proposal.id, activeReview.file.id, revision).catch(() => undefined);
       }
     };
   }, [

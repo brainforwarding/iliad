@@ -1,7 +1,7 @@
-import { fileHasMutableReview } from "./reviewFiles";
+import { fileHasMutableReview, reviewFileExpectation } from "./reviewFiles";
 import type { PendingFileTreeChange } from "./pendingFileTree";
 import { normalizeRelativePath } from "./pendingFileTree";
-import type { AgentChangeProposal, AgentProposalFileChange } from "../types/iliad";
+import type { AgentChangeProposal, AgentProposalFileChange, ReviewFileExpectation } from "../types/iliad";
 
 export interface ReviewQueueItem {
   id: string;
@@ -14,6 +14,11 @@ export interface ReviewQueueItem {
   updatedAt: string;
   /** Other file ids of the same proposal for the same path (reviewed together). */
   duplicateFileIds: string[];
+  /**
+   * The revision this item was built from, for `fileId` then each duplicate:
+   * bulk Keep all / Restore all send these so main acts only on what was shown.
+   */
+  files: ReviewFileExpectation[];
 }
 
 export interface ReviewTarget {
@@ -64,6 +69,7 @@ export function buildReviewQueueItems(proposals: AgentChangeProposal[]): ReviewQ
       if (existing) {
         if (existing.proposalId === proposal.id) {
           existing.duplicateFileIds.push(file.id);
+          existing.files.push(reviewFileExpectation(file));
         }
 
         return;
@@ -78,7 +84,8 @@ export function buildReviewQueueItems(proposals: AgentChangeProposal[]): ReviewQ
         normalizedRelativePath,
         createdAt: proposal.createdAt,
         updatedAt: proposal.updatedAt || proposal.createdAt,
-        duplicateFileIds: []
+        duplicateFileIds: [],
+        files: [reviewFileExpectation(file)]
       };
 
       byPath.set(normalizedRelativePath, item);
@@ -108,4 +115,21 @@ export function pendingFileTreeChangesFromQueue(items: ReviewQueueItem[]): Pendi
     normalizedRelativePath: item.normalizedRelativePath,
     status: "pending"
   }));
+}
+
+/**
+ * The files a bulk Restore all sends, grouped per proposal: every queued file
+ * with the revision the tree showed. Main restores nothing unless its pending
+ * set is exactly this one.
+ */
+export function shownFilesByProposal(items: ReviewQueueItem[]): Map<string, ReviewFileExpectation[]> {
+  const byProposal = new Map<string, ReviewFileExpectation[]>();
+
+  for (const item of items) {
+    const shown = byProposal.get(item.proposalId) ?? [];
+    shown.push(...item.files);
+    byProposal.set(item.proposalId, shown);
+  }
+
+  return byProposal;
 }

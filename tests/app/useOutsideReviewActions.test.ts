@@ -4,11 +4,13 @@ import {
   editorReviewActionLabelsForMode,
   externalActiveFileAutoSelectionDecision,
   externalReviewTargetForActiveFile,
+  externalReviewTargetWithRevision,
   loadActiveBufferFromDiskIfSafe,
   reviewActionMayLoadActiveBuffer,
   reviewTargetAfterActiveFileChange
 } from "../../src/app/useOutsideReview";
 import { conflictMayResume } from "../../src/app/useDocumentPersistence";
+import { buildReviewQueueItems, shownFilesByProposal } from "../../src/review/reviewQueue";
 import { appStrings } from "../../src/i18n/strings";
 import type { AgentChangeProposal, AgentProposalFileChange } from "../../src/types/iliad";
 
@@ -116,6 +118,40 @@ describe("useOutsideReview helpers", () => {
   it("does not recover unrelated or non-external active-file targets", () => {
     expect(externalReviewTargetForActiveFile([externalEditProposal()], "/workspace", "other.md")).toBeNull();
     expect(externalReviewTargetForActiveFile([proposal()], "/workspace", "novel/lighthouse.md")).toBeNull();
+  });
+
+  it("binds the conflict banner's target to the revision it was built from", () => {
+    const shown = externalEditProposal();
+    const file = shown.files[0] as Extract<AgentProposalFileChange, { kind: "edit_file" }>;
+    file.baselineContentHash = "base";
+    file.reviewedContentHash = "disk-1";
+
+    expect(externalReviewTargetWithRevision([shown], "/workspace", "novel/lighthouse.md")).toEqual({
+      proposalId: "proposal-1",
+      fileId: "file-1",
+      revision: { baselineHash: "base", diskHash: "disk-1" }
+    });
+
+    // A newer revision keeps the stable ids but carries its own hashes, so an
+    // action built from the older render is answered stale by main.
+    const newer = externalEditProposal();
+    (newer.files[0] as Extract<AgentProposalFileChange, { kind: "edit_file" }>).reviewedContentHash = "disk-2";
+    expect(externalReviewTargetWithRevision([newer], "/workspace", "novel/lighthouse.md")?.revision.diskHash).toBe("disk-2");
+    expect(externalReviewTargetWithRevision([newer], "/workspace", "other.md")).toBeNull();
+  });
+
+  it("sends bulk Restore all the exact set of files the tree showed, per proposal", () => {
+    const shown = externalMultiFileProposal();
+    shown.files.forEach((file, index) => {
+      if (file.kind === "edit_file") {
+        file.reviewedContentHash = `disk-${index}`;
+      }
+    });
+
+    const byProposal = shownFilesByProposal(buildReviewQueueItems([shown]));
+    expect([...byProposal.keys()]).toEqual(["proposal-1"]);
+    expect(byProposal.get("proposal-1")?.map((entry) => entry.fileId).sort()).toEqual(shown.files.map((file) => file.id).sort());
+    expect(byProposal.get("proposal-1")?.every((entry) => entry.baselineHash === "base" && entry.diskHash?.startsWith("disk-"))).toBe(true);
   });
 
   it("only auto-selects external active-file reviews when no review is already active", () => {

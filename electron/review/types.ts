@@ -131,7 +131,20 @@ export type AgentDraftFileChange =
       summary: string;
     };
 
-export interface ApplyAgentProposalFileRequest {
+/**
+ * The revision of one review file as the renderer showed it (null where that
+ * side is absent). Main answers `stale` when the item no longer matches.
+ */
+export interface ReviewFileRevision {
+  baselineHash: string | null;
+  diskHash: string | null;
+}
+
+export interface ReviewFileExpectation extends ReviewFileRevision {
+  fileId: string;
+}
+
+export interface ApplyAgentProposalFileRequest extends ReviewFileRevision {
   workspaceSessionId: string;
   proposalId: string;
   fileId: string;
@@ -165,7 +178,7 @@ export type ApplyAgentProposalFileResponse =
       status: AgentProposalFileStatus;
     };
 
-export interface RejectAgentProposalFileRequest {
+export interface RejectAgentProposalFileRequest extends ReviewFileRevision {
   workspaceSessionId: string;
   proposalId: string;
   fileId: string;
@@ -174,6 +187,8 @@ export interface RejectAgentProposalFileRequest {
 export interface RejectAgentProposalRequest {
   workspaceSessionId: string;
   proposalId: string;
+  /** Every pending file the writer was shown; any difference makes the action stale. */
+  files: ReviewFileExpectation[];
 }
 
 export interface ReviewChunkActionRequest {

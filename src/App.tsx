@@ -9,7 +9,7 @@ import {
   useDocumentPersistence,
   type SaveStatus
 } from "./app/useDocumentPersistence";
-import { externalReviewTargetForActiveFile, useOutsideReview } from "./app/useOutsideReview";
+import { externalReviewTargetWithRevision, useOutsideReview } from "./app/useOutsideReview";
 import { useSelectionComments } from "./app/useSelectionComments";
 import { useSettingsPanel } from "./app/useSettingsPanel";
 import { useSidebarPeek } from "./app/useSidebarPeek";
@@ -36,7 +36,7 @@ import {
 } from "./files/fileTreeContentSearch";
 import { fileHasMutableReview } from "./review/reviewFiles";
 import { logReviewNavigation } from "./review/reviewDebug";
-import { buildReviewQueueSummary, pendingFileTreeChangesFromQueue } from "./review/reviewQueue";
+import { buildReviewQueueSummary, pendingFileTreeChangesFromQueue, shownFilesByProposal } from "./review/reviewQueue";
 import type { ContentSearchRevealTarget } from "./editor/contentSearchReveal";
 import { useFileActions } from "./files/fileActions";
 import { findNode, findNodeByRelativePath } from "./files/fileTree";
@@ -368,7 +368,8 @@ export default function App() {
       return null;
     }
 
-    return externalReviewTargetForActiveFile(agentProposals, workspace.path, activeFile.relativePath);
+    // The banner acts on the revision it was built from; a newer one is stale.
+    return externalReviewTargetWithRevision(agentProposals, workspace.path, activeFile.relativePath);
   }, [activeFile, activeFileInConflict, agentProposals, workspace]);
   const reloadActiveDocumentFromDisk = useCallback(
     async ({ mayReplace }: { mayReplace?: () => boolean } = {}) => {
@@ -447,7 +448,11 @@ export default function App() {
       relativePath: activeFile.relativePath,
       busy: reviewActionBusy,
       onRestore: () => {
-        void rejectAgentProposalFile(conflictReviewTarget.proposalId, conflictReviewTarget.fileId).catch(() => undefined);
+        void rejectAgentProposalFile(
+          conflictReviewTarget.proposalId,
+          conflictReviewTarget.fileId,
+          conflictReviewTarget.revision
+        ).catch(() => undefined);
       },
       onKeep: () => {
         if (!window.confirm(strings.editor.conflictBanner.confirmDiscard)) {
@@ -456,9 +461,12 @@ export default function App() {
 
         // The writer confirmed discarding the buffer: the only Keep that may
         // load disk over a conflicted buffer (spec V5).
-        void applyAgentProposalFile(conflictReviewTarget.proposalId, conflictReviewTarget.fileId, {
-          discardBuffer: true
-        }).catch(() => undefined);
+        void applyAgentProposalFile(
+          conflictReviewTarget.proposalId,
+          conflictReviewTarget.fileId,
+          conflictReviewTarget.revision,
+          { discardBuffer: true }
+        ).catch(() => undefined);
       }
     };
   }, [
@@ -666,15 +674,22 @@ export default function App() {
       }))
     });
     setPendingReviewDiscarding(true);
+    let stale = false;
 
     try {
+      // Each item carries the revision it was built from: a file that changed
+      // since the tree showed it comes back stale and is left for review.
       for (const item of items) {
-        for (const fileId of [item.fileId, ...item.duplicateFileIds]) {
-          await applyAgentProposalFile(item.proposalId, fileId);
+        for (const expected of item.files) {
+          const { fileId, ...revision } = expected;
+          stale = (await applyAgentProposalFile(item.proposalId, fileId, revision)) === "stale" || stale;
         }
       }
 
-      setNotice(strings.review.applied);
+      if (!stale) {
+        // On a stale outcome the hook already showed the refreshed-review notice.
+        setNotice(strings.review.applied);
+      }
     } finally {
       setPendingReviewDiscarding(false);
       logReviewNavigation("bulk_accept_pending_changes_finish", { count: items.length });
@@ -706,21 +721,17 @@ export default function App() {
     setPendingReviewDiscarding(true);
 
     const failures: string[] = [];
-    const proposalIds = new Set<string>();
+    // The exact set the tree showed, per proposal: main restores nothing when
+    // the pending set or any file's revision differs from it.
+    const shownByProposal = shownFilesByProposal(items);
     let stale = false;
 
     try {
       // Outside items are restored as one batch in main, which continues past
       // individual failures and reports them. One failure never stops the rest.
-      for (const item of items) {
-        if (proposalIds.has(item.proposalId)) {
-          continue;
-        }
-
-        proposalIds.add(item.proposalId);
-
+      for (const [proposalId, files] of shownByProposal) {
         try {
-          stale = (await rejectAgentProposal(item.proposalId)) === "stale" || stale;
+          stale = (await rejectAgentProposal(proposalId, files)) === "stale" || stale;
         } catch (rejectError) {
           failures.push(rejectError instanceof Error ? rejectError.message : String(rejectError));
         }
@@ -1572,7 +1583,7 @@ export default function App() {
         if (reviewRevealPath === path) {
           setReviewRevealPath(null);
         }
-    
+
         if (revealFolderPath === path) {
           setRevealFolderPath(null);
         }

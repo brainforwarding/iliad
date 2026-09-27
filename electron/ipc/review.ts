@@ -2,7 +2,12 @@ import { ipcMain } from "electron";
 import path from "node:path";
 import { sanitizeUnknownError, type DiagnosticDetailValue, type DiagnosticsLogger } from "../diagnostics/logger.js";
 import { workspaceFingerprint } from "../review/externalReviewProjection.js";
-import type { ExternalReviewActionResult, WorkspaceBaselineService } from "../review/workspaceBaseline.js";
+import type {
+  ExternalReviewActionResult,
+  ExternalReviewFileExpectation,
+  ExternalReviewFileRevision,
+  WorkspaceBaselineService
+} from "../review/workspaceBaseline.js";
 import type {
   AgentChangeProposal,
   ApplyAgentProposalFileResponse,
@@ -36,9 +41,14 @@ interface ReviewFileRequest {
   fileId: string;
 }
 
+interface ReviewFileRevisionRequest extends ReviewFileRequest {
+  expected: ExternalReviewFileRevision;
+}
+
 interface ReviewProposalRequest {
   workspaceSessionId: string;
   proposalId: string;
+  files: ExternalReviewFileExpectation[];
 }
 
 export function registerReviewIpc(deps: ReviewIpcDeps) {
@@ -62,11 +72,11 @@ export async function handleKeepFileIpc(
   deps: ReviewIpcDeps
 ): Promise<ApplyAgentProposalFileResponse> {
   const workspaceRoot = await trustedWorkspaceRoot(event, request, deps, "The review action came from an untrusted window.");
-  const { proposalId, fileId } = fileRequest(request);
+  const { proposalId, fileId, expected } = fileRevisionRequest(request);
   requireCurrentProposal(deps, workspaceRoot, proposalId);
 
   return logged(deps, "review.keep_file", workspaceRoot, { fileId }, async () =>
-    keepResponse(await deps.baselineService.keep(workspaceRoot, fileId), fileId)
+    keepResponse(await deps.baselineService.keep(workspaceRoot, fileId, expected), fileId)
   );
 }
 
@@ -77,11 +87,11 @@ export async function handleRestoreFileIpc(
   deps: ReviewIpcDeps
 ): Promise<AgentChangeProposal> {
   const workspaceRoot = await trustedWorkspaceRoot(event, request, deps, "The review action came from an untrusted window.");
-  const { proposalId, fileId } = fileRequest(request);
+  const { proposalId, fileId, expected } = fileRevisionRequest(request);
   requireCurrentProposal(deps, workspaceRoot, proposalId);
 
   return logged(deps, "review.restore_file", workspaceRoot, { fileId }, async () =>
-    (await deps.baselineService.restore(workspaceRoot, fileId)).proposal
+    (await deps.baselineService.restore(workspaceRoot, fileId, expected)).proposal
   );
 }
 
@@ -92,11 +102,11 @@ export async function handleRestoreAllIpc(
   deps: ReviewIpcDeps
 ): Promise<AgentChangeProposal> {
   const workspaceRoot = await trustedWorkspaceRoot(event, request, deps, "The review action came from an untrusted window.");
-  const { proposalId } = proposalRequest(request);
+  const { proposalId, files } = proposalRequest(request);
   requireCurrentProposal(deps, workspaceRoot, proposalId);
 
   return logged(deps, "review.restore_all", workspaceRoot, {}, async () => {
-    const result = await deps.baselineService.restoreAll(workspaceRoot);
+    const result = await deps.baselineService.restoreAll(workspaceRoot, files);
 
     if (result.unrestored.length > 0) {
       throw new Error(
@@ -228,6 +238,47 @@ function fileRequest(request: unknown): ReviewFileRequest {
   return { workspaceSessionId, proposalId, fileId };
 }
 
+/**
+ * File-level actions carry the revision the renderer showed (baseline and
+ * disk hash, `null` for an absent side). Both keys are required: a request
+ * that does not say which revision it acts on is refused.
+ */
+function fileRevisionRequest(request: unknown): ReviewFileRevisionRequest {
+  const target = fileRequest(request);
+  const expected = revisionFields(request);
+
+  if (!expected) {
+    throw new Error("The review action is missing its target.");
+  }
+
+  return { ...target, expected };
+}
+
+function revisionFields(value: unknown): ExternalReviewFileRevision | null {
+  const baselineHash = nullableHashField(value, "baselineHash");
+  const diskHash = nullableHashField(value, "diskHash");
+
+  if (baselineHash === undefined || diskHash === undefined || (baselineHash === null && diskHash === null)) {
+    return null;
+  }
+
+  return { baselineHash, diskHash };
+}
+
+function nullableHashField(value: unknown, key: string): string | null | undefined {
+  if (!value || typeof value !== "object" || !(key in value)) {
+    return undefined;
+  }
+
+  const field = (value as Record<string, unknown>)[key];
+
+  if (field === null) {
+    return null;
+  }
+
+  return typeof field === "string" && field.trim() ? field.trim() : undefined;
+}
+
 function chunkRequest(request: unknown) {
   const { proposalId, fileId } = fileRequest(request);
   const chunkId = stringField(request, "chunkId");
@@ -244,12 +295,25 @@ function chunkRequest(request: unknown) {
 function proposalRequest(request: unknown): ReviewProposalRequest {
   const proposalId = stringField(request, "proposalId");
   const workspaceSessionId = stringField(request, "workspaceSessionId");
+  const rawFiles =
+    request && typeof request === "object" && "files" in request ? (request as { files: unknown }).files : undefined;
 
-  if (!proposalId || !workspaceSessionId) {
+  if (!proposalId || !workspaceSessionId || !Array.isArray(rawFiles) || rawFiles.length === 0) {
     throw new Error("The review action is missing its target.");
   }
 
-  return { workspaceSessionId, proposalId };
+  const files = rawFiles.map((entry) => {
+    const fileId = stringField(entry, "fileId");
+    const expected = revisionFields(entry);
+
+    if (!fileId || !expected) {
+      throw new Error("The review action is missing its target.");
+    }
+
+    return { fileId, ...expected };
+  });
+
+  return { workspaceSessionId, proposalId, files };
 }
 
 function stringField(value: unknown, key: string) {

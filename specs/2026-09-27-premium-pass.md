@@ -1,6 +1,6 @@
 # Premium pass: calmer chrome, paper-premium colors, review in the top row
 
-Date: 2026-09-27. Status: reviewed (Codex xhigh, 2026-09-27); implementing.
+Date: 2026-09-27. Status: implemented and verified locally (2026-09-27); implementation reviewed by Codex xhigh; not released (owner).
 Branch: `premium-pass` (off `record-shortcuts`). Endpoint: implemented and
 verified in the local build, **no release** (owner, 2026-09-27).
 
@@ -271,3 +271,15 @@ State is tracked in this file's "Progress" section below.
 - [x] Stage 4 — settings panel (`src/components/settings/`, `useSettingsPanel`; update check moved from the workspace menu to General; app menu "Settings…")
 - [x] Stage 5 — review in the top row (`ReviewControls` portaled into the top-row slot; ↑ ↓ wrap, local active hunk, hidden when stale), rendered suggestions (`renderedInsert.ts`), removed rows full width and aligned with the added block (owner feedback), resize line hidden at rest so the sidebar edge is one hairline (owner feedback)
 - [x] Stage 6 — empty state G (`EditorEmptyState`, `src/preferences/recentDocuments.ts`; recorded via `useFileActions` `onDocumentOpened`, relocated via `onPathRelocated`; stale entries skipped at render)
+
+## Implementation review (Codex xhigh, 2026-09-27)
+
+- High (fixed): file-level Keep all / Restore all — from the top row, the
+  conflict banner and the tree's bulk row — now carry the revision the writer
+  saw (baseline + disk hash); main refuses with `stale` if it changed, writes
+  nothing and shows the refreshed review. Restore all requires the exact shown
+  set. A stale Keep on a create/delete no longer clears the open buffer.
+- Medium (fixed): the ↑ ↓ cursor key includes the reviewed content hash, so it
+  resets when an outside revision arrives.
+- Low (fixed): whitespace.
+

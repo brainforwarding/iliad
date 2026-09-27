@@ -8,6 +8,22 @@ import type { DisplayReviewHunk } from "./diff";
  * restores anything.
  */
 
+/**
+ * The key the ↑ ↓ cursor is remembered under. Hunk ids and indexes are
+ * positional, so the key names the reviewed disk content, not just the stable
+ * file id: when the outside file changes (a refresh, or a chunk Restore that
+ * rewrites disk) the cursor resets instead of pointing at a different change.
+ * A chunk Keep only advances the baseline, so the remaining hunks keep their
+ * order and the clamped index still lands on the next one.
+ */
+export function hunkNavigationKey(input: {
+  documentPath: string | null | undefined;
+  fileId: string;
+  reviewedContentHash: string | null | undefined;
+}) {
+  return [input.documentPath ?? "", input.fileId, input.reviewedContentHash ?? ""].join("\u0000");
+}
+
 /** Navigation needs a live (non-stale) review with at least one unresolved hunk. */
 export function hunkNavigationAvailable(input: { stale: boolean; hunkCount: number }) {
   return !input.stale && input.hunkCount > 0;

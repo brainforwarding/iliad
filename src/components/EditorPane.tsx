@@ -9,7 +9,13 @@ import { markdownLineCount, reviewBlockedLineRanges } from "../editor/aiReview/b
 import { aiReviewExtension } from "../editor/aiReview/extension";
 import { reviewHunksForDisplay, type DisplayReviewHunk } from "../editor/aiReview/diff";
 import { acceptReviewShortcutApplies, nextChunkFocusIndex } from "../editor/aiReview/keyboard";
-import { clampHunkIndex, hunkScrollPosition, nextHunkIndex, previousHunkIndex } from "../editor/aiReview/navigation";
+import {
+  clampHunkIndex,
+  hunkNavigationKey,
+  hunkScrollPosition,
+  nextHunkIndex,
+  previousHunkIndex
+} from "../editor/aiReview/navigation";
 import type { EditorReviewState } from "../editor/aiReview/types";
 import { CodeMirrorHost } from "../editor/CodeMirrorHost";
 import { imageDropPasteExtension } from "../editor/imageDropPaste";
@@ -333,9 +339,18 @@ export function EditorPane({
   }, [review]);
   const unresolvedHunks = useMemo(() => editReviewDisplay?.hunks ?? [], [editReviewDisplay]);
   const reviewStale = review?.mode === "edit_file" && (Boolean(editReviewDisplay?.stale) || review.file.status === "stale");
-  // ↑ ↓ navigation: a local index keyed to the review snapshot, so a new file
-  // or a new review starts with no active hunk (no reset effect needed).
-  const reviewNavigationKey = review?.mode === "edit_file" ? `${file?.path ?? ""}\u0000${review.file.id}` : null;
+  // ↑ ↓ navigation: a local index keyed to the review snapshot (file and
+  // reviewed content), so a new file or a new outside revision starts with no
+  // active hunk (no reset effect needed).
+  const reviewNavigationKey =
+    review?.mode === "edit_file"
+      ? hunkNavigationKey({
+          documentPath: file?.path,
+          fileId: review.file.id,
+          // Projected edits always carry the hash; the content itself is the fallback.
+          reviewedContentHash: review.file.reviewedContentHash ?? review.file.replacement
+        })
+      : null;
   const [hunkCursor, setHunkCursor] = useState<{ key: string; index: number } | null>(null);
   const activeHunkIndex =
     hunkCursor && reviewNavigationKey !== null && hunkCursor.key === reviewNavigationKey && !reviewStale

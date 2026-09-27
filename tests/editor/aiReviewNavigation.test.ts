@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   clampHunkIndex,
   hunkNavigationAvailable,
+  hunkNavigationKey,
   hunkScrollPosition,
   nextHunkIndex,
   previousHunkIndex
@@ -52,5 +53,16 @@ describe("outside review hunk navigation", () => {
     expect(hunkScrollPosition(doc, { oldLines: [], displayOldStartLine: 3, displayAnchorLine: 2 })).toBe(doc.line(2).to);
     expect(hunkScrollPosition(doc, { oldLines: [], displayOldStartLine: 1, displayAnchorLine: 0 })).toBe(0);
     expect(hunkScrollPosition(doc, { oldLines: ["x"], displayOldStartLine: 9, displayAnchorLine: 9 })).toBe(doc.line(3).from);
+  });
+
+  it("keys the cursor to the reviewed snapshot so a new outside revision resets it", () => {
+    const shown = hunkNavigationKey({ documentPath: "/ws/doc.md", fileId: "external-file-1", reviewedContentHash: "disk-1" });
+
+    // Same file, same reviewed content (e.g. after a chunk Keep): the cursor stays.
+    expect(hunkNavigationKey({ documentPath: "/ws/doc.md", fileId: "external-file-1", reviewedContentHash: "disk-1" })).toBe(shown);
+    // The stable file id survives revisions; the reviewed content does not.
+    expect(hunkNavigationKey({ documentPath: "/ws/doc.md", fileId: "external-file-1", reviewedContentHash: "disk-2" })).not.toBe(shown);
+    expect(hunkNavigationKey({ documentPath: "/ws/other.md", fileId: "external-file-1", reviewedContentHash: "disk-1" })).not.toBe(shown);
+    expect(hunkNavigationKey({ documentPath: "/ws/doc.md", fileId: "external-file-2", reviewedContentHash: "disk-1" })).not.toBe(shown);
   });
 });

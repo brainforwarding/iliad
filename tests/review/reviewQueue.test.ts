@@ -4,6 +4,7 @@ import {
   buildReviewQueueSummary,
   pendingFileTreeChangesFromQueue
 } from "../../src/review/reviewQueue";
+import { reviewFileRevision } from "../../src/review/reviewFiles";
 import type { AgentChangeProposal, AgentProposalFileChange } from "../../src/types/iliad";
 
 function editFile(overrides: Partial<Extract<AgentProposalFileChange, { kind: "edit_file" }>> = {}) {
@@ -81,6 +82,50 @@ describe("review queue", () => {
 
     expect(items).toHaveLength(2);
     expect(items.find((item) => item.normalizedRelativePath === "doc.md")?.duplicateFileIds).toEqual(["duplicate"]);
+  });
+
+  it("carries the revision each queued file was built from, for bulk Keep all / Restore all", () => {
+    const [create, remove, edit] = buildReviewQueueItems([
+      externalProposal({
+        files: [
+          editFile({ id: "edit", baselineContentHash: "base-e", reviewedContentHash: "disk-e" }),
+          editFile({ id: "edit-dup", baselineContentHash: "base-e", reviewedContentHash: "disk-e2" }),
+          {
+            id: "create",
+            kind: "create_file",
+            status: "pending",
+            relativePath: "new.md",
+            content: "fresh\n",
+            unifiedDiff: "",
+            reviewedContentHash: "disk-c"
+          },
+          {
+            id: "delete",
+            kind: "delete_file",
+            status: "pending",
+            relativePath: "gone.md",
+            baseHash: "base-d",
+            baseContent: "gone\n",
+            unifiedDiff: "",
+            baselineContentHash: "base-d"
+          }
+        ]
+      })
+    ]).sort((left, right) => left.fileId.localeCompare(right.fileId));
+
+    expect(create.files).toEqual([{ fileId: "create", baselineHash: null, diskHash: "disk-c" }]);
+    expect(remove.files).toEqual([{ fileId: "delete", baselineHash: "base-d", diskHash: null }]);
+    expect(edit.files).toEqual([
+      { fileId: "edit", baselineHash: "base-e", diskHash: "disk-e" },
+      { fileId: "edit-dup", baselineHash: "base-e", diskHash: "disk-e2" }
+    ]);
+  });
+
+  it("derives a file revision that fails safe when a reviewed hash is missing", () => {
+    expect(reviewFileRevision(editFile({ baseHash: "base", reviewedContentHash: undefined }))).toEqual({
+      baselineHash: "base",
+      diskHash: null
+    });
   });
 
   it("skips files that no longer need a decision", () => {

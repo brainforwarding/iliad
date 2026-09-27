@@ -88,20 +88,89 @@ describe("review IPC", () => {
     await expect(handleGetExternalReviewIpc(event, { workspaceSessionId: "other" }, d)).rejects.toThrow(/trusted workspace/);
   });
 
-  it("keeps and restores through the baseline service", async () => {
+  it("keeps and restores through the baseline service with the revision the renderer saw", async () => {
     const d = deps();
-    const request = { workspaceSessionId: "session-1", proposalId: "proposal-external", fileId: "file-1" };
+    const request = {
+      workspaceSessionId: "session-1",
+      proposalId: "proposal-external",
+      fileId: "file-1",
+      baselineHash: "b",
+      diskHash: "d"
+    };
 
     await expect(handleKeepFileIpc(event, request, d)).resolves.toMatchObject({
       kind: "edit_file",
       status: "applied",
       content: "kept\n"
     });
-    expect(d.baselineService.keep).toHaveBeenCalledWith("/ws", "file-1");
+    expect(d.baselineService.keep).toHaveBeenCalledWith("/ws", "file-1", { baselineHash: "b", diskHash: "d" });
     await expect(handleRestoreFileIpc(event, request, d)).resolves.toBe(proposal);
-    expect(d.baselineService.restore).toHaveBeenCalledWith("/ws", "file-1");
-    await expect(handleRestoreAllIpc(event, request, d)).resolves.toBe(proposal);
-    expect(d.baselineService.restoreAll).toHaveBeenCalledWith("/ws");
+    expect(d.baselineService.restore).toHaveBeenCalledWith("/ws", "file-1", { baselineHash: "b", diskHash: "d" });
+
+    // Creates have no baseline and deletes no disk: null is an explicit side.
+    await handleKeepFileIpc(event, { ...request, baselineHash: null }, d);
+    expect(d.baselineService.keep).toHaveBeenLastCalledWith("/ws", "file-1", { baselineHash: null, diskHash: "d" });
+    await handleRestoreFileIpc(event, { ...request, diskHash: null }, d);
+    expect(d.baselineService.restore).toHaveBeenLastCalledWith("/ws", "file-1", { baselineHash: "b", diskHash: null });
+
+    const files = [
+      { fileId: "file-1", baselineHash: "b", diskHash: "d" },
+      { fileId: "file-2", baselineHash: null, diskHash: "n" }
+    ];
+    await expect(
+      handleRestoreAllIpc(event, { workspaceSessionId: "session-1", proposalId: "proposal-external", files }, d)
+    ).resolves.toBe(proposal);
+    expect(d.baselineService.restoreAll).toHaveBeenCalledWith("/ws", files);
+  });
+
+  it("refuses file-level actions that do not say which revision they act on", async () => {
+    const d = deps();
+    const target = { workspaceSessionId: "session-1", proposalId: "proposal-external", fileId: "file-1" };
+
+    for (const request of [
+      target,
+      { ...target, baselineHash: "b" },
+      { ...target, diskHash: "d" },
+      { ...target, baselineHash: null, diskHash: null },
+      { ...target, baselineHash: "", diskHash: "d" },
+      { ...target, baselineHash: 1, diskHash: "d" }
+    ]) {
+      await expect(handleKeepFileIpc(event, request, d)).rejects.toThrow(/missing its target/);
+      await expect(handleRestoreFileIpc(event, request, d)).rejects.toThrow(/missing its target/);
+    }
+
+    for (const files of [undefined, [], [{ fileId: "file-1" }], [{ baselineHash: "b", diskHash: "d" }]]) {
+      await expect(
+        handleRestoreAllIpc(event, { workspaceSessionId: "session-1", proposalId: "proposal-external", files }, d)
+      ).rejects.toThrow(/missing its target/);
+    }
+
+    expect(d.baselineService.keep).not.toHaveBeenCalled();
+    expect(d.baselineService.restore).not.toHaveBeenCalled();
+    expect(d.baselineService.restoreAll).not.toHaveBeenCalled();
+  });
+
+  it("returns the stale answer from main without treating it as an error", async () => {
+    const staleProposal = { id: "proposal-external", status: "stale", files: [{ id: "file-1", kind: "edit_file", status: "stale" }] };
+    const stale = {
+      status: "stale" as const,
+      proposal: staleProposal as never,
+      relativePath: null,
+      kind: null,
+      unrestored: [],
+      snapshot: { workspaceRoot: "/ws", revision: 9, proposal: null }
+    };
+    const d = deps(baseline({ keep: vi.fn(async () => stale), restore: vi.fn(async () => stale) }));
+    const request = {
+      workspaceSessionId: "session-1",
+      proposalId: "proposal-external",
+      fileId: "file-1",
+      baselineHash: "old-b",
+      diskHash: "old-d"
+    };
+
+    await expect(handleKeepFileIpc(event, request, d)).resolves.toMatchObject({ status: "stale", fileId: "file-1" });
+    await expect(handleRestoreFileIpc(event, request, d)).resolves.toMatchObject({ status: "stale" });
   });
 
   it("routes chunk actions with the hashes the renderer saw", async () => {
@@ -137,7 +206,11 @@ describe("review IPC", () => {
     const d = deps();
 
     await expect(
-      handleKeepFileIpc(event, { workspaceSessionId: "session-1", proposalId: "proposal-old", fileId: "file-1" }, d)
+      handleKeepFileIpc(
+        event,
+        { workspaceSessionId: "session-1", proposalId: "proposal-old", fileId: "file-1", baselineHash: "b", diskHash: "d" },
+        d
+      )
     ).rejects.toThrow(/no longer current/);
     expect(d.baselineService.keep).not.toHaveBeenCalled();
   });
@@ -157,7 +230,15 @@ describe("review IPC", () => {
     );
 
     await expect(
-      handleRestoreAllIpc(event, { workspaceSessionId: "session-1", proposalId: "proposal-external" }, d)
+      handleRestoreAllIpc(
+        event,
+        {
+          workspaceSessionId: "session-1",
+          proposalId: "proposal-external",
+          files: [{ fileId: "a", baselineHash: "b", diskHash: "d" }]
+        },
+        d
+      )
     ).rejects.toThrow(/a\.md \(changed\)/);
   });
 

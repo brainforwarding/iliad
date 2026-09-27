@@ -417,6 +417,20 @@ export type SetGroqKeyResult =
   | { ok: true; state: GroqKeyState }
   | { ok: false; reason: "rejected" | "unreachable" | "invalid_shape" };
 
+/**
+ * The revision of one review file as the writer saw it: its baseline and disk
+ * hashes, `null` for an absent side (a create has no baseline, a delete no
+ * disk). File-level actions carry it; main answers `stale` when it moved on.
+ */
+export interface ReviewFileRevision {
+  baselineHash: string | null;
+  diskHash: string | null;
+}
+
+export interface ReviewFileExpectation extends ReviewFileRevision {
+  fileId: string;
+}
+
 export interface ReviewChunkActionRequest {
   workspaceSessionId: string;
   proposalId: string;
@@ -441,17 +455,26 @@ export interface ReviewChunkActionResponse {
 export interface AgentApi {
   getExternalReview: (request: { workspaceSessionId: string }) => Promise<ExternalReviewSnapshot>;
   onExternalReviewChanged: (listener: (snapshot: ExternalReviewSnapshot) => void) => () => void;
-  applyProposalFile: (request: {
+  applyProposalFile: (
+    request: {
+      workspaceSessionId: string;
+      proposalId: string;
+      fileId: string;
+    } & ReviewFileRevision
+  ) => Promise<ApplyAgentProposalFileResponse>;
+  rejectProposalFile: (
+    request: {
+      workspaceSessionId: string;
+      proposalId: string;
+      fileId: string;
+    } & ReviewFileRevision
+  ) => Promise<AgentChangeProposal>;
+  /** Restores every pending file; `files` is the set the writer was shown (any difference → stale). */
+  rejectProposal: (request: {
     workspaceSessionId: string;
     proposalId: string;
-    fileId: string;
-  }) => Promise<ApplyAgentProposalFileResponse>;
-  rejectProposalFile: (request: {
-    workspaceSessionId: string;
-    proposalId: string;
-    fileId: string;
+    files: ReviewFileExpectation[];
   }) => Promise<AgentChangeProposal>;
-  rejectProposal: (request: { workspaceSessionId: string; proposalId: string }) => Promise<AgentChangeProposal>;
   keepChunk: (request: ReviewChunkActionRequest) => Promise<ReviewChunkActionResponse>;
   restoreChunk: (request: ReviewChunkActionRequest) => Promise<ReviewChunkActionResponse>;
 }

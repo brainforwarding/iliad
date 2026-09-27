@@ -1,4 +1,4 @@
-import type { AgentChangeProposal, AgentProposalFileChange } from "../types/iliad";
+import type { AgentChangeProposal, AgentProposalFileChange, ReviewFileExpectation, ReviewFileRevision } from "../types/iliad";
 
 /** A review file still needs a decision (pending, stale, or failed). */
 export function fileHasMutableReview(file: AgentProposalFileChange) {
@@ -11,4 +11,25 @@ export function fileHasMutableReview(file: AgentProposalFileChange) {
 
 export function reviewableFile(proposal: AgentChangeProposal) {
   return proposal.files.find(fileHasMutableReview) ?? null;
+}
+
+/**
+ * The revision of a review file as rendered: the hashes main compares before
+ * any file-level Keep or Restore. A missing hash stays null, which main never
+ * matches for a present side, so the action fails safe as stale.
+ */
+export function reviewFileRevision(file: AgentProposalFileChange): ReviewFileRevision {
+  if (file.kind === "create_file") {
+    return { baselineHash: null, diskHash: file.reviewedContentHash ?? null };
+  }
+
+  if (file.kind === "delete_file") {
+    return { baselineHash: file.baselineContentHash ?? file.baseHash, diskHash: null };
+  }
+
+  return { baselineHash: file.baselineContentHash ?? file.baseHash, diskHash: file.reviewedContentHash ?? null };
+}
+
+export function reviewFileExpectation(file: AgentProposalFileChange): ReviewFileExpectation {
+  return { fileId: file.id, ...reviewFileRevision(file) };
 }
