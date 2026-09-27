@@ -925,10 +925,19 @@
   font-size: var(--text-xs);
 }
 
-/* A quote inside the green block takes the review green, not the document's
-   quote bar colour, so the block reads as one change. */
+/* A quote inside the green block: its bar sits at the text inset (8px), in
+   the review green, so it never doubles up with the block's rail at the
+   left edge and the rail stays one even line. */
 .cm-ai-review-source-block .cm-md-blockquote-line {
-  border-left-color: var(--diff-ins-strong);
+  padding-left: 22px !important;
+  border-left: 0;
+  background-image: linear-gradient(
+    to right,
+    transparent 8px,
+    var(--diff-ins-strong) 8px,
+    var(--diff-ins-strong) 10px,
+    transparent 10px
+  );
 }
 
 /* Removed lines of an edit are full-width rows like the added block: the
