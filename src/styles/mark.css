@@ -1,4 +1,4 @@
-/* Flow paperclip signature mark — see src/components/ClipMark.tsx. */
+/* Iliad paperclip signature mark (the 45° clip) — see src/components/ClipMark.tsx. */
 
 .clip-mark {
   display: inline-flex;
@@ -27,7 +27,7 @@
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.7;
+  stroke-width: 1.8;
 }
 
 .clip-mark__zzz {

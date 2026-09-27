@@ -100,8 +100,9 @@ A **faceless gold paperclip** (no eyes — an eyed paperclip in an AI writing ap
 - **Asleep** state (crash / no API key): droops, desaturates, shows a `z`.
 - Colour: `--brand-gold` via `currentColor` — the one warm brand moment.
 - All motion off under `prefers-reduced-motion`.
-- Component: `src/components/ClipMark.tsx` (replaces `IliadMark.tsx`; same props `size`/`asleep`/`className`). Body path = the site's clip:
-  `M5 9.5 V23 a3 3 0 0 0 6 0 V7 a4.5 4.5 0 0 0 -9 0 v17 a6.5 6.5 0 0 0 13 0 V10`.
+- Component: `src/components/ClipMark.tsx` (replaces `IliadMark.tsx`; same props `size`/`asleep`/`className`). Body = the 45° clip (logo option 1B, Figma `i2BTwgceho8SqRYGZKjLhB` node `119:66`), 24-unit grid, stroke 1.8, round caps/joins:
+  `M18.45 13.36L13.36 18.45C12.32 19.48 10.92 20.07 9.45 20.07C7.99 20.07 6.59 19.48 5.55 18.45C4.52 17.41 3.93 16.01 3.93 14.55C3.93 13.08 4.52 11.68 5.55 10.64L11.66 4.53C12.43 3.77 13.46 3.34 14.55 3.34C15.63 3.34 16.67 3.77 17.43 4.53C18.2 5.3 18.63 6.34 18.63 7.42C18.63 8.5 18.2 9.54 17.43 10.3L11.32 16.41C10.83 16.91 10.15 17.19 9.45 17.19C8.75 17.19 8.08 16.91 7.59 16.41C7.09 15.92 6.81 15.25 6.81 14.55C6.81 13.85 7.09 13.17 7.59 12.68L14.04 6.23`.
+  The app icon (`build/icon.svg`) places it at 60% of the squircle, gold `#ffad1f` on graphite `#20242a`.
 - Live reference: `owl-lab/clip-lab.html`.
 
 ## Typography
