@@ -11,6 +11,7 @@ import {
 } from "./app/useDocumentPersistence";
 import { externalReviewTargetForActiveFile, useOutsideReview } from "./app/useOutsideReview";
 import { useSelectionComments } from "./app/useSelectionComments";
+import { useSettingsPanel } from "./app/useSettingsPanel";
 import { useSidebarPeek } from "./app/useSidebarPeek";
 import { useWindowChrome } from "./app/useWindowChrome";
 import { useWorkspace } from "./app/useWorkspace";
@@ -24,10 +25,11 @@ import {
 } from "./components/EditorPane";
 import { ClipMark } from "./components/ClipMark";
 import { FileTree } from "./components/FileTree";
-import { LanguageMenu } from "./components/LanguageMenu";
 import { TreeContextMenu, type TreeContextMenuState } from "./components/TreeContextMenu";
-import { TypographyMenu } from "./components/TypographyMenu";
-import { GROQ_KEY_URL, WritingAssistsMenu } from "./components/WritingAssistsMenu";
+import { GeneralSettings } from "./components/settings/GeneralSettings";
+import { SettingsPanel } from "./components/settings/SettingsPanel";
+import { TypographySettings } from "./components/settings/TypographySettings";
+import { GROQ_KEY_URL, WritingAssistsSettings } from "./components/settings/WritingAssistsSettings";
 import {
   markLatestContentSearchRequestId,
   type FileTreeContentSearchProvider
@@ -58,6 +60,9 @@ import type {
   WorkspaceInfo,
   WritingAssistStatus
 } from "./types/iliad";
+
+/** The running app's version (package.json, injected by Vite; main's app.getVersion() reads the same). */
+const APP_VERSION = __ILIAD_VERSION__;
 
 /** The View menu's Toggle Sidebar key (electron/main.ts), shown in the toggle's tooltip. */
 const SIDEBAR_SHORTCUT_LABEL = "\u2303\u2318S";
@@ -193,9 +198,6 @@ export default function App() {
     typeof window === "undefined" ? 1200 : window.innerWidth
   );
   const [sidebarResizing, setSidebarResizing] = useState(false);
-  const [typographyOpen, setTypographyOpen] = useState(false);
-  const [writingAssistsOpen, setWritingAssistsOpen] = useState(false);
-  const [languageOpen, setLanguageOpen] = useState(false);
   const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null);
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);
   const [revealFolderPath, setRevealFolderPath] = useState<string | null>(null);
@@ -203,9 +205,6 @@ export default function App() {
   const [contentSearchRevealTarget, setContentSearchRevealTarget] = useState<ContentSearchRevealTarget | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [treeContextMenu, setTreeContextMenu] = useState<TreeContextMenuState | null>(null);
-  const typographyMenuRef = useRef<HTMLDivElement | null>(null);
-  const writingAssistsMenuRef = useRef<HTMLDivElement | null>(null);
-  const languageMenuRef = useRef<HTMLDivElement | null>(null);
   const treeContextMenuRef = useRef<HTMLDivElement | null>(null);
   const appShellRef = useRef<HTMLDivElement | null>(null);
   const sidebarResizeHandleRef = useRef<HTMLDivElement | null>(null);
@@ -214,10 +213,21 @@ export default function App() {
   const contentSearchRevealRequestIdRef = useRef(0);
   const closeTreeContextMenu = useCallback(() => setTreeContextMenu(null), []);
   const {
+    settingsOpen,
+    settingsTab,
+    settingsPanelRef,
+    keyFieldFocusRequest,
+    openSettings,
+    closeSettings,
+    toggleSettings,
+    selectSettingsTab,
+    requestKeyField
+  } = useSettingsPanel();
+  const {
     peekOpen: sidebarPeekOpen,
     closePeek: closeSidebarPeek,
     regionHandlers: sidebarPeekRegion
-  } = useSidebarPeek({ enabled: !sidebarOpen, hold: Boolean(treeContextMenu) || renamingPath !== null });
+  } = useSidebarPeek({ enabled: !sidebarOpen, hold: Boolean(treeContextMenu) || renamingPath !== null || settingsOpen });
   const toggleSidebar = useCallback(() => {
     closeSidebarPeek();
     setSidebarOpen((open) => !open);
@@ -226,6 +236,8 @@ export default function App() {
     onMenuCommand: (command) => {
       if (command === "toggle-sidebar") {
         toggleSidebar();
+      } else if (command === "open-settings") {
+        openSettings();
       }
     }
   });
@@ -497,7 +509,6 @@ export default function App() {
   }, []);
   // The AI route (free / own key / blocked) and key state; main picks the route on each request.
   const [writingAssistStatus, setWritingAssistStatus] = useState<WritingAssistStatus | null>(null);
-  const [keyFieldFocusRequest, setKeyFieldFocusRequest] = useState(0);
   const aiRoute = writingAssistStatus?.ai.route ?? null;
   const [updateStatus, setUpdateStatus] = useState<UpdateCheckResult | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
@@ -527,20 +538,18 @@ export default function App() {
     void window.iliad.openUrl(GROQ_KEY_URL);
   }, []);
 
-  // A notice's "Use my key" / "Update key": open Writing assists with the key form expanded.
+  // A notice's "Use my key" / "Update key": Settings on the Writing tab with the key form expanded.
   const requestGroqKey = useCallback(() => {
-    setTypographyOpen(false);
-    setLanguageOpen(false);
-    setWritingAssistsOpen(true);
-    setKeyFieldFocusRequest((request) => request + 1);
+    requestKeyField();
     void refreshWritingAssistStatus();
-  }, [refreshWritingAssistStatus]);
+  }, [refreshWritingAssistStatus, requestKeyField]);
 
+  const writingSettingsShown = settingsOpen && settingsTab === "writing";
   useEffect(() => {
-    if (writingAssistsOpen) {
+    if (writingSettingsShown) {
       void refreshWritingAssistStatus();
     }
-  }, [refreshWritingAssistStatus, writingAssistsOpen]);
+  }, [refreshWritingAssistStatus, writingSettingsShown]);
 
   const checkForUpdates = useCallback(async () => {
     const requestId = updateCheckRequestIdRef.current + 1;
@@ -556,11 +565,8 @@ export default function App() {
 
       setUpdateStatus(result);
 
-      if (result.status === "current") {
-        setNotice(strings.updates.current(result.latestVersion));
-      } else if (result.status === "error") {
-        setNotice(strings.updates.checkFailed);
-      } else {
+      // Settings' General tab shows the result; an available update also gets the toast.
+      if (result.status === "available") {
         setNotice(null);
       }
     } catch {
@@ -573,7 +579,6 @@ export default function App() {
         currentVersion: "",
         message: strings.updates.checkFailed
       });
-      setNotice(strings.updates.checkFailed);
     } finally {
       if (updateCheckRequestIdRef.current === requestId) {
         setUpdateChecking(false);
@@ -599,7 +604,13 @@ export default function App() {
     }
   }, [updateStatus]);
 
-  useEffect(() => window.iliad.updates.onCheckRequested(() => void checkForUpdates()), [checkForUpdates]);
+  // The app menu's "Check for Updates…" shows the result in Settings → General.
+  const checkForUpdatesFromMenu = useCallback(() => {
+    openSettings("general");
+    void checkForUpdates();
+  }, [checkForUpdates, openSettings]);
+
+  useEffect(() => window.iliad.updates.onCheckRequested(checkForUpdatesFromMenu), [checkForUpdatesFromMenu]);
   useEffect(() => {
     let cancelled = false;
 
@@ -607,7 +618,7 @@ export default function App() {
       .consumePendingCheckRequest()
       .then((pending) => {
         if (pending && !cancelled) {
-          void checkForUpdates();
+          checkForUpdatesFromMenu();
         }
       })
       .catch(() => undefined);
@@ -615,7 +626,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [checkForUpdates]);
+  }, [checkForUpdatesFromMenu]);
 
   const handleManualReviewTargetChange = useCallback(
     (target: Parameters<typeof selectAgentReviewTarget>[0]) => {
@@ -983,12 +994,11 @@ export default function App() {
     clearHistory();
     setError(null);
     setNotice(null);
-    setLanguageOpen(false);
-    setTypographyOpen(false);
-    setWritingAssistsOpen(false);
+    closeSettings({ restoreFocus: false });
   }, [
     clearDocument,
     clearHistory,
+    closeSettings,
     closeTreeContextMenu,
     setActiveFile,
     setAgentProposals,
@@ -1095,15 +1105,18 @@ export default function App() {
           return;
         }
 
+        // Settings closes first (it may sit over the peek) and hands focus back.
+        if (settingsOpen) {
+          closeSettings();
+          return;
+        }
+
         // Escape with the peek showing hides only the peek.
         if (sidebarPeekOpen) {
           closeSidebarPeek();
           return;
         }
 
-        setLanguageOpen(false);
-        setTypographyOpen(false);
-        setWritingAssistsOpen(false);
         closeTreeContextMenu();
         return;
       }
@@ -1156,31 +1169,15 @@ export default function App() {
   }, [
     activeFile,
     closeDialogOpen,
+    closeSettings,
     closeSidebarPeek,
     closeTreeContextMenu,
     createMarkdownFile,
     openWorkspace,
     requestCloseDocument,
+    settingsOpen,
     sidebarPeekOpen
   ]);
-
-  useEffect(() => {
-    if (!languageOpen) {
-      return;
-    }
-
-    const onPointerDown = (event: PointerEvent) => {
-      if (languageMenuRef.current?.contains(event.target as Node)) {
-        return;
-      }
-
-      setLanguageOpen(false);
-    };
-
-    window.addEventListener("pointerdown", onPointerDown);
-
-    return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, [languageOpen]);
 
   useEffect(() => {
     if (!treeContextMenu) {
@@ -1199,42 +1196,6 @@ export default function App() {
 
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [closeTreeContextMenu, treeContextMenu]);
-
-  useEffect(() => {
-    if (!typographyOpen) {
-      return;
-    }
-
-    const onPointerDown = (event: PointerEvent) => {
-      if (typographyMenuRef.current?.contains(event.target as Node)) {
-        return;
-      }
-
-      setTypographyOpen(false);
-    };
-
-    window.addEventListener("pointerdown", onPointerDown);
-
-    return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, [typographyOpen]);
-
-  useEffect(() => {
-    if (!writingAssistsOpen) {
-      return;
-    }
-
-    const onPointerDown = (event: PointerEvent) => {
-      if (writingAssistsMenuRef.current?.contains(event.target as Node)) {
-        return;
-      }
-
-      setWritingAssistsOpen(false);
-    };
-
-    window.addEventListener("pointerdown", onPointerDown);
-
-    return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, [writingAssistsOpen]);
 
   const sidebarMaximumWidth = useMemo(
     () => effectiveSidebarMaximum(viewportWidth),
@@ -1550,9 +1511,6 @@ export default function App() {
       renamingPath={renamingPath}
       revealPath={reviewRevealPath ?? revealFolderPath}
       labels={strings.sidebar}
-      updateLabels={strings.updates}
-      updateStatus={updateStatus}
-      updateChecking={updateChecking}
       onOpenNode={(node) => {
         logReviewNavigation("file_tree_open_node", {
           nodeRel: node.relativePath,
@@ -1597,9 +1555,6 @@ export default function App() {
       onOpenFolder={openWorkspace}
       onOpenRecent={openRecentWorkspace}
       onRevealWorkspace={() => void window.iliad.revealInFinder(workspace.path, workspace.path)}
-      onCheckForUpdates={checkForUpdates}
-      onDownloadUpdate={downloadUpdate}
-      onViewUpdateRelease={viewUpdateRelease}
       onSelectNode={(node) => setSelectedTreePath(node.path)}
       onSelectWorkspaceRoot={() => {
         setSelectedTreePath(workspace.path);
@@ -1614,6 +1569,9 @@ export default function App() {
       onCommitRename={renameNode}
       contentSearchProvider={fileTreeContentSearchProvider}
       companionCommentCount={activeFile && commentsEnabled ? { documentPath: activeFile.path, count: commentCount } : null}
+      onOpenSettings={toggleSettings}
+      settingsOpen={settingsOpen}
+      updateAvailable={updateStatus?.status === "available"}
     />
   );
 
@@ -1676,58 +1634,6 @@ export default function App() {
           <div ref={setTopbarSlot} className="topbar-slot" />
           <div className="topbar-actions">
             {shouldShowStatus && visibleStatus ? <span className="document-save-state">{visibleStatus}</span> : null}
-            <TypographyMenu
-              editorFontPreset={editorFontPreset}
-              editorFontSize={editorFontSize}
-              menuRef={typographyMenuRef}
-              labels={strings.typography}
-              onReset={resetEditorPreferences}
-              onSetFontPreset={setEditorFontPreset}
-              onSetFontSize={setEditorFontSize}
-              onToggleOpen={() => setTypographyOpen((open) => !open)}
-              open={typographyOpen}
-            />
-            <WritingAssistsMenu
-              preferences={autocompleteOptions.preferences}
-              onPreferencesChange={autocompleteOptions.setPreferences}
-              onResetShortcuts={autocompleteOptions.resetShortcuts}
-              labels={strings.writingAssists}
-              menuRef={writingAssistsMenuRef}
-              open={writingAssistsOpen}
-              correctorEnabled={correctorEnabled}
-              autocompleteEnabled={autocompleteEnabled}
-              correctorAvailable={language === "en"}
-              groqKey={writingAssistStatus?.groqKey ?? null}
-              onSaveGroqKey={saveGroqKey}
-              onGetGroqKey={openGroqKeyPage}
-              onOpenPrivacy={() => void window.iliad.openUrl(strings.writingAssists.privacyUrl)}
-              onRecordingShortcutChange={(recording) => void window.iliad.setRecordingShortcut(recording).catch(() => undefined)}
-              keyFieldFocusRequest={keyFieldFocusRequest}
-              onToggleOpen={() => {
-                setWritingAssistsOpen((open) => {
-                  const nextOpen = !open;
-
-                  if (nextOpen) {
-                    void refreshWritingAssistStatus();
-                  }
-
-                  return nextOpen;
-                });
-              }}
-              onSetCorrectorEnabled={setCorrectorEnabled}
-              onSetAutocompleteEnabled={setAutocompleteEnabled}
-            />
-            <LanguageMenu
-              language={language}
-              labels={strings.language}
-              menuRef={languageMenuRef}
-              onSetLanguage={(nextLanguage) => {
-                setLanguage(nextLanguage);
-                setLanguageOpen(false);
-              }}
-              onToggleOpen={() => setLanguageOpen((open) => !open)}
-              open={languageOpen}
-            />
           </div>
         </div>
       </header>
@@ -1795,6 +1701,57 @@ export default function App() {
         </EditorErrorBoundary>
 
       </div>
+
+      {settingsOpen ? (
+        <SettingsPanel
+          labels={strings.settings}
+          tab={settingsTab}
+          onSelectTab={selectSettingsTab}
+          updateAvailable={updateStatus?.status === "available"}
+          panelRef={settingsPanelRef}
+        >
+          {settingsTab === "general" ? (
+            <GeneralSettings
+              labels={{ ...strings.settings, english: strings.language.english, spanish: strings.language.spanish }}
+              language={language}
+              onSetLanguage={setLanguage}
+              version={APP_VERSION}
+              updateStatus={updateStatus}
+              updateChecking={updateChecking}
+              onCheckForUpdates={checkForUpdates}
+              onDownloadUpdate={downloadUpdate}
+              onViewUpdateRelease={viewUpdateRelease}
+            />
+          ) : settingsTab === "typography" ? (
+            <TypographySettings
+              editorFontPreset={editorFontPreset}
+              editorFontSize={editorFontSize}
+              labels={{ ...strings.typography, font: strings.settings.font, size: strings.settings.size, sizeValue: strings.settings.sizeValue }}
+              onReset={resetEditorPreferences}
+              onSetFontPreset={setEditorFontPreset}
+              onSetFontSize={setEditorFontSize}
+            />
+          ) : (
+            <WritingAssistsSettings
+              preferences={autocompleteOptions.preferences}
+              onPreferencesChange={autocompleteOptions.setPreferences}
+              onResetShortcuts={autocompleteOptions.resetShortcuts}
+              labels={strings.writingAssists}
+              correctorEnabled={correctorEnabled}
+              autocompleteEnabled={autocompleteEnabled}
+              correctorAvailable={language === "en"}
+              groqKey={writingAssistStatus?.groqKey ?? null}
+              onSaveGroqKey={saveGroqKey}
+              onGetGroqKey={openGroqKeyPage}
+              onOpenPrivacy={() => void window.iliad.openUrl(strings.writingAssists.privacyUrl)}
+              onRecordingShortcutChange={(recording) => void window.iliad.setRecordingShortcut(recording).catch(() => undefined)}
+              keyFieldFocusRequest={keyFieldFocusRequest}
+              onSetCorrectorEnabled={setCorrectorEnabled}
+              onSetAutocompleteEnabled={setAutocompleteEnabled}
+            />
+          )}
+        </SettingsPanel>
+      ) : null}
 
       <TreeContextMenu
         menu={treeContextMenu}

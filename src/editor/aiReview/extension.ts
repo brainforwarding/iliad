@@ -444,7 +444,9 @@ function buildDecorations(state: EditorState, options: ReviewExtensionOptions): 
       for (let lineNumber = hunk.displayOldStartLine; lineNumber <= hunk.displayOldEndLine; lineNumber += 1) {
         const line = lineAt(state, lineNumber);
         const hunkLineIndex = lineNumber - hunk.displayOldStartLine;
-        ranges.push(Decoration.line({ class: reviewSourceLineClasses(hunk.oldLines[hunkLineIndex] ?? line.text) }).range(line.from));
+        ranges.push(Decoration.line({
+          class: `${reviewSourceLineClasses(hunk.oldLines[hunkLineIndex] ?? line.text)} cm-ai-review-removed-row`.trim()
+        }).range(line.from));
 
         addChangedLineDecoration(ranges, line, "cm-ai-review-line-removed", active);
       }

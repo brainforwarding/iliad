@@ -1,70 +1,147 @@
-.typography-menu,
-.language-menu,
-.writing-assists-menu {
-  position: relative;
-  display: inline-grid;
-  -webkit-app-region: no-drag;
-}
-
-.typography-popover,
-.language-popover,
-.writing-assists-popover {
+/*
+ * Settings (premium pass stage 4, Figma H/J): a non-modal panel anchored above
+ * the sidebar's Settings row. The content scrolls above segmented tabs that
+ * stay put at the bottom, so the Writing tab fits the 640px minimum height.
+ */
+.settings-panel {
   position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 12;
+  z-index: 40;
+  bottom: 44px;
+  left: 8px;
   display: grid;
-  width: 218px;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-surface);
+  width: min(340px, calc(100vw - 16px));
+  max-height: calc(100% - var(--topbar-height) - 52px);
+  grid-template-rows: minmax(0, 1fr) auto;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-panel);
   background: var(--overlay);
   box-shadow: var(--shadow-popover);
   color: var(--ink-2);
   -webkit-app-region: no-drag;
 }
 
-.writing-assists-popover {
-  width: min(380px, calc(100vw - 24px));
-  max-height: calc(100vh - 90px);
+.settings-content {
+  min-height: 0;
   overflow-y: auto;
-  gap: 0;
-  padding: 6px 16px 10px;
+  padding: 4px 16px;
 }
 
-.language-popover {
-  width: 144px;
-  gap: 4px;
-  padding: 6px;
+.settings-rows {
+  display: grid;
 }
 
-.language-option {
-  min-height: 30px;
-  border: 1px solid transparent;
+.settings-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  margin: 0 10px 10px;
+  padding: 2px;
+  border-radius: var(--radius-control);
+  background: var(--paper);
+}
+
+.settings-tab,
+.settings-segment {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--ink-2);
+  color: var(--muted-1);
   cursor: pointer;
   font: inherit;
-  font-size: var(--text-sm);
-  padding: 0 9px;
-  text-align: left;
-  -webkit-app-region: no-drag;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
 }
 
-.language-option:hover,
-.language-option:focus-visible {
-  border-color: var(--hairline-strong);
-  background: var(--card);
-  outline: none;
+.settings-tab {
+  height: 26px;
+  padding: 0 8px;
 }
 
-.language-option.is-active {
-  border-color: var(--hairline-strong);
+.settings-tab:hover:not(.is-active),
+.settings-segment:hover:not(.is-active) {
+  color: var(--ink-1);
+}
+
+.settings-tab.is-active,
+.settings-segment.is-active {
   background: var(--editor);
   box-shadow: var(--shadow-sm);
   color: var(--ink-1);
+}
+
+.settings-tab-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--radius-pill);
+  background: var(--pending);
+}
+
+.settings-segmented {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-control);
+  background: var(--paper);
+}
+
+.settings-segment {
+  height: 22px;
+  padding: 0 9px;
+}
+
+.settings-stepper {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-step-button {
+  width: 30px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-control);
+  background: var(--editor);
+  color: var(--ink-3);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.settings-step-button:hover:not(:disabled) {
+  border-color: var(--border-control);
+}
+
+.settings-step-button:disabled {
+  opacity: 0.4;
+}
+
+.settings-step-value {
+  min-width: 42px;
+  color: var(--muted-2);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+.settings-version {
+  user-select: text;
+}
+
+.writing-assist-row-note.is-ready {
+  color: var(--ink-2);
 }
 
 /*
@@ -264,20 +341,20 @@
   color: var(--ink-1);
 }
 
-.writing-assists-popover button:disabled {
+.settings-panel button:disabled {
   cursor: default;
 }
 
-.writing-assists-popover .writing-assist-link:disabled {
+.settings-panel .writing-assist-link:disabled {
   opacity: 0.4;
 }
 
-.writing-assists-popover :is(button, input, select):focus-visible {
+.settings-panel :is(button, input, select):focus-visible {
   outline: 2px solid var(--ink-2);
   outline-offset: 2px;
 }
 
-.writing-assists-popover .writing-assist-row.is-button:focus-visible {
+.settings-panel .writing-assist-row.is-button:focus-visible {
   outline-offset: -2px;
 }
 
@@ -311,81 +388,6 @@
 
 .writing-assist-switch.is-on span {
   transform: translateX(16px);
-}
-
-.typography-row {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 42px;
-  align-items: center;
-  gap: 8px;
-}
-
-.typography-step-button,
-.font-preset-button,
-.typography-reset-button {
-  border: 1px solid var(--hairline-strong);
-  border-radius: var(--radius-control);
-  background: var(--editor);
-  color: var(--ink-3);
-  cursor: pointer;
-  font-size: var(--text-sm);
-  -webkit-app-region: no-drag;
-}
-
-.typography-step-button {
-  height: 30px;
-  font-weight: 600;
-}
-
-.typography-step-button:hover,
-.font-preset-button:hover,
-.typography-reset-button:hover {
-  border-color: var(--border-control);
-  background: var(--card);
-}
-
-.typography-step-button:focus-visible,
-.font-preset-button:focus-visible,
-.typography-reset-button:focus-visible {
-  outline: none;
-  border-color: var(--focus-ring-border);
-  box-shadow: var(--focus-ring);
-}
-
-.typography-size-value {
-  color: var(--muted-2);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  text-align: center;
-}
-
-.font-preset-group {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 2px;
-}
-
-.font-preset-button {
-  height: 30px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--muted-1);
-}
-
-.font-preset-button:hover:not(.is-active) {
-  border-color: transparent;
-  background: var(--hover-wash);
-}
-
-.font-preset-button.is-active {
-  border-color: transparent;
-  background: var(--accent-tint);
-  color: var(--accent-deep);
-}
-
-.typography-reset-button {
-  height: 30px;
-  width: 100%;
 }
 
 .workspace-popover {
@@ -496,40 +498,6 @@
   font-size: var(--text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.workspace-update-status {
-  display: grid;
-  gap: 7px;
-  padding: 7px 8px 6px;
-  color: var(--muted-2);
-  font-size: var(--text-xs);
-  line-height: 1.25;
-}
-
-.workspace-update-status p {
-  margin: 0;
-}
-
-.workspace-update-status.is-available {
-  color: var(--ink-2);
-}
-
-.workspace-update-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.workspace-update-actions button {
-  display: inline-flex;
-  min-height: 26px;
-  align-items: center;
-  gap: 5px;
-  padding: 0 7px;
-  border: 1px solid var(--hairline);
-  background: var(--editor);
-  font-size: var(--text-xs);
 }
 
 .tree-context-menu {

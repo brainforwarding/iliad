@@ -8,6 +8,9 @@
   overflow: clip; /* never a scroll container; .editor-surface owns scrolling */
 }
 
+/* The rare bands above the text (conflict, detached comments). Outside-review
+   controls live in the top row (ReviewControls); these stay light: the page
+   background with a faint hairline, no grey band. */
 .editor-review-toolbar {
   display: flex;
   min-width: 0;
@@ -15,9 +18,9 @@
   justify-content: space-between;
   gap: 12px;
   min-height: 34px;
-  padding: 4px 10px 4px 16px;
+  padding: 4px 14px 4px 18px;
   border-bottom: 1px solid var(--hairline);
-  background: var(--card);
+  background: var(--editor);
   color: var(--ink-3);
 }
 
@@ -885,7 +888,8 @@
   box-sizing: border-box;
   width: 100%;
   margin: 0;
-  padding: 0 2px 0 6px;
+  /* Same inset as a removed row, so old and new text start at one x. */
+  padding: 1px 2px 1px 8px;
   white-space: pre-wrap;
 }
 
@@ -926,3 +930,18 @@
 .cm-ai-review-source-block .cm-md-blockquote-line {
   border-left-color: var(--diff-ins-strong);
 }
+
+/* Removed lines of an edit are full-width rows like the added block: the
+   same tint across the line, a rail at the same x and the same 8px inset,
+   so red and green line up. The inline mark keeps only the strike-through. */
+.cm-line.cm-ai-review-removed-row {
+  padding-left: 8px !important;
+  background-color: var(--diff-del-soft);
+  box-shadow: inset 2px 0 0 var(--diff-del-strong);
+}
+
+.cm-ai-review-removed-row .cm-ai-review-line-removed,
+.cm-ai-review-removed-row .cm-ai-review-line-removed.is-active {
+  background-color: transparent;
+}
+

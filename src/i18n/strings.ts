@@ -181,6 +181,26 @@ export const appStrings = {
       viewRelease: "View Release",
       dismiss: "Dismiss"
     },
+    settings: {
+      dialogLabel: "Settings",
+      tabsLabel: "Settings sections",
+      tabs: { general: "General", typography: "Typography", writing: "Writing" },
+      tabUpdateAvailable: (tab: string) => `${tab}, update available`,
+      appLanguage: "App language",
+      version: "Version",
+      versionValue: (version: string) => `Iliad MD ${version}`,
+      updates: "Updates",
+      upToDate: "Up to date",
+      checking: "Checking…",
+      checkFailed: "Couldn't check for updates",
+      ready: (version: string) => `Iliad MD ${version} is ready`,
+      checkNow: "Check now",
+      download: "Download",
+      whatsNew: "What's new",
+      font: "Font",
+      size: "Size",
+      sizeValue: (size: number) => `${size} px`
+    },
     editor: {
       emptyTitle: "Pick a file to start",
       emptyNewDocument: "New document",
@@ -528,6 +548,26 @@ export const appStrings = {
       download: "Descargar",
       viewRelease: "Ver versión",
       dismiss: "Cerrar"
+    },
+    settings: {
+      dialogLabel: "Ajustes",
+      tabsLabel: "Secciones de ajustes",
+      tabs: { general: "General", typography: "Tipografía", writing: "Escritura" },
+      tabUpdateAvailable: (tab: string) => `${tab}, actualización disponible`,
+      appLanguage: "Idioma de la app",
+      version: "Versión",
+      versionValue: (version: string) => `Iliad MD ${version}`,
+      updates: "Actualizaciones",
+      upToDate: "Al día",
+      checking: "Buscando…",
+      checkFailed: "No se pudo buscar actualizaciones",
+      ready: (version: string) => `Iliad MD ${version} está lista`,
+      checkNow: "Buscar ahora",
+      download: "Descargar",
+      whatsNew: "Novedades",
+      font: "Letra",
+      size: "Tamaño",
+      sizeValue: (size: number) => `${size} px`
     },
     editor: {
       emptyTitle: "Elige un archivo para empezar",

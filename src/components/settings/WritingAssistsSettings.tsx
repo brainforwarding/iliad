@@ -1,34 +1,23 @@
-import { PenLine } from "lucide-react";
-import { Icon } from "./Icon";
-import { useEffect, useRef, useState, type Dispatch, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type Dispatch, type FormEvent, type KeyboardEvent, type ReactNode, type SetStateAction } from "react";
 import {
   autocompleteShortcutActions,
   compactShortcutLabel,
   heldModifiers,
   type AutocompletePreferences,
   type AutocompleteShortcutAction
-} from "../editor/ideaAutocomplete/options";
-import { recordShortcutKeyDown, type ShortcutRecording } from "../editor/ideaAutocomplete/shortcutRecording";
-import type { AppStrings } from "../i18n/strings";
-import type { GroqKeyState, SetGroqKeyResult } from "../types/iliad";
+} from "../../editor/ideaAutocomplete/options";
+import { recordShortcutKeyDown, type ShortcutRecording } from "../../editor/ideaAutocomplete/shortcutRecording";
+import type { AppStrings } from "../../i18n/strings";
+import type { GroqKeyState, SetGroqKeyResult } from "../../types/iliad";
+import { RowCopy } from "./SettingsRow";
 
 export const GROQ_KEY_URL = "https://console.groq.com/keys";
 
-interface WritingAssistsMenuLabels {
-  title: string;
-  dialogLabel: string;
-  corrector: string;
-  autocomplete: string;
-  correctorUnavailable: string;
-}
-
-interface WritingAssistsMenuProps {
-  labels: WritingAssistsMenuLabels & AppStrings["writingAssists"];
+interface WritingAssistsSettingsProps {
+  labels: AppStrings["writingAssists"];
   preferences: AutocompletePreferences;
   onPreferencesChange: (preferences: AutocompletePreferences) => void;
   onResetShortcuts: () => void;
-  menuRef: RefObject<HTMLDivElement>;
-  open: boolean;
   correctorEnabled: boolean;
   autocompleteEnabled: boolean;
   correctorAvailable: boolean;
@@ -39,11 +28,14 @@ interface WritingAssistsMenuProps {
   onGetGroqKey: () => void;
   /** Opens the privacy page (in the app language) in the browser. */
   onOpenPrivacy: () => void;
-  /** True while a key chip records keys (the app menu's shortcuts pause meanwhile). */
+  /**
+   * True while a key chip records keys (the app menu's shortcuts pause
+   * meanwhile). Unmounting this body (closing Settings or leaving the Writing
+   * tab) ends the recording and reports false.
+   */
   onRecordingShortcutChange?: (recording: boolean) => void;
-  /** Bumped to open the key form and focus its field (a notice's "Use my key" / "Update key"). */
+  /** Non-zero opens the key form and focuses its field (a notice's "Use my key" / "Update key"). */
   keyFieldFocusRequest?: number;
-  onToggleOpen: () => void;
   onSetCorrectorEnabled: Dispatch<SetStateAction<boolean>>;
   onSetAutocompleteEnabled: Dispatch<SetStateAction<boolean>>;
 }
@@ -73,20 +65,6 @@ type GroqKeyLabels = Pick<
 >;
 
 type KeyFormError = "rejected" | "unreachable" | "invalid_shape" | "failed";
-
-/**
- * One row style for every item (spec 2026-09-25, Figma frame 15): name on the
- * left, an optional grey note under it, the control on the right, a hairline
- * under the row.
- */
-function RowCopy({ label, note }: { label: string; note?: string }) {
-  return (
-    <span className="writing-assist-row-copy">
-      <span className="writing-assist-row-label">{label}</span>
-      {note ? <span className="writing-assist-row-note">{note}</span> : null}
-    </span>
-  );
-}
 
 function SwitchRow({
   checked,
@@ -161,11 +139,12 @@ function GroqKeyRow({
     }
   }, [focusRequest]);
 
+  // A later request (the panel already open on the form) focuses the field again.
   useEffect(() => {
     if (editing) {
       inputRef.current?.focus();
     }
-  }, [editing]);
+  }, [editing, focusRequest]);
 
   const close = () => {
     setEditing(false);
@@ -367,13 +346,15 @@ function ShortcutRow({
   );
 }
 
-export function WritingAssistsMenu({
+/**
+ * The Writing tab of Settings: today's Writing assists panel, one row style
+ * (spec 2026-09-25, Figma frame 15; moved into Settings by the premium pass).
+ */
+export function WritingAssistsSettings({
   preferences,
   onPreferencesChange,
   onResetShortcuts,
   labels,
-  menuRef,
-  open,
   correctorEnabled,
   autocompleteEnabled,
   correctorAvailable,
@@ -383,16 +364,15 @@ export function WritingAssistsMenu({
   onOpenPrivacy,
   onRecordingShortcutChange,
   keyFieldFocusRequest,
-  onToggleOpen,
   onSetCorrectorEnabled,
   onSetAutocompleteEnabled
-}: WritingAssistsMenuProps) {
+}: WritingAssistsSettingsProps) {
   const shortcutActionLabels = { continue: labels.continueKey, sentence: labels.sentenceKey, paragraph: labels.paragraphKey, idea: labels.ideaKey };
   const [recording, setRecording] = useState<ShortcutRecording | null>(null);
-  // Closing the popover (or turning autocomplete off) ends any recording.
+  // Turning autocomplete off ends any recording (unmounting ends it too).
   useEffect(() => {
-    if (!open || !autocompleteEnabled) setRecording(null);
-  }, [open, autocompleteEnabled]);
+    if (!autocompleteEnabled) setRecording(null);
+  }, [autocompleteEnabled]);
   const isRecording = recording !== null;
   const recordingChange = useRef(onRecordingShortcutChange);
   recordingChange.current = onRecordingShortcutChange;
@@ -402,55 +382,39 @@ export function WritingAssistsMenu({
     return () => recordingChange.current?.(false);
   }, [isRecording]);
   return (
-    <div className="writing-assists-menu" ref={menuRef}>
-      <button
-        type="button"
-        className="icon-button"
-        data-tooltip={labels.title}
-        aria-label={labels.title}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={onToggleOpen}
-      >
-        <Icon icon={PenLine} />
-      </button>
-
-      {open ? (
-        <div className="writing-assists-popover" role="dialog" aria-label={labels.dialogLabel}>
-          <SwitchRow
-            label={labels.corrector}
-            checked={correctorAvailable && correctorEnabled}
-            disabled={!correctorAvailable}
-            note={correctorAvailable ? undefined : labels.correctorUnavailable}
-            onToggle={() => onSetCorrectorEnabled((enabled) => !enabled)}
-          />
-          <SwitchRow
-            label={labels.autocomplete}
-            checked={autocompleteEnabled}
-            onToggle={() => onSetAutocompleteEnabled((enabled) => !enabled)}
-          />
-          {autocompleteEnabled ? <>
-            {autocompleteShortcutActions.map((action) => (
-              <ShortcutRow key={action} action={action} preferences={preferences} labels={labels}
-                rowLabels={shortcutActionLabels} recording={recording} onRecordingChange={setRecording}
-                onPreferencesChange={onPreferencesChange} />
-            ))}
-            <KeyTextRow label={labels.accept} keyText="Tab" />
-            <KeyTextRow label={labels.alternatives} keyText={`${compactShortcutLabel("Alt")} ↑↓`} />
-            <KeyTextRow label={labels.dismiss} keyText="Esc" />
-            <button type="button" className="writing-assist-row is-button" onClick={onResetShortcuts}>
-              <RowCopy label={labels.reset} />
-            </button>
-          </> : null}
-          {groqKey ? (
-            <GroqKeyRow keyState={groqKey} labels={labels} onSave={onSaveGroqKey} onGetKey={onGetGroqKey}
-              focusRequest={keyFieldFocusRequest} />
-          ) : null}
-          <button type="button" className="writing-assist-row is-button" onClick={onOpenPrivacy}>
-            <RowCopy label={labels.privacy} />
-          </button>
-        </div>
+    <div className="settings-rows">
+      <SwitchRow
+        label={labels.corrector}
+        checked={correctorAvailable && correctorEnabled}
+        disabled={!correctorAvailable}
+        note={correctorAvailable ? undefined : labels.correctorUnavailable}
+        onToggle={() => onSetCorrectorEnabled((enabled) => !enabled)}
+      />
+      <SwitchRow
+        label={labels.autocomplete}
+        checked={autocompleteEnabled}
+        onToggle={() => onSetAutocompleteEnabled((enabled) => !enabled)}
+      />
+      {autocompleteEnabled ? <>
+        {autocompleteShortcutActions.map((action) => (
+          <ShortcutRow key={action} action={action} preferences={preferences} labels={labels}
+            rowLabels={shortcutActionLabels} recording={recording} onRecordingChange={setRecording}
+            onPreferencesChange={onPreferencesChange} />
+        ))}
+        <KeyTextRow label={labels.accept} keyText="Tab" />
+        <KeyTextRow label={labels.alternatives} keyText={`${compactShortcutLabel("Alt")} ↑↓`} />
+        <KeyTextRow label={labels.dismiss} keyText="Esc" />
+        <button type="button" className="writing-assist-row is-button" onClick={onResetShortcuts}>
+          <RowCopy label={labels.reset} />
+        </button>
+      </> : null}
+      {groqKey ? (
+        <GroqKeyRow keyState={groqKey} labels={labels} onSave={onSaveGroqKey} onGetKey={onGetGroqKey}
+          focusRequest={keyFieldFocusRequest} />
       ) : null}
+      <button type="button" className="writing-assist-row is-button" onClick={onOpenPrivacy}>
+        <RowCopy label={labels.privacy} />
+      </button>
     </div>
   );
 }

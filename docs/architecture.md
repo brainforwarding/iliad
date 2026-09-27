@@ -231,12 +231,37 @@ The UI target is one useful top bar, not a separate macOS traffic-light bar plus
 - The active document appears once in the topbar as a simple tab/dent.
 - The sidebar begins below the topbar.
 - The sidebar header shows workspace name plus `+` only.
-- The topbar owns compact typography, language, and focus controls.
+- The top row's right side holds only the save state and the review slot; display settings live in Settings.
+
+### Settings
+
+One panel (`src/components/settings/SettingsPanel.tsx`, state in
+`src/app/useSettingsPanel.ts`) replaces the old Typography, Language and
+Writing assists menus (spec `specs/2026-09-27-premium-pass.md`, stage 4). It
+opens from the sidebar's footer "Settings" row and from the app menu
+"Settings…" (no accelerator; `window:menu-command` `open-settings` to the
+window the menu was used in). It is a non-modal dialog anchored above the
+footer row: outside click and Escape close it, Escape returns focus to the
+opener, and it holds the sidebar peek open. Tabs sit at the bottom
+(`role=tablist`, arrow keys/Home/End), the content scrolls above them so the
+Writing tab fits at the 640px minimum height, and the last tab is remembered in
+`localStorage` (`iliad:settings-tab`). Only the active tab body is mounted, so
+closing Settings or leaving Writing ends shortcut recording and releases the
+menu-shortcut pause.
+
+- General (`GeneralSettings.tsx`): App language, Version (the package version
+  injected by Vite as `__ILIAD_VERSION__`), Updates (Check now; Checking… / Up
+  to date / failed / "Iliad MD x is ready" with Download and What's new). The
+  app menu's "Check for Updates…" opens Settings on General and runs the check.
+  An available update puts an amber dot on the footer row and the General tab.
+- Typography (`TypographySettings.tsx`): Font, Size (A− N px A+, 14–24), Reset.
+- Writing (`WritingAssistsSettings.tsx`): the Writing assists rows below.
+  AI notices' "Use my key" opens this tab with the key field focused.
 
 Relevant files:
 
 - `src/App.tsx`
-- `src/components/LanguageMenu.tsx`
+- `src/components/settings/GeneralSettings.tsx`
 - `src/styles/app.css`
 - `src/styles/chrome.css`
 - `src/styles/sidebar.css`
@@ -261,7 +286,7 @@ Relevant files:
 - `src/i18n/appLanguage.ts`
 - `src/i18n/strings.ts`
 - `src/App.tsx`
-- `src/components/LanguageMenu.tsx`
+- `src/components/settings/GeneralSettings.tsx`
 - `electron/ipc/workspace.ts`
 - `electron/preload.ts`
 - `src/types/iliad.ts`
@@ -387,7 +412,7 @@ indentation), Esc dismisses or rejects, ⌥↑/↓ cycles alternatives. Only the
 selection keymap binds the ✦ AI menu key and it always consumes it, so the key
 never falls through to CodeMirror's `insertBlankLine`.
 
-The Writing assists menu (`src/components/WritingAssistsMenu.tsx`, Figma
+The Writing assists settings (`src/components/settings/WritingAssistsSettings.tsx`, Figma
 "Writing assists: one row style", frame 15) holds settings only, in one row
 style: name, optional grey note, control on the right, a hairline under each
 row. Rows: Corrector, Autocomplete, then (while Autocomplete is on) ✦ AI menu,
@@ -467,7 +492,7 @@ Relevant files:
 - `electron/writing/`, `electron/ipc/autocomplete.ts`, `electron/ipc/tighten.ts`,
   `electron/ipc/writingSettings.ts`, `electron/ipc/trust.ts`
 - `src/editor/ideaAutocomplete/`, `src/editor/aiReview/`,
-  `src/components/WritingAssistsMenu.tsx`
+  `src/components/settings/WritingAssistsSettings.tsx`
 - `bin/iliad`, `bin/iliad.mjs`, `bin/lib/`, `resources/skill/iliad/SKILL.md`
 - `electron/cli/`, `src/app/useCliBridge.ts`
 
@@ -506,6 +531,13 @@ Rules that must hold:
   (`agent:keep-chunk` / `agent:restore-chunk`) when they no longer match.
   Keep all / Restore all act on the whole file. Creates and deletes stay
   file-level: Keep file / Move to Trash, Confirm deletion / Restore file.
+- The open document's file-level review controls sit on the right of the
+  window's top row ("{n} changes · ↑ ↓ · Keep all · Restore all"; a stale
+  review shows only Restore all). EditorPane owns them and portals
+  `ReviewControls` into the top-row slot App passes as `topbarSlot`. ↑ ↓ only
+  scroll to the previous/next unresolved chunk and mark it active (a local
+  index keyed to the review, wrapping at the ends); they never act on it.
+  The conflict and detached-comments bars stay light bands above the text.
 - Every Restore uses a guarded replacement, never a truncating write: the
   current file is renamed to a hidden holding path and its bytes verified
   against the reviewed hash, the new text is written to a temp file in the
@@ -557,7 +589,7 @@ Style ownership:
 - Sidebar, file tree, tree selection, and inline rename styles live in `sidebar.css`.
 - Editor container, empty editor state, and scroll geometry live in `editor.css`.
 - CodeMirror visual Markdown classes and widgets live in `visual-markdown.css`.
-- Inline review (outside chunks, ✦ AI results, review toolbar) lives in `editor.css`; pending-review tree markers live in `sidebar.css`.
+- Inline review (outside chunks, ✦ AI results, conflict/detached bands) lives in `editor.css`; the top-row review controls live in `chrome.css`; pending-review tree markers live in `sidebar.css`.
 - The paperclip signature mark lives in `mark.css`.
 - Typography popover, tree context menu, toasts, and transient error text live in `popovers.css`.
 - Media queries live in `responsive.css` and stay last.
@@ -659,7 +691,7 @@ Typography is an editor display preference, not document content.
 Relevant files:
 
 - `src/preferences/editorPreferences.ts`
-- `src/components/TypographyMenu.tsx`
+- `src/components/settings/TypographySettings.tsx`
 - `src/components/EditorPane.tsx`
 - `src/styles/popovers.css`
 - `src/styles/visual-markdown.css`
@@ -765,7 +797,8 @@ Manual Electron checks still matter:
   remove it to return to free. Check the Writing assists menu against Figma
   frame 15 in English and Spanish.
 - Edit an open document from another tool: each chunk shows Keep / Restore;
-  Keep all and Restore all work from the toolbar and the sidebar's
+  Keep all and Restore all work from the top row (↑ ↓ step through the
+  chunks) and the sidebar's
   all-documents row ("{n} changed", shown only when a document other than
   the open one is pending); an
   outside-created file offers Keep file / Move to Trash and a deletion offers

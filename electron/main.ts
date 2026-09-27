@@ -98,6 +98,15 @@ function installApplicationMenu() {
       label: app.name,
       submenu: [
         { role: "about" },
+        { type: "separator" },
+        {
+          // No accelerator (spec 2026-09-27): opens Settings in the window the menu was used in.
+          label: "Settings\u2026",
+          click: (_item, targetWindow) => {
+            const window = targetWindow instanceof BrowserWindow ? targetWindow : BrowserWindow.getFocusedWindow();
+            sendMenuCommand(window, "open-settings");
+          }
+        },
         {
           label: "Check for Updates...",
           click: () => {

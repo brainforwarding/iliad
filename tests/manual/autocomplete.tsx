@@ -3,7 +3,7 @@ import React, { useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { EditorView } from "@codemirror/view";
 import { EditorPane } from "../../src/components/EditorPane";
-import { WritingAssistsMenu } from "../../src/components/WritingAssistsMenu";
+import { WritingAssistsSettings } from "../../src/components/settings/WritingAssistsSettings";
 import { useAutocompletePreferences } from "../../src/preferences/autocompletePreferences";
 import { appStrings } from "../../src/i18n/strings";
 import type { IdeaAutocompleteRequest, IdeaAutocompleteResult, FileTreeNode } from "../../src/types/iliad";
@@ -50,7 +50,6 @@ function Preview() {
   const [open, setOpen] = useState(true);
   const [enabled, setEnabled] = useState(true);
   const [corrector, setCorrector] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const [language, setLanguage] = useState<"en" | "es">("en");
   const strings = appStrings[language];
@@ -65,12 +64,15 @@ function Preview() {
   return <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "var(--editor)" }}>
     <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 24px", borderBottom: "1px solid var(--hairline)", fontFamily: "var(--font-ui)" }}>
       <div><button onClick={() => setChapter((n) => 1 - n)}>{files[chapter].name}</button> <button onClick={() => setLanguage(language === "en" ? "es" : "en")}>{language.toUpperCase()}</button></div>
-      <WritingAssistsMenu labels={strings.writingAssists} menuRef={menuRef} open={open} onToggleOpen={() => setOpen(!open)}
+      <div style={{ position: "relative" }}>
+      <button onClick={() => setOpen(!open)}>{strings.settings.tabs.writing}</button>
+      {open ? <div className="settings-panel" style={{ top: 32, bottom: "auto", left: "auto", right: 0 }}><div className="settings-content"><WritingAssistsSettings labels={strings.writingAssists}
         correctorEnabled={corrector} onSetCorrectorEnabled={setCorrector} correctorAvailable={true}
         autocompleteEnabled={enabled} onSetAutocompleteEnabled={setEnabled}
         groqKey={{ state: "none", last4: null, rejected: false }} onSaveGroqKey={async () => ({ ok: true, state: { state: "none", last4: null, rejected: false } })} onGetGroqKey={() => undefined} onOpenPrivacy={() => undefined}
         preferences={options.preferences} onPreferencesChange={options.setPreferences}
-        onResetShortcuts={options.resetShortcuts} />
+        onResetShortcuts={options.resetShortcuts} /></div></div> : null}
+      </div>
     </header>
     <EditorPane file={files[chapter]} value={text[chapter]} editorFontSize={19} editorFontPreset="serif" labels={strings.editor} review={null}
       selectionComments={selectionComments}

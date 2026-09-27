@@ -162,3 +162,4 @@ The cask ships from the own tap `brainforwarding/homebrew-tap`. Submit to
 - Review: when a hunk edits a line and adds lines before it, the intraline diff pairs the old line with the first new line, so the whole removed line is marked word by word.
 - Tree: keyboard access to the context menu (review finding, deferred).
 
+- Idea (owner, 2026-09-27): AI-suggested document title, like ChatGPT names chats. Discuss after the premium pass: when it triggers (e.g. an `untitled` doc once it has enough text), what it changes (file name vs first heading — the file on disk is the contract), and that it stays review-first (a suggestion the writer accepts, never a silent rename).

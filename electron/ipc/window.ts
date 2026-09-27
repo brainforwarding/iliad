@@ -6,7 +6,7 @@ export const windowFullscreenChangedChannel = "window:fullscreen-changed";
 /** Main → renderer: an app-menu command meant for this window. */
 export const menuCommandChannel = "window:menu-command";
 
-/** Commands the app menu sends to the window it was used in (Settings arrives in stage 4). */
+/** Commands the app menu sends to the window it was used in (View → Toggle Sidebar, App → Settings…). */
 export const menuCommands = ["toggle-sidebar", "open-settings"] as const;
 export type MenuCommand = (typeof menuCommands)[number];
 

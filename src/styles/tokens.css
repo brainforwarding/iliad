@@ -123,6 +123,7 @@
   /* ---- Radii — two, plus pill and circle ---- */
   --radius-surface: 8px; /* panels / cards / popovers */
   --radius-control: 6px; /* buttons / inputs / rows */
+  --radius-panel: 12px; /* the Settings panel */
   --radius-pill: 999px;
 
   /* ---- Type families — one each ---- */

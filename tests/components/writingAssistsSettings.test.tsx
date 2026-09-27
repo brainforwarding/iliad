@@ -1,7 +1,6 @@
-import { createRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { WritingAssistsMenu } from "../../src/components/WritingAssistsMenu";
+import { WritingAssistsSettings } from "../../src/components/settings/WritingAssistsSettings";
 import { defaultAutocompletePreferences } from "../../src/editor/ideaAutocomplete/options";
 import { appStrings } from "../../src/i18n/strings";
 import type { GroqKeyState } from "../../src/types/iliad";
@@ -18,7 +17,7 @@ function render({
 } = {}) {
   const noop = () => undefined;
   return renderToStaticMarkup(
-    <WritingAssistsMenu labels={appStrings[language].writingAssists} menuRef={createRef()} open onToggleOpen={noop}
+    <WritingAssistsSettings labels={appStrings[language].writingAssists}
       correctorEnabled={false} onSetCorrectorEnabled={noop} correctorAvailable={correctorAvailable}
       autocompleteEnabled={autocompleteEnabled} onSetAutocompleteEnabled={noop}
       groqKey={groqKey} onSaveGroqKey={async () => ({ ok: true, state: FREE })} onGetGroqKey={noop} onOpenPrivacy={noop}
@@ -32,7 +31,7 @@ function rowLabels(html: string) {
   return [...html.matchAll(/class="writing-assist-row-label"[^>]*>([^<]*)</g)].map((match) => match[1]);
 }
 
-describe("Writing assists menu", () => {
+describe("Writing assists settings (Settings → Writing)", () => {
   it("lists every item as one row, in the spec order (EN)", () => {
     expect(rowLabels(render())).toEqual([
       "Corrector", "Autocomplete", "✦ AI menu", "Sentence", "Paragraph", "Full idea",

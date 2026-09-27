@@ -4,10 +4,12 @@ import { EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap, type ViewUpdate } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { markdownLineCount, reviewBlockedLineRanges } from "../editor/aiReview/blockedRanges";
 import { aiReviewExtension } from "../editor/aiReview/extension";
 import { reviewHunksForDisplay, type DisplayReviewHunk } from "../editor/aiReview/diff";
 import { acceptReviewShortcutApplies, nextChunkFocusIndex } from "../editor/aiReview/keyboard";
+import { clampHunkIndex, hunkScrollPosition, nextHunkIndex, previousHunkIndex } from "../editor/aiReview/navigation";
 import type { EditorReviewState } from "../editor/aiReview/types";
 import { CodeMirrorHost } from "../editor/CodeMirrorHost";
 import { imageDropPasteExtension } from "../editor/imageDropPaste";
@@ -50,6 +52,7 @@ import type {
 import { AiNoticeBar } from "./AiNoticeBar";
 import { ClipMark } from "./ClipMark";
 import { DetachedCommentsBar } from "./DetachedCommentsBar";
+import { ReviewControls } from "./ReviewControls";
 import { FilePlus } from "lucide-react";
 
 export interface EditorSelectionCommentsProps {
@@ -199,9 +202,9 @@ interface EditorPaneProps {
   onOpenLink: (href: string) => void | Promise<void>;
   onCreateDocument?: () => void;
   /**
-   * The empty right-side slot of the window's top row (App state from a
-   * callback ref, null until mounted). Stage 5 of the premium pass portals the
-   * review controls into it; unused until then.
+   * The right-side slot of the window's top row (App state from a callback
+   * ref, null until mounted). The outside-review controls are portaled into it
+   * once it exists; review state stays owned here.
    */
   topbarSlot?: HTMLElement | null;
   onEditorViewChange?: (view: EditorView) => void;
@@ -305,6 +308,7 @@ export function EditorPane({
   onInsertImageReference,
   onOpenLink,
   onCreateDocument,
+  topbarSlot = null,
   onEditorViewChange,
   contentSearchRevealTarget,
   onContentSearchRevealHandled
@@ -320,7 +324,17 @@ export function EditorPane({
 
     return reviewHunksForDisplay(review.currentContent, review.file);
   }, [review]);
-  const unresolvedHunks = editReviewDisplay?.hunks ?? [];
+  const unresolvedHunks = useMemo(() => editReviewDisplay?.hunks ?? [], [editReviewDisplay]);
+  const reviewStale = review?.mode === "edit_file" && (Boolean(editReviewDisplay?.stale) || review.file.status === "stale");
+  // ↑ ↓ navigation: a local index keyed to the review snapshot, so a new file
+  // or a new review starts with no active hunk (no reset effect needed).
+  const reviewNavigationKey = review?.mode === "edit_file" ? `${file?.path ?? ""}\u0000${review.file.id}` : null;
+  const [hunkCursor, setHunkCursor] = useState<{ key: string; index: number } | null>(null);
+  const activeHunkIndex =
+    hunkCursor && reviewNavigationKey !== null && hunkCursor.key === reviewNavigationKey && !reviewStale
+      ? clampHunkIndex(hunkCursor.index, unresolvedHunks.length)
+      : null;
+  const activeHunkId = activeHunkIndex === null ? null : (unresolvedHunks[activeHunkIndex]?.id ?? null);
   const readOnly = review?.mode === "create_file" || review?.mode === "delete_file" || Boolean(review?.mode === "edit_file" && review.readOnly);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
   const [provisionalCommentRange, setProvisionalCommentRange] = useState<{ from: number; to: number } | null>(null);
@@ -447,6 +461,30 @@ export function EditorPane({
       }
     };
   }, [editReviewDisplay, review]);
+
+  // Scrolls to the previous/next unresolved hunk and marks it active. Read-only:
+  // it never keeps or restores, and it leaves focus on the arrow for repeats.
+  const navigateReviewHunk = useCallback(
+    (direction: "previous" | "next") => {
+      if (!editorView || reviewNavigationKey === null || reviewStale) {
+        return;
+      }
+
+      const count = unresolvedHunks.length;
+      const index = direction === "next" ? nextHunkIndex(activeHunkIndex, count) : previousHunkIndex(activeHunkIndex, count);
+      const hunk = index === null ? undefined : unresolvedHunks[index];
+
+      if (index === null || !hunk) {
+        return;
+      }
+
+      setHunkCursor({ key: reviewNavigationKey, index });
+      editorView.dispatch({
+        effects: EditorView.scrollIntoView(hunkScrollPosition(editorView.state.doc, hunk), { y: "center" })
+      });
+    },
+    [activeHunkIndex, editorView, reviewNavigationKey, reviewStale, unresolvedHunks]
+  );
 
   useEffect(() => {
     const actedIndex = chunkFocusIndexRef.current;
@@ -1008,7 +1046,7 @@ export function EditorPane({
           aiReviewExtension({
             mode: "edit_file",
             hunks: editReviewDisplay.hunks,
-            activeHunkId: null,
+            activeHunkId,
             createLineCount: 0,
             onAcceptHunk: outsideChunkHandlers?.onKeep,
             onRejectHunk: outsideChunkHandlers?.onRestore,
@@ -1062,6 +1100,7 @@ export function EditorPane({
       return nextExtensions;
     },
     [
+      activeHunkId,
       autocompleteExtensions,
       lengthKeyGuard,
       editReviewDisplay,
@@ -1156,65 +1195,18 @@ export function EditorPane({
           onDelete={detachedComments.onDelete}
         />
       ) : null}
-      {review ? (
-        <div className="editor-review-toolbar">
-          {review.mode === "edit_file" ? (
-            <>
-              <div className="editor-review-title">
-                <span className="editor-review-path">{review.file.relativePath}</span>
-                <span aria-hidden="true">·</span>
-                <span>
-                  {editReviewDisplay?.stale || review.file.status === "stale"
-                    ? review.labels.stale
-                    : review.labels.changes(unresolvedHunks.length)}
-                </span>
-              </div>
-              <div className="editor-review-actions">
-                <button
-                  type="button"
-                  disabled={review.actionBusy || Boolean(editReviewDisplay?.stale) || unresolvedHunks.length === 0}
-                  onClick={review.onAcceptFile}
-                >
-                  {review.labels.acceptAll}
-                </button>
-                <button type="button" disabled={review.actionBusy} onClick={review.onRejectFile}>
-                  {review.labels.rejectAll}
-                </button>
-              </div>
-            </>
-          ) : review.mode === "create_file" ? (
-            <>
-              <div className="editor-review-title">
-                <span className="editor-review-path">{review.labels.pendingDocument(review.file.relativePath)}</span>
-              </div>
-              <div className="editor-review-actions">
-                <button type="button" disabled={review.actionBusy} onClick={review.onAcceptFile}>
-                  {review.labels.create}
-                </button>
-                <button type="button" disabled={review.actionBusy} onClick={review.onRejectFile}>
-                  {review.labels.discard}
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="editor-review-title">
-                <span className="editor-review-path">
-                  {review.labels.pendingDeleteDocument(review.file.relativePath)}
-                </span>
-              </div>
-              <div className="editor-review-actions">
-                <button type="button" disabled={review.actionBusy} onClick={review.onAcceptFile}>
-                  {review.labels.delete}
-                </button>
-                <button type="button" disabled={review.actionBusy} onClick={review.onRejectFile}>
-                  {review.labels.discard}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      ) : null}
+      {review && topbarSlot
+        ? createPortal(
+            <ReviewControls
+              review={review}
+              stale={reviewStale}
+              hunkCount={unresolvedHunks.length}
+              onPrevious={() => navigateReviewHunk("previous")}
+              onNext={() => navigateReviewHunk("next")}
+            />,
+            topbarSlot
+          )
+        : null}
       <div className="editor-surface" ref={editorSurfaceRef}>
         <CodeMirrorHost
           value={value}

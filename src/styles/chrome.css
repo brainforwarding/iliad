@@ -110,7 +110,7 @@
   color: var(--muted-2);
 }
 
-/* Stage 5 portals the document's review controls here. */
+/* EditorPane portals the document's outside-review controls here. */
 .topbar-slot {
   display: flex;
   min-width: 0;
@@ -121,6 +121,75 @@
 
 .topbar-slot:empty {
   align-self: stretch;
+}
+
+/* Outside-review controls: "{n} changes · ↑ ↓ · Keep all · Restore all". */
+.review-controls {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.review-controls__count {
+  overflow: hidden;
+  color: var(--muted-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-controls__nav {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.review-controls .review-controls__arrow {
+  width: 26px;
+  height: 26px;
+}
+
+.review-controls__button {
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border-control);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.review-controls__button:hover:not(:disabled) {
+  background: var(--hover-wash);
+}
+
+.review-controls__button.is-primary {
+  border-color: var(--accent-deepest);
+  background: var(--accent-deepest);
+  color: var(--ink-inverse);
+}
+
+.review-controls__button.is-primary:hover:not(:disabled) {
+  border-color: var(--accent-deep);
+  background: var(--accent-deep);
+}
+
+.review-controls__button:focus-visible {
+  outline: none;
+  border-color: var(--focus-ring-border);
+  box-shadow: var(--focus-ring);
+}
+
+.review-controls__button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .topbar-actions {
@@ -351,7 +420,9 @@
   border-radius: 999px;
   background: var(--muted-3);
   content: "";
-  opacity: 0.22;
+  /* Invisible at rest: the sidebar's own hairline is the one edge, top to
+     bottom. The handle's line only shows on hover, focus or drag. */
+  opacity: 0;
   transition:
     background 120ms ease,
     opacity 120ms ease,

@@ -27,10 +27,10 @@ function renderTree(overrides: Partial<Parameters<typeof FileTree>[0]> = {}) {
     <FileTree
       workspace={workspace} recentWorkspaces={[]} nodes={nodes} activePath={undefined} selectedPath={null}
       pendingChanges={[]} pendingReviewCount={0} creatingFile={false} creatingFolder={false}
-      labels={appStrings.en.sidebar} updateLabels={appStrings.en.updates} updateStatus={null} updateChecking={false}
+      labels={appStrings.en.sidebar}
       renamingPath={null} onOpenNode={noop} onOpenPendingChange={noop} onCreateFile={noop} onCreateFolder={noop}
-      onOpenFolder={noop} onOpenRecent={noop} onRevealWorkspace={noop} onCheckForUpdates={noop} onDownloadUpdate={noop}
-      onViewUpdateRelease={noop} onSelectNode={noop} onSelectWorkspaceRoot={noop} onAcceptPendingChanges={noop}
+      onOpenFolder={noop} onOpenRecent={noop} onRevealWorkspace={noop}
+      onSelectNode={noop} onSelectWorkspaceRoot={noop} onAcceptPendingChanges={noop}
       onRejectPendingChanges={noop} onMoveNode={async () => null} onShowContextMenu={noop} onCancelRename={noop}
       onCommitRename={noop} {...overrides}
     />

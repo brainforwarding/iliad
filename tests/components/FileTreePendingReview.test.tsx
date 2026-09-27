@@ -52,9 +52,6 @@ function renderFileTree(overrides: Partial<Parameters<typeof FileTree>[0]> = {})
       creatingFile={false}
       creatingFolder={false}
       labels={appStrings.en.sidebar}
-      updateLabels={appStrings.en.updates}
-      updateStatus={null}
-      updateChecking={false}
       renamingPath={null}
       onOpenNode={() => undefined}
       onOpenPendingChange={() => undefined}
@@ -63,9 +60,6 @@ function renderFileTree(overrides: Partial<Parameters<typeof FileTree>[0]> = {})
       onOpenFolder={() => undefined}
       onOpenRecent={() => undefined}
       onRevealWorkspace={() => undefined}
-      onCheckForUpdates={() => undefined}
-      onDownloadUpdate={() => undefined}
-      onViewUpdateRelease={() => undefined}
       onSelectNode={() => undefined}
       onSelectWorkspaceRoot={() => undefined}
       onAcceptPendingChanges={() => undefined}
