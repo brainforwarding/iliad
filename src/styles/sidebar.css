@@ -3,21 +3,20 @@
   min-width: 0;
   height: 100%;
   min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr);
+  /* header · tree · Settings footer */
+  grid-template-rows: auto minmax(0, 1fr) auto;
   border-right: 1px solid var(--hairline);
   background: var(--sidebar);
 }
 
-.sidebar.has-file-tree-search {
-  grid-template-rows: auto auto minmax(0, 1fr);
-}
-
+/* Optional rows (review row, search) sit between the header and the tree. */
+.sidebar.has-file-tree-search,
 .sidebar.has-pending-review {
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 
 .sidebar.has-file-tree-search.has-pending-review {
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
 }
 
 .sidebar-header {
@@ -95,49 +94,53 @@
   align-items: center;
 }
 
+/* All-documents review row: one light line under the header, no band. */
 .file-tree-pending-review {
-  display: grid;
+  display: flex;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 7px;
-  padding: 8px;
-  border-top: 1px solid var(--hairline);
-  border-bottom: 1px solid var(--hairline);
-  background: var(--paper);
-  color: var(--ink-2);
-  font-size: var(--text-sm);
+  min-height: 28px;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px 4px 16px;
+  font-size: var(--text-ui);
 }
 
-.file-tree-pending-review > span {
+.file-tree-pending-review-count {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
-  font-weight: 600;
-  line-height: 1.25;
+  color: var(--muted-2);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .file-tree-pending-review-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 6px;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
 }
 
 .file-tree-pending-review-actions button {
-  min-width: 0;
-  min-height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--hairline-strong);
+  min-height: 24px;
+  padding: 0 6px;
+  border: 0;
   border-radius: var(--radius-control);
-  background: var(--editor);
-  color: var(--ink-2);
+  background: transparent;
+  color: var(--ink-3);
   cursor: pointer;
   font: inherit;
-  font-size: var(--text-sm);
-  font-weight: 600;
+  font-size: var(--text-ui);
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .file-tree-pending-review-actions button:hover:not(:disabled) {
   background: var(--hover-wash);
+}
+
+.file-tree-pending-review-actions button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .file-tree-pending-review-actions button:disabled {
@@ -495,15 +498,16 @@
   box-shadow: inset 0 0 0 1px var(--accent-wash);
 }
 
+/* Tree rows: 28px, no file icons; folders carry a 12px chevron in the
+   first column so file names align with folder names. */
 .tree-item {
   display: grid;
   width: 100%;
-  min-height: 30px;
+  min-height: 28px;
   grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 2px;
-  padding-left: calc(8px + var(--tree-depth) * 18px);
-  border: 1px solid transparent;
+  padding-left: calc(4px + var(--tree-depth) * 18px);
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--ink-3);
@@ -513,41 +517,42 @@
   outline: none;
 }
 
-.tree-item:hover,
-.tree-item:focus-within {
-  background: var(--paper);
+.tree-item:hover {
+  background: var(--row-hover);
+}
+
+.tree-item:has(.tree-open-button:focus-visible) {
+  box-shadow: var(--focus-ring);
 }
 
 .tree-item.is-selected {
-  border-color: var(--row-wash);
-  background: var(--hover-wash);
+  background: var(--row-hover);
+  box-shadow: inset 0 0 0 1px var(--row-wash);
 }
 
-.tree-item.is-directory.is-selected {
-  border-color: var(--row-wash);
-  background: var(--hover-wash);
+.tree-item.is-active,
+.tree-item.is-active:hover {
+  background: var(--row-selected);
   color: var(--ink-3);
 }
 
-.tree-item.is-active {
-  border-color: transparent;
-  background: var(--hover-wash);
-  box-shadow: var(--rail);
-  color: var(--ink-3);
+.tree-item.is-selected:has(.tree-open-button:focus-visible),
+.tree-item.is-active:has(.tree-open-button:focus-visible) {
+  box-shadow: var(--focus-ring);
 }
 
 .tree-item.is-search-active-match {
-  border-color: var(--focus-ring-border);
   background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--focus-ring-border);
 }
 
 .tree-item.is-active.is-search-active-match {
-  box-shadow: var(--rail), var(--focus-ring);
+  box-shadow: inset 0 0 0 1px var(--focus-ring-border), var(--focus-ring);
 }
 
 .tree-item.is-drop-target {
-  border-color: var(--accent-wash);
   background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-wash);
 }
 
 .tree-item.is-dragging {
@@ -558,9 +563,9 @@
   display: grid;
   min-width: 0;
   min-height: 28px;
-  grid-template-columns: 20px minmax(0, 1fr) 18px;
+  grid-template-columns: 12px minmax(0, 1fr) 18px;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   padding: 0 4px 0 0;
   border: 0;
   background: transparent;
@@ -576,7 +581,7 @@
 
 /* Companion rows (Comments) under their document: quieter, smaller. */
 .tree-item.is-companion {
-  min-height: 26px;
+  min-height: 24px;
 }
 
 .tree-item.is-companion .tree-open-button {
@@ -607,20 +612,8 @@
   opacity: 0.7;
 }
 
-.tree-item.is-pending-create {
-  color: var(--accent-deep);
-}
-
-.tree-item.is-pending-create .tree-icon,
-.tree-item.is-pending-dir .tree-icon {
-  color: var(--accent);
-}
-
-.tree-item.is-pending-create .tree-name {
-  color: var(--accent-deep);
-  font-weight: 600;
-}
-
+/* Pending create/delete read through the dot (create green) and, for
+   deletes, the struck-through name; no file icons. */
 .tree-item.is-pending-delete .tree-name,
 .tree-item:has(.tree-pending-dot.is-delete) .tree-name {
   color: var(--review-delete-ink);
@@ -632,18 +625,11 @@
   text-decoration-thickness: 1px;
 }
 
-.tree-item.is-pending-delete .tree-icon,
-.tree-item:has(.tree-pending-dot.is-delete) .tree-icon {
-  color: var(--review-delete-ink);
-}
-
 .tree-item.is-external,
 .tree-item.is-asset {
   color: var(--muted-3);
 }
 
-.tree-item.is-external .tree-icon,
-.tree-item.is-asset .tree-icon,
 .tree-item.is-asset .tree-name {
   opacity: 0.66;
 }
@@ -652,7 +638,7 @@
   display: inline-grid;
   min-width: 0;
   place-items: center;
-  color: var(--muted-2);
+  color: var(--icon);
 }
 
 .tree-name {
@@ -661,7 +647,7 @@
   align-items: center;
   gap: 5px;
   overflow: hidden;
-  font-size: var(--text-md);
+  font-size: var(--text-ui);
   line-height: 1.1;
   white-space: nowrap;
 }
@@ -733,9 +719,9 @@
   grid-column: 1 / -1;
   min-width: 0;
   min-height: 28px;
-  grid-template-columns: 20px minmax(0, 1fr);
+  grid-template-columns: 12px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
+  gap: 6px;
 }
 
 .tree-rename-input {
@@ -745,7 +731,7 @@
   border-radius: 5px;
   background: var(--overlay-veil);
   color: var(--ink-1);
-  font-size: var(--text-md);
+  font-size: var(--text-ui);
   outline: none;
   padding: 0 6px;
 }
@@ -759,4 +745,51 @@
   padding: 20px 12px;
   color: var(--muted-3);
   font-size: var(--text-md);
+}
+
+/* Settings footer: always visible; the tree scrolls above it. */
+.sidebar-footer {
+  padding: 4px 8px 8px;
+}
+
+.sidebar-settings-row {
+  display: grid;
+  width: 100%;
+  min-height: 28px;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-ui);
+  text-align: left;
+}
+
+.sidebar-settings-row svg {
+  color: var(--icon);
+}
+
+.sidebar-settings-row:hover {
+  background: var(--row-hover);
+}
+
+.sidebar-settings-row.is-open {
+  background: var(--row-selected);
+}
+
+.sidebar-settings-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.sidebar-settings-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--pending);
 }

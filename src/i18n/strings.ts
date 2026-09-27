@@ -50,6 +50,8 @@ export const appStrings = {
       recent: "Recent",
       noFiles: "No files",
       workspaceRoot: "Workspace root",
+      settings: "Settings",
+      settingsUpdateAvailable: "Settings, update available",
       fileTreeMoveStarted: (path: string) => `Moving ${path}`,
       fileTreeMoveTarget: (path: string) => `Move to ${path}`,
       fileTreeMoveRootTarget: "Move to workspace root",
@@ -59,7 +61,8 @@ export const appStrings = {
       pendingEdit: (path: string) => `Pending edit: ${path}`,
       proposedNewDocument: (path: string) => `Proposed new document: ${path}`,
       pendingDelete: (path: string) => `Pending delete: ${path}`,
-      pendingReviewSummary: (count: number) => (count === 1 ? "1 pending review item" : `${count} pending review items`),
+      pendingReviewSummary: (count: number) => `${count} changed`,
+      pendingReviewRegion: "Documents with changes to review",
       acceptPendingChanges: "Keep all",
       rejectPendingChanges: "Restore all",
       rename: (name: string) => `Rename ${name}`,
@@ -116,7 +119,8 @@ export const appStrings = {
       moveToWorkspaceRoot: "Move to workspace root",
       copyPath: "Copy path",
       revealInFinder: "Reveal in Finder",
-      moveToTrash: "Move to Trash"
+      moveToTrash: "Move to Trash",
+      newFolder: "New folder"
     },
     typography: {
       title: "Typography",
@@ -393,6 +397,8 @@ export const appStrings = {
       recent: "Recientes",
       noFiles: "Sin archivos",
       workspaceRoot: "Raíz del espacio",
+      settings: "Ajustes",
+      settingsUpdateAvailable: "Ajustes, actualización disponible",
       fileTreeMoveStarted: (path: string) => `Moviendo ${path}`,
       fileTreeMoveTarget: (path: string) => `Mover a ${path}`,
       fileTreeMoveRootTarget: "Mover a la raíz del espacio",
@@ -402,8 +408,8 @@ export const appStrings = {
       pendingEdit: (path: string) => `Edición pendiente: ${path}`,
       proposedNewDocument: (path: string) => `Documento nuevo propuesto: ${path}`,
       pendingDelete: (path: string) => `Eliminación pendiente: ${path}`,
-      pendingReviewSummary: (count: number) =>
-        count === 1 ? "1 cambio pendiente de revisión" : `${count} cambios pendientes de revisión`,
+      pendingReviewSummary: (count: number) => `${count} con cambios`,
+      pendingReviewRegion: "Documentos con cambios por revisar",
       acceptPendingChanges: "Conservar todo",
       rejectPendingChanges: "Restaurar todo",
       rename: (name: string) => `Renombrar ${name}`,
@@ -461,7 +467,8 @@ export const appStrings = {
       moveToWorkspaceRoot: "Mover a la raíz del espacio",
       copyPath: "Copiar ruta",
       revealInFinder: "Mostrar en Finder",
-      moveToTrash: "Mover a la papelera"
+      moveToTrash: "Mover a la papelera",
+      newFolder: "Nueva carpeta"
     },
     typography: {
       title: "Tipografía",

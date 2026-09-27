@@ -267,7 +267,7 @@ State is tracked in this file's "Progress" section below.
 
 - [x] Stage 1 — foundations (tokens, system font, `Icon` 16/1.5, overflow clip on `.app-shell`/`.app-content`/`.editor-shell` only — `.sidebar` stays visible so its menus aren't cut, light scrollbars)
 - [x] Stage 2 — window chrome (52px top row, `trafficLightPosition {x:20,y:19}`, controls at 88px; View menu item is a fixed "Toggle Sidebar" ⌃⌘S — a Show/Hide label would need extra renderer→main state, tooltip does switch; breadcrumb includes the workspace name as in Figma C; peek via `useSidebarPeek`; fullscreen via `window:is-fullscreen` / `window:fullscreen-changed`; menu commands via `window:menu-command`; Aa/pen/language kept on the right until stage 4)
-- [ ] Stage 3 — sidebar
+- [x] Stage 3 — sidebar (review row sits under the header, above search; `shouldShowPendingReviewStrip`; `createFolder(explicitDirectoryPath?)`; context menu clamps to its measured size; Settings footer props `onOpenSettings`/`settingsOpen`/`updateAvailable` wired in stage 4; Check for updates stays in the folder menu until stage 4)
 - [ ] Stage 4 — settings panel
 - [ ] Stage 5 — review in the top row, rendered suggestions (5.2–5.4 rendered + continuous block done early: `renderedInsert.ts`; wholly new lines get no per-word emphasis; quote bar green inside the block)
 - [ ] Stage 6 — empty state G

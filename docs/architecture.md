@@ -115,7 +115,7 @@ Relevant files:
 
 The app manages Markdown documents and folders in the sidebar.
 
-- The sidebar header has two create actions: new document and new folder.
+- The sidebar header has one create action (new document) next to search. New folder lives in the workspace menu ("New folder", after "Open folder…", following the creation target rules) and in the tree context menu on folders, which passes that folder as an explicit target instead of relying on the selection update.
 - New document creates `untitled.md`, `untitled-2.md`, etc. using backend uniqueness logic.
 - New folder creates `untitled folder`, `untitled folder-2`, etc. using backend uniqueness logic.
 - Creation target is derived from tree selection: selected folder, parent of selected file, parent of active file, then workspace root.
@@ -765,7 +765,9 @@ Manual Electron checks still matter:
   remove it to return to free. Check the Writing assists menu against Figma
   frame 15 in English and Spanish.
 - Edit an open document from another tool: each chunk shows Keep / Restore;
-  Keep all and Restore all work from the toolbar and the tree strip; an
+  Keep all and Restore all work from the toolbar and the sidebar's
+  all-documents row ("{n} changed", shown only when a document other than
+  the open one is pending); an
   outside-created file offers Keep file / Move to Trash and a deletion offers
   Confirm deletion / Restore file.
 - Add a comment on a selection and confirm `name.comments.md` appears beside

@@ -1,4 +1,4 @@
-import { ChevronDown, Download, ExternalLink, FolderOpen, RefreshCw } from "lucide-react";
+import { ChevronDown, Download, ExternalLink, FolderOpen, FolderPlus, RefreshCw } from "lucide-react";
 import { Icon } from "./Icon";
 import { useEffect, useRef, useState } from "react";
 import type { UpdateCheckResult, WorkspaceInfo } from "../types/iliad";
@@ -6,6 +6,7 @@ import type { UpdateCheckResult, WorkspaceInfo } from "../types/iliad";
 interface WorkspaceMenuLabels {
   changeFolder: string;
   openFolder: string;
+  newFolder: string;
   recent: string;
 }
 
@@ -26,7 +27,12 @@ interface WorkspaceMenuProps {
   updateLabels: WorkspaceMenuUpdateLabels;
   updateStatus: UpdateCheckResult | null;
   updateChecking: boolean;
+  creatingFolder?: boolean;
+  /** Full "New folder in X" description, shown as the item's title. */
+  newFolderTitle?: string;
   onOpenFolder: () => void | Promise<void>;
+  /** Uses the tree's creation target rules (selected folder, else the open document's folder). */
+  onCreateFolder: () => void | Promise<void>;
   onOpenRecent: (workspace: WorkspaceInfo) => void | Promise<void>;
   onRevealWorkspace: () => void | Promise<void>;
   onCheckForUpdates: () => void | Promise<void>;
@@ -48,7 +54,10 @@ export function WorkspaceMenu({
   updateLabels,
   updateStatus,
   updateChecking,
+  creatingFolder = false,
+  newFolderTitle,
   onOpenFolder,
+  onCreateFolder,
   onOpenRecent,
   onRevealWorkspace,
   onCheckForUpdates,
@@ -129,6 +138,21 @@ export function WorkspaceMenu({
             <Icon icon={FolderOpen} />
             <span>{labels.openFolder}</span>
             <kbd>⌘O</kbd>
+          </button>
+
+          <button
+            type="button"
+            role="menuitem"
+            className="workspace-action"
+            title={newFolderTitle}
+            disabled={creatingFolder}
+            onClick={() => {
+              setOpen(false);
+              void onCreateFolder();
+            }}
+          >
+            <Icon icon={FolderPlus} />
+            <span>{labels.newFolder}</span>
           </button>
 
           {recents.length > 0 ? (

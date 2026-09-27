@@ -58,6 +58,7 @@
   --hover-wash-light: rgba(255, 255, 255, 0.7); /* hover on the file tree */
   --row-wash: rgba(100, 100, 104, 0.12); /* subtle row tint (pending/active rows) */
   --row-selected: #f0efeb; /* selected / active row fill in chrome lists */
+  --row-hover: rgba(60, 60, 64, 0.028); /* hover on chrome-list rows; lighter than --row-selected */
 
   /* ---- Focus (accessibility) — one ring everywhere ---- */
   --focus-ring: 0 0 0 2px rgba(60, 66, 74, 0.18);

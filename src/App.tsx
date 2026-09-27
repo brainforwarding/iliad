@@ -1593,7 +1593,7 @@ export default function App() {
         });
       }}
       onCreateFile={createMarkdownFile}
-      onCreateFolder={createFolder}
+      onCreateFolder={() => void createFolder()}
       onOpenFolder={openWorkspace}
       onOpenRecent={openRecentWorkspace}
       onRevealWorkspace={() => void window.iliad.revealInFinder(workspace.path, workspace.path)}
@@ -1807,6 +1807,10 @@ export default function App() {
           return openNode(node);
         }}
         onDuplicate={duplicateNode}
+        onNewFolder={(node) => {
+          closeTreeContextMenu();
+          return createFolder(node.path);
+        }}
         onMoveToTrash={moveNodeToTrash}
         onMoveToRoot={(node) => moveNode(node, workspace.path)}
         canMoveToRoot={(node) => {

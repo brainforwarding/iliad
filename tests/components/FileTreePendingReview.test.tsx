@@ -1,7 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { FileTree, PendingReviewStrip, fileTreeNodeShowsPendingIndicator } from "../../src/components/FileTree";
+import {
+  FileTree,
+  PendingReviewStrip,
+  fileTreeNodeShowsPendingIndicator,
+  shouldShowPendingReviewStrip
+} from "../../src/components/FileTree";
 import { appStrings } from "../../src/i18n/strings";
 import type { FileTreeDisplayNode, PendingFileTreeChange } from "../../src/review/pendingFileTree";
 import type { FileTreeNode, WorkspaceInfo } from "../../src/types/iliad";
@@ -75,48 +80,77 @@ function renderFileTree(overrides: Partial<Parameters<typeof FileTree>[0]> = {})
 }
 
 describe("FileTree pending review strip", () => {
-  it("renders pending review actions above the tree when review items exist", () => {
+  it("shows the all-documents row only when documents other than the open one are pending", () => {
+    expect(shouldShowPendingReviewStrip(0, false)).toBe(false);
+    expect(shouldShowPendingReviewStrip(1, true)).toBe(false);
+    expect(shouldShowPendingReviewStrip(1, false)).toBe(true);
+    expect(shouldShowPendingReviewStrip(2, true)).toBe(true);
+    expect(shouldShowPendingReviewStrip(3, false)).toBe(true);
+  });
+
+  it("renders one light review row under the header when review items exist", () => {
     const html = renderFileTree();
 
-    expect(html).toContain("file-tree-pending-review");
-    expect(html).toContain("2 pending review items");
+    expect(html).toContain("has-pending-review");
+    expect(html).toContain('class="file-tree-pending-review"');
+    expect(html).toContain(">2 changed<");
     expect(html).toContain(">Keep all<");
     expect(html).toContain(">Restore all<");
     expect(html).toContain("new");
+    expect(html.indexOf("file-tree-pending-review")).toBeGreaterThan(html.indexOf("sidebar-header"));
+    expect(html.indexOf("file-tree-pending-review")).toBeLessThan(html.indexOf("tree-scroll"));
   });
 
-  it("hides the strip when there are no pending review items", () => {
+  it("hides the row and reserves no grid row when there are no pending review items", () => {
     const html = renderFileTree({ pendingReviewCount: 0, pendingChanges: [] });
 
     expect(html).not.toContain("file-tree-pending-review");
-    expect(html).not.toContain("pending review items");
+    expect(html).not.toContain("has-pending-review");
+    expect(html).not.toContain(" changed<");
   });
 
-  it("hides strip actions when the only pending review item is already visible", () => {
+  it("hides the row and its grid row when the only pending item is the open document", () => {
     const html = renderFileTree({ pendingReviewCount: 1, pendingReviewActive: true });
 
-    expect(html).toContain("file-tree-pending-review is-current-review");
-    expect(html).toContain("1 pending review item");
+    expect(html).not.toContain("file-tree-pending-review");
+    expect(html).not.toContain("has-pending-review");
     expect(html).not.toContain(">Keep all<");
     expect(html).not.toContain(">Restore all<");
   });
 
-  it("keeps strip actions for multiple pending items even when one item is visible", () => {
+  it("shows the row for a single pending item that is not the open document", () => {
+    const html = renderFileTree({ pendingReviewCount: 1, pendingReviewActive: false });
+
+    expect(html).toContain("has-pending-review");
+    expect(html).toContain(">1 changed<");
+    expect(html).toContain(">Keep all<");
+  });
+
+  it("keeps the row for multiple pending items even when one item is open", () => {
     const html = renderFileTree({ pendingReviewCount: 2, pendingReviewActive: true });
 
-    expect(html).toContain("2 pending review items");
+    expect(html).toContain(">2 changed<");
     expect(html).toContain(">Keep all<");
     expect(html).toContain(">Restore all<");
   });
 
-  it("disables both strip actions while a pending review action is busy", () => {
+  it("uses Spanish copy", () => {
+    const html = renderFileTree({ labels: appStrings.es.sidebar });
+
+    expect(html).toContain(">2 con cambios<");
+    expect(html).toContain(">Conservar todo<");
+    expect(html).toContain(">Restaurar todo<");
+    expect(html).toContain(">Ajustes<");
+  });
+
+  it("disables both row actions while a pending review action is busy", () => {
     const html = renderFileTree({ pendingReviewBusy: true });
 
-    expect(html).toContain("2 pending review items");
+    expect(html).toContain(">2 changed<");
     expect(html.match(/disabled=\"\"/g)).toHaveLength(2);
   });
 
-  it("calls the reject handler from the strip without requiring a real file node", () => {
+  it("calls the reject handler from the row without requiring a real file node", () => {
     const onReject = vi.fn();
     const element = PendingReviewStrip({
       count: 2,
@@ -130,6 +164,64 @@ describe("FileTree pending review strip", () => {
     rejectButton.props.onClick();
 
     expect(onReject).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("FileTree sidebar chrome", () => {
+  const folderNodes: FileTreeNode[] = [
+    {
+      name: "drafts",
+      path: "/workspace/drafts",
+      relativePath: "drafts",
+      kind: "directory",
+      children: [{ name: "inner.md", path: "/workspace/drafts/inner.md", relativePath: "drafts/inner.md", kind: "markdown" }]
+    },
+    ...nodes,
+    { name: "photo.png", path: "/workspace/photo.png", relativePath: "photo.png", kind: "external" }
+  ];
+
+  it("has only search and new document in the header; new folder lives in the menus", () => {
+    const html = renderFileTree({ pendingChanges: [], pendingReviewCount: 0 });
+    const header = html.slice(html.indexOf("sidebar-header"), html.indexOf("tree-scroll"));
+
+    expect(header.match(/class="icon-button"/g)).toHaveLength(2);
+    expect(header).toContain('aria-label="Find in file tree"');
+    expect(header).toContain("lucide-square-pen");
+    expect(header).not.toContain("New folder");
+  });
+
+  it("draws folders with a chevron and aria-expanded, files without icons", () => {
+    const html = renderFileTree({ nodes: folderNodes, pendingChanges: [], pendingReviewCount: 0 });
+
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain("lucide-chevron-right");
+    expect(html).not.toContain("lucide-folder");
+    expect(html).not.toContain("lucide-file");
+    expect(html.match(/<span class="tree-icon"><\/span>/g)).toHaveLength(2);
+  });
+
+  it("marks pending creates through the dot, not an icon", () => {
+    const html = renderFileTree();
+
+    expect(html).toContain("tree-pending-dot is-create");
+    expect(html).not.toContain("lucide-file-plus");
+  });
+
+  it("renders the Settings footer row with its selected state and update dot", () => {
+    const plain = renderFileTree({ pendingChanges: [], pendingReviewCount: 0 });
+
+    expect(plain).toContain('class="sidebar-footer"');
+    expect(plain).toContain(">Settings<");
+    expect(plain).toContain("lucide-settings");
+    expect(plain).not.toContain("sidebar-settings-dot");
+    expect(plain.indexOf("sidebar-footer")).toBeGreaterThan(plain.indexOf("tree-scroll"));
+
+    const open = renderFileTree({ pendingChanges: [], pendingReviewCount: 0, settingsOpen: true, updateAvailable: true, onOpenSettings: () => undefined });
+
+    expect(open).toContain("sidebar-settings-row is-open");
+    expect(open).toContain('aria-expanded="true"');
+    expect(open).toContain("sidebar-settings-dot");
+    expect(open).toContain('aria-label="Settings, update available"');
   });
 });
 

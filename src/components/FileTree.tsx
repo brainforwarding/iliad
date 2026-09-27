@@ -1,17 +1,4 @@
-import {
-  ChevronDown,
-  ChevronUp,
-  ExternalLink,
-  File,
-  FilePlus,
-  FileText,
-  FileX,
-  Folder,
-  FolderOpen,
-  FolderPlus,
-  Search,
-  X
-} from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp, ExternalLink, Search, Settings, SquarePen, X } from "lucide-react";
 import { Icon } from "./Icon";
 import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode, RefObject } from "react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -90,6 +77,7 @@ interface FileTreeProps {
   onOpenNode: (node: FileTreeNode) => void;
   onOpenPendingChange: (target: PendingFileTreeChange) => void | Promise<void>;
   onCreateFile: () => void;
+  /** Creates a folder at the current creation target (selection, else the open document's folder). */
   onCreateFolder: () => void;
   onOpenFolder: () => void | Promise<void>;
   onOpenRecent: (workspace: WorkspaceInfo) => void | Promise<void>;
@@ -110,6 +98,12 @@ interface FileTreeProps {
   contentSearchProvider?: FileTreeContentSearchProvider;
   /** Entries in the active document's comments file, once read ("Comments · N"). */
   companionCommentCount?: { documentPath: string; count: number | null } | null;
+  /** Footer "Settings" row. The row always renders; without a handler it does nothing. */
+  onOpenSettings?: () => void;
+  /** Shows the Settings row in its selected (soft fill) state. */
+  settingsOpen?: boolean;
+  /** Shows a small amber dot on the Settings row. */
+  updateAvailable?: boolean;
 }
 
 interface FileTreeUpdateLabels {
@@ -133,6 +127,8 @@ interface FileTreeLabels {
   recent: string;
   noFiles: string;
   workspaceRoot: string;
+  settings: string;
+  settingsUpdateAvailable: string;
   fileTreeMoveStarted: (path: string) => string;
   fileTreeMoveTarget: (path: string) => string;
   fileTreeMoveRootTarget: string;
@@ -143,6 +139,7 @@ interface FileTreeLabels {
   proposedNewDocument: (path: string) => string;
   pendingDelete: (path: string) => string;
   pendingReviewSummary: (count: number) => string;
+  pendingReviewRegion: string;
   acceptPendingChanges: string;
   rejectPendingChanges: string;
   rename: (name: string) => string;
@@ -315,26 +312,22 @@ export function fileTreeNodeShowsPendingIndicator(node: FileTreeDisplayNode, isE
   return displayNodeKind(node) === "directory" && !isExpanded && Boolean(node.hasPendingDescendant);
 }
 
-function FileIcon({ node, isExpanded }: { node: FileTreeDisplayNode; isExpanded: boolean }) {
-  if (node.source === "pending-create" || (node.source === "real" && node.pendingTarget?.kind === "create_file")) {
-    return <Icon icon={FilePlus} />;
-  }
+/**
+ * Folders get a 12px chevron; files get nothing (their names align with folder
+ * names because every row keeps the chevron column). Pending create/delete
+ * meaning lives in the row's dot and name styling, not in an icon.
+ */
+function TreeChevron({ isDirectory, isExpanded }: { isDirectory: boolean; isExpanded: boolean }) {
+  return isDirectory ? <Icon icon={isExpanded ? ChevronDown : ChevronRight} size={12} /> : null;
+}
 
-  if (node.source === "pending-delete" || (node.source === "real" && node.pendingTarget?.kind === "delete_file")) {
-    return <Icon icon={FileX} />;
-  }
-
-  const kind = displayNodeKind(node);
-
-  if (kind === "directory") {
-    return isExpanded ? <Icon icon={FolderOpen} /> : <Icon icon={Folder} />;
-  }
-
-  if (kind === "markdown") {
-    return <Icon icon={FileText} />;
-  }
-
-  return <Icon icon={File} />;
+/**
+ * The all-documents review row shows only when pending documents exist other
+ * than the one already open: more than one, or exactly one that is not the
+ * open review. One value drives both the row and the sidebar grid class.
+ */
+export function shouldShowPendingReviewStrip(count: number, active?: boolean) {
+  return count > 1 || (count === 1 && !active);
 }
 
 export function PendingReviewStrip({
@@ -352,43 +345,23 @@ export function PendingReviewStrip({
   onAccept: () => void | Promise<void>;
   onReject: () => void | Promise<void>;
 }) {
-  if (count === 0) {
+  if (!shouldShowPendingReviewStrip(count, active)) {
     return null;
   }
 
-  const showActions = !(active && count === 1);
-
   return (
-    <div
-      className={`file-tree-pending-review${showActions ? "" : " is-current-review"}`}
-      role="region"
-      aria-label={labels.pendingReviewSummary(count)}
-    >
-      <span>{labels.pendingReviewSummary(count)}</span>
-      {showActions ? (
-        <div className="file-tree-pending-review-actions">
-          <button type="button" disabled={busy} onClick={() => void onAccept()}>
-            {labels.acceptPendingChanges}
-          </button>
-          <button type="button" disabled={busy} onClick={() => void onReject()}>
-            {labels.rejectPendingChanges}
-          </button>
-        </div>
-      ) : null}
+    <div className="file-tree-pending-review" role="region" aria-label={labels.pendingReviewRegion}>
+      <span className="file-tree-pending-review-count">{labels.pendingReviewSummary(count)}</span>
+      <div className="file-tree-pending-review-actions">
+        <button type="button" disabled={busy} onClick={() => void onAccept()}>
+          {labels.acceptPendingChanges}
+        </button>
+        <button type="button" disabled={busy} onClick={() => void onReject()}>
+          {labels.rejectPendingChanges}
+        </button>
+      </div>
     </div>
   );
-}
-
-function RealFileIcon({ node, isExpanded }: { node: FileTreeNode; isExpanded: boolean }) {
-  if (node.kind === "directory") {
-    return isExpanded ? <Icon icon={FolderOpen} /> : <Icon icon={Folder} />;
-  }
-
-  if (node.kind === "markdown") {
-    return <Icon icon={FileText} />;
-  }
-
-  return <Icon icon={File} />;
 }
 
 function nodeFileNameFromInput(node: FileTreeNode, value: string) {
@@ -489,7 +462,7 @@ function RenameInput({
   return (
     <form className="tree-rename-form" onSubmit={onSubmit}>
       <span className="tree-icon">
-        <RealFileIcon node={node} isExpanded={isExpanded} />
+        <TreeChevron isDirectory={node.kind === "directory"} isExpanded={isExpanded} />
       </span>
       <input
         ref={inputRef}
@@ -919,6 +892,7 @@ function TreeRow({
               aria-label={pendingTitle ?? undefined}
               aria-describedby={pathDescriptionId}
               aria-current={isSearchActiveMatch ? "true" : undefined}
+              aria-expanded={isDirectory ? isExpanded : undefined}
               onBlur={() => onHidePathPeek(fullRelativePath)}
               onFocus={(event) => onShowPathPeek(fullRelativePath, event.currentTarget, { delayMs: 350 })}
               onKeyDown={onSearchRowKeyDown}
@@ -951,7 +925,7 @@ function TreeRow({
               }}
             >
               <span className="tree-icon">
-                <FileIcon node={node} isExpanded={isExpanded} />
+                <TreeChevron isDirectory={isDirectory} isExpanded={isExpanded} />
               </span>
               <span className="tree-name">
                 <span className="tree-name-text">
@@ -1116,7 +1090,10 @@ export function FileTree({
   onCancelRename,
   onCommitRename,
   contentSearchProvider,
-  companionCommentCount
+  companionCommentCount,
+  onOpenSettings,
+  settingsOpen = false,
+  updateAvailable = false
 }: FileTreeProps) {
   const [durableExpanded, setDurableExpanded] = useState<Set<string>>(new Set());
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1156,7 +1133,7 @@ export function FileTree({
   const searchInputId = `${generatedId}-file-tree-search-input`;
   const searchStatusId = `${generatedId}-file-tree-search-status`;
   const displayNodes = useMemo(() => buildFileTreeDisplayNodes(nodes, pendingChanges), [nodes, pendingChanges]);
-  const hasPendingReview = pendingReviewCount > 0;
+  const showPendingReviewStrip = shouldShowPendingReviewStrip(pendingReviewCount, pendingReviewActive);
   const pendingCreateRelativePaths = useMemo(
     () =>
       new Set(
@@ -2263,7 +2240,7 @@ export function FileTree({
       className={[
         "sidebar",
         searchOpen ? "has-file-tree-search" : "",
-        hasPendingReview ? "has-pending-review" : ""
+        showPendingReviewStrip ? "has-pending-review" : ""
       ]
         .filter(Boolean)
         .join(" ")}
@@ -2277,7 +2254,10 @@ export function FileTree({
           updateLabels={updateLabels}
           updateStatus={updateStatus}
           updateChecking={updateChecking}
+          creatingFolder={creatingFolder}
+          newFolderTitle={newFolderLabel}
           onOpenFolder={onOpenFolder}
+          onCreateFolder={onCreateFolder}
           onOpenRecent={onOpenRecent}
           onRevealWorkspace={onRevealWorkspace}
           onCheckForUpdates={onCheckForUpdates}
@@ -2303,20 +2283,21 @@ export function FileTree({
             disabled={creatingFile}
             onClick={onCreateFile}
           >
-            <Icon icon={FilePlus} />
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            data-tooltip={newFolderLabel}
-            aria-label={newFolderLabel}
-            disabled={creatingFolder}
-            onClick={onCreateFolder}
-          >
-            <Icon icon={FolderPlus} />
+            <Icon icon={SquarePen} />
           </button>
         </div>
       </div>
+
+      {showPendingReviewStrip ? (
+        <PendingReviewStrip
+          count={pendingReviewCount}
+          active={pendingReviewActive}
+          busy={pendingReviewBusy}
+          labels={labels}
+          onAccept={onAcceptPendingChanges}
+          onReject={onRejectPendingChanges}
+        />
+      ) : null}
 
       {searchOpen ? (
         <FileTreeSearchControl
@@ -2361,15 +2342,6 @@ export function FileTree({
           onKeyDown={handleSearchInputKeyDown}
         />
       ) : null}
-
-      <PendingReviewStrip
-        count={pendingReviewCount}
-        active={pendingReviewActive}
-        busy={pendingReviewBusy}
-        labels={labels}
-        onAccept={onAcceptPendingChanges}
-        onReject={onRejectPendingChanges}
-      />
 
       <div
         id={treeListId}
@@ -2443,6 +2415,19 @@ export function FileTree({
             {hasNameSearchQuery && searchFilter ? labels.fileTreeSearchNoResults : labels.noFiles}
           </div>
         )}
+      </div>
+      <div className="sidebar-footer">
+        <button
+          type="button"
+          className={`sidebar-settings-row${settingsOpen ? " is-open" : ""}`}
+          aria-label={updateAvailable ? labels.settingsUpdateAvailable : labels.settings}
+          aria-expanded={onOpenSettings ? settingsOpen : undefined}
+          onClick={() => onOpenSettings?.()}
+        >
+          <Icon icon={Settings} />
+          <span>{labels.settings}</span>
+          {updateAvailable ? <span className="sidebar-settings-dot" aria-hidden="true" /> : null}
+        </button>
       </div>
       <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {moveStatusText}

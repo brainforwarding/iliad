@@ -268,7 +268,13 @@ export function useFileActions({
     workspace
   ]);
 
-  const createFolder = useCallback(async () => {
+  /**
+   * Creates "untitled folder". Without an argument the target follows the
+   * creation rules (selected folder, else the open document's folder, else the
+   * root). Callers that know the folder (the tree context menu) pass it
+   * explicitly so the target never depends on a pending selection update.
+   */
+  const createFolder = useCallback(async (explicitDirectoryPath?: string) => {
     if (!workspace || creatingFolderRef.current) {
       return;
     }
@@ -277,7 +283,8 @@ export function useFileActions({
     setCreatingFolder(true);
     try {
       await flushSave();
-      const targetDirectoryPath = creationDirectoryPath || workspace.path;
+      const targetDirectoryPath =
+        (typeof explicitDirectoryPath === "string" && explicitDirectoryPath) || creationDirectoryPath || workspace.path;
       setRevealFolderPath(targetDirectoryPath);
       const folder = await window.iliad.createFolder(workspace.path, targetDirectoryPath, "untitled folder");
       const nextTree = await refreshTree(workspace.path);
