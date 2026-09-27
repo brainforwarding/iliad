@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FileTreeNode, MarkdownWriteConflictReason, WorkspaceInfo } from "../types/iliad";
+import { createAutosaveFence } from "./autosaveFence";
 
 export type SaveStatus = "saved" | "saving" | "unsaved" | "error" | "conflict";
 
@@ -51,6 +52,7 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveStatusRef = useRef<SaveStatus>("saved");
+  const fenceRef = useRef(createAutosaveFence());
   const stateRef = useRef({ workspace, activeFile, documentText, savedText });
 
   // The refs are updated synchronously by the setters below, not only after
@@ -80,7 +82,7 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
     }
   }, []);
 
-  const saveCurrentDocument = useCallback(async (nextText?: string) => {
+  const performSave = useCallback(async (nextText?: string) => {
     const current = stateRef.current;
 
     if (!current.workspace || !current.activeFile || current.activeFile.kind !== "markdown") {
@@ -137,7 +139,19 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
     }
   }, [messages.saveDocumentFallback, onError, setSaveStatus, setSavedText]);
 
+  // Every save is tracked so the autosave fence can wait for one in flight.
+  const saveCurrentDocument = useCallback(
+    (nextText?: string) => fenceRef.current.trackSave(performSave(nextText)),
+    [performSave]
+  );
+
   const flushSave = useCallback(async () => {
+    // A flush during the fence (navigation while the document is being
+    // auto-renamed) waits for it, then saves to wherever the document is now.
+    while (fenceRef.current.isHeld()) {
+      await fenceRef.current.whenReleased();
+    }
+
     cancelPendingSave();
 
     await saveCurrentDocument();
@@ -147,10 +161,22 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
     (value: string) => {
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+
+      // While the fence is held typing only marks the buffer dirty; leaving
+      // the fence re-arms autosave with the latest text.
+      if (fenceRef.current.isHeld()) {
+        return;
       }
 
       saveTimer.current = setTimeout(() => {
         saveTimer.current = null;
+
+        if (fenceRef.current.isHeld()) {
+          return;
+        }
+
         saveCurrentDocument(value).catch(() => {
           // Errors are already reflected in saveStatus; the timer must not reject.
         });
@@ -219,6 +245,51 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
     }
   }, [scheduleAutosave, setSaveStatus]);
 
+  /**
+   * Runs `operation` with autosave paused (the autosave fence): the timer is
+   * disarmed, a save in flight is awaited, and afterwards autosave re-arms if
+   * the writer typed meanwhile — saving to the active file as it is then.
+   */
+  const runWithAutosavePaused = useCallback(
+    <T,>(operation: () => Promise<T>) =>
+      fenceRef.current.run(operation, {
+        disarm: cancelPendingSave,
+        rearm: () => {
+          const latest = stateRef.current;
+
+          if (saveStatusRef.current === "conflict" || latest.documentText === latest.savedText) {
+            return;
+          }
+
+          setSaveStatus("unsaved");
+          scheduleAutosave(latest.documentText);
+        }
+      }),
+    [cancelPendingSave, scheduleAutosave, setSaveStatus]
+  );
+
+  /** Saved and quiet: no unsaved text, no autosave armed, no save in flight, not fenced. */
+  const isDocumentSettled = useCallback(() => {
+    const latest = stateRef.current;
+
+    return (
+      saveStatusRef.current === "saved" &&
+      latest.documentText === latest.savedText &&
+      saveTimer.current === null &&
+      !fenceRef.current.hasSaveInFlight() &&
+      !fenceRef.current.isHeld()
+    );
+  }, []);
+
+  /**
+   * The active document moved on disk (auto-rename inside the fence): the
+   * ref follows immediately so a save re-armed by the fence targets the new
+   * path even before React re-renders.
+   */
+  const noteActiveFileRelocated = useCallback((node: FileTreeNode) => {
+    stateRef.current = { ...stateRef.current, activeFile: node };
+  }, []);
+
   const loadDocument = useCallback((text: string) => {
     cancelPendingSave();
     setDocumentText(text);
@@ -255,8 +326,11 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
     cancelPendingSave,
     flushSave,
     handleEditorChange,
+    isDocumentSettled,
     loadDocument,
+    noteActiveFileRelocated,
     resumeAfterConflict,
+    runWithAutosavePaused,
     saveCurrentDocument,
     setDocumentText,
     setLastSavedAt,

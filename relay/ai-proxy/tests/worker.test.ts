@@ -19,6 +19,7 @@ import { issueToken, parseSigningKeys } from "../src/tokens.js";
 import {
   autocompleteTask,
   Harness,
+  nameTask,
   parseProxyStream,
   selectionTask,
   simpleCompletion,
@@ -208,6 +209,62 @@ describe("POST /v1/generate", () => {
     expect((await harness.stats()).stats.spentNano).toBe(2 * (300 * 150 + 40 * 600));
   });
 
+  it("serves the prompt v2 name task: small budget, 80-char cap, reserved and settled like any request", async () => {
+    const harness = new Harness();
+    const token = await harness.token();
+    harness.groq.scripts.push({ steps: simpleCompletion("Spring workshop plan", { usage: { prompt: 120, completion: 30 } }) });
+    const task = nameTask();
+    const { response, text } = await harness.generate(task, { token });
+
+    expect(response.status).toBe(200);
+    expect(streamedContent(text)).toBe("Spring workshop plan");
+    const parsed = parseWritingAiTask(task);
+    if (!parsed.ok) throw new Error("task");
+    expect(harness.groq.calls[0].body).toMatchObject({
+      model: GROQ_MODEL,
+      messages: buildWritingAiPrompt(parsed.task).messages,
+      max_completion_tokens: 512
+    });
+    expect(JSON.stringify(harness.groq.calls[0].body)).toContain("Give a short title (2–6 words) for this document");
+    expect((await harness.stats()).stats).toMatchObject({ requests: 1, spentNano: 120 * 150 + 30 * 600, reservedNano: 0 });
+
+    // Spanish variant, and the v1 tasks still accepted as v2.
+    harness.groq.scripts.push({ steps: simpleCompletion("Plan de la sesión", { usage: { prompt: 120, completion: 30 } }) });
+    expect(streamedContent((await harness.generate(nameTask({ language: "es" }), { token })).text)).toBe("Plan de la sesión");
+    harness.groq.scripts.push({ steps: simpleCompletion("the gulls had gone inland.", { usage: { prompt: 420, completion: 90 } }) });
+    expect((await harness.generate(autocompleteTask({ v: 2 }), { token })).response.status).toBe(200);
+  });
+
+  it("caps a name answer at 80 chars", async () => {
+    const harness = new Harness();
+    const token = await harness.token();
+    harness.groq.scripts.push({ steps: simpleCompletion("t".repeat(200), { usage: { prompt: 120, completion: 60 } }) });
+    const { text } = await harness.generate(nameTask(), { token });
+    expect(streamedContent(text).length).toBeLessThanOrEqual(80);
+    expect(parseProxyStream(text)).toContainEqual({ choices: [{ index: 0, delta: {}, finish_reason: "length" }] });
+  });
+
+  it("answers 426 client_outdated for a v2 name task while SUPPORTED_PROMPT_VERSIONS is 1 (no Groq call, no charge)", async () => {
+    const harness = new Harness({ SUPPORTED_PROMPT_VERSIONS: "1" });
+    const token = await harness.token();
+    const { response } = await harness.generate(nameTask(), { token });
+    expect(response.status).toBe(426);
+    expect(await errorOf(response)).toEqual({ code: "client_outdated" });
+    expect(harness.groq.calls).toHaveLength(0);
+    expect((await harness.stats()).stats).toMatchObject({ requests: 0, spentNano: 0 });
+  });
+
+  it("rejects a name task with unknown fields or text over 1,500 chars (400 bad_request)", async () => {
+    const harness = new Harness();
+    const token = await harness.token();
+    for (const task of [nameTask({ prefix: "x" }), nameTask({ text: "x".repeat(1501) }), nameTask({ text: "  " })]) {
+      const { response } = await harness.generate(task, { token });
+      expect(response.status).toBe(400);
+      expect(await errorOf(response)).toEqual({ code: "bad_request" });
+    }
+    expect(harness.groq.calls).toHaveLength(0);
+  });
+
   it("forwards a selection output between 8,001 and 12,000 chars (cap = task maxOutputChars)", async () => {
     const harness = new Harness();
     const token = await harness.token();
@@ -289,7 +346,7 @@ describe("POST /v1/generate", () => {
     it("unknown or unsupported v → 426 client_outdated; non-numeric v → 400", async () => {
       const harness = new Harness();
       const token = await harness.token();
-      const unknown = await harness.generate(autocompleteTask({ v: 2 }), { token });
+      const unknown = await harness.generate(autocompleteTask({ v: 3 }), { token });
       expect(unknown.response.status).toBe(426);
       expect(await errorOf(unknown.response)).toEqual({ code: "client_outdated" });
       expect((await harness.generate(autocompleteTask({ v: "1" }), { token })).response.status).toBe(400);

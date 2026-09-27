@@ -270,6 +270,45 @@ export type TightenResult =
   /** `resetAt` (ISO 8601, 00:00 UTC) only with `free_exhausted`. */
   | { ok: false; reason: TightenFailureReason; resetAt?: string };
 
+export interface AutoRenameDocumentRequest {
+  /** Hash of the content the renderer last saved; the rename is skipped if disk differs. */
+  expectedHash: string;
+  /** The formatted file-name stem (no extension); main adds `-2` … `-9` on collisions. */
+  stem: string;
+}
+
+export type AutoRenameDocumentResult =
+  | { ok: true; node: FileTreeNode; relativePath: string }
+  | { ok: false; reason: "changed" | "under_review" | "collision" | "failed" };
+
+export interface SuggestDocumentNameRequest {
+  /** Renderer-owned; used to cancel. A new request supersedes the window's previous one. */
+  requestId: string;
+  language: "en" | "es";
+  /** The document's opening text, at most 1,500 characters. */
+  text: string;
+}
+
+export type SuggestDocumentNameFailureReason =
+  | "invalid_api_key"
+  | "free_exhausted"
+  | "free_unavailable"
+  | "client_outdated"
+  | "key_unreadable"
+  | "unreachable"
+  | "rate_limited"
+  | "timeout"
+  | "aborted"
+  | "empty"
+  | "too_long"
+  | "untrusted"
+  | "failed";
+
+export type SuggestDocumentNameResult =
+  | { ok: true; title: string }
+  /** `resetAt` (ISO 8601, 00:00 UTC) only with `free_exhausted`. */
+  | { ok: false; reason: SuggestDocumentNameFailureReason; resetAt?: string };
+
 export interface IdeaAutocompleteRequest {
   direction?: string;
   avoid?: string[];
@@ -551,6 +590,12 @@ export interface IliadApi {
   createMarkdown: (workspaceRoot: string, directoryPath: string, requestedName: string) => Promise<FileTreeNode>;
   createFolder: (workspaceRoot: string, directoryPath: string, requestedName: string) => Promise<FileTreeNode>;
   renamePath: (workspaceRoot: string, filePath: string, requestedName: string) => Promise<FileTreeNode>;
+  /** Guarded rename of an untitled document to an AI/heading name (serialized with saves in main). */
+  autoRenameDocument: (
+    workspaceRoot: string,
+    filePath: string,
+    request: AutoRenameDocumentRequest
+  ) => Promise<AutoRenameDocumentResult>;
   movePath: (workspaceRoot: string, sourcePath: string, targetDirectoryPath: string) => Promise<FileTreeNode>;
   duplicatePath: (workspaceRoot: string, filePath: string) => Promise<FileTreeNode>;
   moveToTrash: (workspaceRoot: string, filePath: string) => Promise<TrashResult>;
@@ -577,6 +622,9 @@ export interface IliadApi {
   writingCorrectorMemory?: WritingCorrectorMemoryApi;
   tightenSelection: (request: TightenSelectionRequest) => Promise<TightenResult>;
   cancelTighten: (requestId: string) => void;
+  /** A short title for an untitled document (prompt v2 `name`, same route as autocomplete). */
+  suggestDocumentName: (request: SuggestDocumentNameRequest) => Promise<SuggestDocumentNameResult>;
+  cancelSuggestDocumentName: (requestId: string) => void;
   autocompleteIdea: (request: IdeaAutocompleteRequest) => Promise<IdeaAutocompleteResult>;
   onAutocompletePartial: (listener: (event: { requestId: string; insert: string }) => void) => () => void;
   cancelAutocompleteIdea: (requestId: string) => void;

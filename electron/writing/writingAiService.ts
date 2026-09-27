@@ -7,10 +7,11 @@ import { ProxyEndpointResolver, parseDevProxyUrl } from "./groq/endpoint.js";
 import { InstallTokenStore } from "./groq/installToken.js";
 import { GroqKeyStore, type GroqKeyStateName, type SafeStorageLike } from "./groq/keyStore.js";
 import { createAutocompletePartialEmitter } from "./groq/partials.js";
-import { GROQ_MODEL, LATEST_PROMPT_VERSION, parseWritingAiTask, type WritingAiTask } from "./groq/prompts/index.js";
+import { GROQ_MODEL, TASK_PROMPT_VERSIONS, parseWritingAiTask, type WritingAiTask } from "./groq/prompts/index.js";
 import { IliadAiProxyClient } from "./groq/proxyClient.js";
 import { containsReasoningMarkers } from "./groq/sse.js";
 import type { TightenLanguage, TightenMode, TightenSelectionRange } from "./tighten.js";
+import type { DocumentNameLanguage } from "./documentName.js";
 
 export type AiRoute = "free" | "own-key" | "blocked";
 
@@ -55,7 +56,8 @@ export interface WritingAiServiceOptions {
 }
 
 /**
- * Built-in writing AI: inline autocomplete and the ✦ AI selection menu, on
+ * Built-in writing AI: inline autocomplete, the ✦ AI selection menu and
+ * naming untitled documents, on
  * Groq (`openai/gpt-oss-120b`) through one of two routes, chosen per request
  * from the key store (spec §1): no key → free (Iliad AI proxy); a key → own
  * key (direct); an unreadable key → blocked. There is no fallback between
@@ -128,7 +130,7 @@ export class WritingAiService {
 
   async autocompleteIdea(request: IdeaAutocompleteTextRequest): Promise<string> {
     const task = checkedTask({
-      v: LATEST_PROMPT_VERSION,
+      v: TASK_PROMPT_VERSIONS.autocomplete,
       task: "autocomplete",
       language: request.language,
       kind: request.suggestionKind,
@@ -155,7 +157,7 @@ export class WritingAiService {
   async tightenSelection(request: TightenSelectionRequest): Promise<string> {
     const mode = request.mode ?? "tighten";
     const task = checkedTask({
-      v: LATEST_PROMPT_VERSION,
+      v: TASK_PROMPT_VERSIONS.selection,
       task: "selection",
       language: request.language,
       mode,
@@ -188,6 +190,33 @@ export class WritingAiService {
     }
   }
 
+  /**
+   * A short title for an untitled document from its opening text (prompt v2
+   * `name`), on the same route as every other request. Returns the raw
+   * answer; the caller cleans it. Only a clean stop without reasoning
+   * markers is returned; anything else throws.
+   */
+  async suggestName(request: { language: DocumentNameLanguage; text: string }, signal: AbortSignal): Promise<string> {
+    const task = checkedTask({
+      v: TASK_PROMPT_VERSIONS.name,
+      task: "name",
+      language: request.language,
+      text: request.text
+    });
+    const result = await this.run("document_name", signal, task, undefined, {});
+
+    if (result.finishReason === "stop" && !containsReasoningMarkers(result.text)) return result.text;
+    if (result.finishReason === "content_filter") {
+      throw new AgentRuntimeError({
+        code: "content_blocked",
+        userMessage: "The AI did not return a title for this text.",
+        detail: "content_filter",
+        retryable: false
+      });
+    }
+    throw malformed(result.finishReason === "stop" ? "reasoning_marker" : result.finishReason ? "finish_other" : "missing_finish_reason");
+  }
+
   dispose() {
     void this.diagnostics.flush();
   }
@@ -200,7 +229,7 @@ export class WritingAiService {
   }
 
   private async run(
-    area: "autocomplete" | "selection_ai",
+    area: "autocomplete" | "selection_ai" | "document_name",
     signal: AbortSignal,
     task: WritingAiTask,
     onDelta: ((delta: string, text: string) => void) | undefined,

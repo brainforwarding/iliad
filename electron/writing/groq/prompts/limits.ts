@@ -71,3 +71,11 @@ export const GROQ_SELECTION_MAX_COMPLETION_TOKENS = 4096;
  */
 export const MEASURED_PROMPT_OVERHEAD_TOKENS = 71;
 export const MIN_PROMPT_OVERHEAD_TOKENS = 150;
+
+// Document naming (prompt v2 `name` task, spec 2026-09-27-name-untitled-documents).
+/** The document's opening text sent to name it. */
+export const NAME_MAX_INPUT_CHARS = 1500;
+/** Output cap (chars) for a title; the app's cleaner rejects longer titles. */
+export const NAME_MAX_OUTPUT_CHARS = 80;
+/** Reasoning headroom plus a short title (bounds reasoning + content on gpt-oss). */
+export const GROQ_NAME_MAX_COMPLETION_TOKENS = 512;

@@ -7,6 +7,7 @@ import { startCliServer, type CliServer } from "./cli/server.js";
 import { registerAutocompleteIpc } from "./ipc/autocomplete.js";
 import { registerAssetIpc, registerAssetProtocol } from "./ipc/assets.js";
 import { registerDiagnosticsIpc } from "./ipc/diagnostics.js";
+import { registerDocumentNameIpc } from "./ipc/documentName.js";
 import { registerFileIpc } from "./ipc/files.js";
 import { registerReviewIpc } from "./ipc/review.js";
 import { registerSearchIpc } from "./ipc/search.js";
@@ -376,6 +377,7 @@ app.whenReady().then(async () => {
   registerWritingCorrectorMemoryIpc({ resolveWorkspaceRootForSession });
   registerAutocompleteIpc({ service: writingAiService, resolveWorkspaceRootForSession });
   registerTightenIpc({ service: writingAiService });
+  registerDocumentNameIpc({ service: writingAiService });
   registerCliIpc({
     setActiveDocument: (webContentsId, documentPath) => windowManager.setActiveDocument(webContentsId, documentPath),
     takeOpenRequest: (webContentsId) => windowManager.takeCliOpenRequest(webContentsId),

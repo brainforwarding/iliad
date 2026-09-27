@@ -121,7 +121,7 @@ export function baseEnv(namespace: FakeNamespace, overrides: Partial<AiProxyEnv>
     IP_DAILY_NEW_INSTALLS: "5",
     IP48_DAILY_NEW_INSTALLS: "20",
     DENY_SUBJECTS: "",
-    SUPPORTED_PROMPT_VERSIONS: "1",
+    SUPPORTED_PROMPT_VERSIONS: "1,2",
     GLOBAL_DAILY_NANO_USD: "5000000000",
     INPUT_NANO_USD_PER_TOKEN: "150",
     OUTPUT_NANO_USD_PER_TOKEN: "600",
@@ -373,6 +373,16 @@ export function autocompleteTask(overrides: Record<string, unknown> = {}) {
     nearbyHeadings: [],
     direction: "",
     avoid: [],
+    ...overrides
+  };
+}
+
+export function nameTask(overrides: Record<string, unknown> = {}) {
+  return {
+    v: 2,
+    task: "name",
+    language: "en",
+    text: "We met on Tuesday to plan the spring workshop. Budget, venue and speakers are still open.",
     ...overrides
   };
 }

@@ -1,6 +1,6 @@
 # Name untitled documents
 
-Date: 2026-09-27. Status: reviewed (Codex xhigh, 2026-09-27); implementing. Branch: `premium-pass`.
+Date: 2026-09-27. Status: implemented and verified locally (2026-09-27); proxy v2 not deployed (owner). Branch: `premium-pass`.
 Endpoint (owner): implemented and verified locally, tested with an own Groq
 key; the proxy change (prompt v2) is written and tested but **not deployed**
 — it ships with the next app release (deploy the Worker first).
@@ -169,8 +169,18 @@ Sources: Figma `i2BTwgceho8SqRYGZKjLhB`, page "AI names untitled documents
 
 ## Progress
 
-- [ ] Spec reviewed
-- [ ] Renderer: empty new docs, candidates, heading naming, safe rename, history fix
-- [ ] AI: prompt v2, service, IPC, cleaner, proxy config + tests
-- [ ] UI: typing animation, double-click rename (tree + breadcrumb)
-- [ ] Live verification, docs, ADR
+- [x] Spec reviewed
+- [x] Renderer: empty new docs, candidates, heading naming, safe rename, history fix
+- [x] AI: prompt v2, service, IPC, cleaner, proxy config + tests
+- [x] UI: typing animation, double-click rename (tree + breadcrumb)
+- [x] Live verification, docs, ADR
+
+Live QA (2026-09-27, isolated instance, local fake proxy): all 9 checks pass
+(empty create, heading → kebab name without AI, AI → spaced name in a spaced
+folder, 20 typing-race runs without a save conflict, breadcrumb animation,
+double-click rename in tree and breadcrumb, comments move, ⌘[ ⌘] after
+renames, an outside `untitled.md` is never renamed). Bug found and fixed: the
+attempt budget was keyed by path, so a reused `untitled.md` stopped being
+named after two documents; attempts are now forgotten when a path stops being
+a candidate or is renamed.
+

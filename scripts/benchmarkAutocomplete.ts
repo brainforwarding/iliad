@@ -28,7 +28,7 @@ import {
   AUTOCOMPLETE_MAX_SUFFIX_CHARS,
   AUTOCOMPLETE_MAX_TITLE_CHARS,
   GROQ_PINNED_PARAMS,
-  LATEST_PROMPT_VERSION,
+  TASK_PROMPT_VERSIONS,
   TIGHTEN_MAX_INPUT_CHARS,
   TIGHTEN_MAX_INSTRUCTION_CHARS,
   buildWritingAiPrompt,
@@ -348,7 +348,7 @@ async function budgetProbes(apiKey: string) {
   const allBudgeted = [...allPrompt, ...reasoningBudget];
 
   return {
-    promptVersion: LATEST_PROMPT_VERSION,
+    promptVersion: TASK_PROMPT_VERSIONS.autocomplete,
     params: GROQ_PINNED_PARAMS,
     gates: {
       a_completionBoundsReasoning: {
@@ -389,7 +389,7 @@ async function main() {
     console.log(JSON.stringify({
       mode: budgetProbe ? "budget-probe" : "benchmark",
       route: "direct",
-      promptVersion: LATEST_PROMPT_VERSION,
+      promptVersion: TASK_PROMPT_VERSIONS.autocomplete,
       cases: [...autocompleteCases, ...selectionCases].map(({ id, task }) => ({ id, kind: task.task === "autocomplete" ? task.kind : task.mode, language: task.language })),
       trials: budgetProbe ? 1 : trials,
       requests: dryRun || !apiKey ? 0 : plannedRequests,

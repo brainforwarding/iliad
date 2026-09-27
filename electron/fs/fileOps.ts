@@ -218,15 +218,34 @@ async function assertVisiblePathHasNoSymlinkAncestor(workspaceRoot: string, file
   }
 }
 
+/**
+ * Creates an empty document (spec 2026-09-27: new documents start empty),
+ * exclusively: `name`, then `name-2`, `name-3`, … only while the name is
+ * taken (EEXIST). Any other error propagates; nothing is ever overwritten.
+ */
 export async function createMarkdownFile(workspaceRoot: string, directoryPath: string, requestedName: string) {
   ensureVisibleWorkspacePath(workspaceRoot, directoryPath);
   const fileName = normalizeMarkdownName(requestedName);
-  const filePath = await uniquePath(directoryPath, fileName);
-  ensureVisibleWorkspacePath(workspaceRoot, filePath);
-  const content = `# ${path.basename(filePath, path.extname(filePath))}\n`;
-  await writeFile(filePath, content, "utf8");
+  const extension = path.extname(fileName);
+  const baseName = path.basename(fileName, extension);
+  const content = "";
 
-  return { ...fileTreeNode(workspaceRoot, filePath, false), content };
+  for (let index = 1; ; index += 1) {
+    const filePath = path.join(directoryPath, index === 1 ? fileName : `${baseName}-${index}${extension}`);
+    ensureVisibleWorkspacePath(workspaceRoot, filePath);
+
+    try {
+      await writeFile(filePath, content, { encoding: "utf8", flag: "wx" });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        continue;
+      }
+
+      throw error;
+    }
+
+    return { ...fileTreeNode(workspaceRoot, filePath, false), content };
+  }
 }
 
 export async function createFolder(workspaceRoot: string, directoryPath: string, requestedName: string) {
@@ -433,6 +452,60 @@ export async function renamePath(workspaceRoot: string, filePath: string, reques
   }
 
   return fileTreeNode(workspaceRoot, newPath, fileStats.isDirectory());
+}
+
+/** Whether any path of `candidatePath`'s document group (document + comments name) is taken. */
+async function documentGroupTaken(candidatePath: string) {
+  const taken = await Promise.all(documentGroupPaths(candidatePath).map(pathExists));
+  return taken.some(Boolean);
+}
+
+/**
+ * Renames a document (with its comments) to the first candidate path whose
+ * whole group is free: an existing file or orphan comments file at a
+ * candidate's names, or `isReserved`, skips it; a file that appears between
+ * the check and the rename moves on to the next candidate. Returns null when
+ * every candidate is taken. The rename is the normal document-group move
+ * (no clobber, rollback on failure). Spec 2026-09-27 (auto-rename).
+ */
+export async function renameDocumentToFirstFreePath(
+  workspaceRoot: string,
+  filePath: string,
+  candidatePaths: string[],
+  isReserved: (candidatePath: string) => boolean = () => false
+): Promise<FileTreeNode | null> {
+  ensureVisibleWorkspacePath(workspaceRoot, filePath);
+  const stats = await lstat(filePath);
+
+  if (!stats.isFile() || !isDocumentFile(filePath, false)) {
+    throw new Error("Only Markdown documents can be named automatically.");
+  }
+
+  for (const candidate of candidatePaths) {
+    ensureVisibleWorkspacePath(workspaceRoot, candidate);
+
+    if (samePath(candidate, filePath)) {
+      return fileTreeNode(workspaceRoot, filePath, false);
+    }
+
+    if (isReserved(candidate) || (await documentGroupTaken(candidate))) {
+      continue;
+    }
+
+    try {
+      await moveDocumentGroup(workspaceRoot, filePath, candidate);
+      return fileTreeNode(workspaceRoot, candidate, false);
+    } catch (error) {
+      // Someone took the name after the check: nothing moved; try the next one.
+      if (await documentGroupTaken(candidate)) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  return null;
 }
 
 /** Best-effort target of a rename, for mutation markers only (never throws). */

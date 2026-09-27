@@ -11,10 +11,11 @@ import {
   movePath,
   plannedRenamePath,
   readMarkdownFile,
+  renameDocumentToFirstFreePath,
   renamePath,
   type FileTreeNode
 } from "../fs/fileOps.js";
-import { ensureMarkdownFile, toKind } from "../fs/pathSafety.js";
+import { ensureMarkdownFile, toKind, validateMarkdownRenameName } from "../fs/pathSafety.js";
 import type { WorkspaceInfo } from "../launch/workspace.js";
 import { hashMarkdown } from "../review/hash.js";
 import {
@@ -24,6 +25,7 @@ import {
   readDiskPathState,
   WorkspaceBaselineService
 } from "../review/workspaceBaseline.js";
+import { isTrustedIpcSender } from "./trust.js";
 
 interface RegisterFileIpcOptions {
   getWindowWorkspace?: (webContentsId: number) => WorkspaceInfo | null;
@@ -136,6 +138,18 @@ export function registerFileIpc(options: RegisterFileIpcOptions = {}) {
   });
 
   ipcMain.handle(
+    "file:auto-rename-document",
+    async (event, workspaceRoot: string, filePath: string, request: unknown): Promise<AutoRenameDocumentResult> => {
+      if (!isTrustedIpcSender(event)) {
+        return { ok: false, reason: "failed" };
+      }
+
+      const verifiedWorkspaceRoot = assertCurrentWorkspace(workspaceRoot, event, options);
+      return autoRenameDocument(baseline, verifiedWorkspaceRoot, filePath, request);
+    }
+  );
+
+  ipcMain.handle(
     "file:move",
     async (
       event,
@@ -191,6 +205,102 @@ export function registerFileIpc(options: RegisterFileIpcOptions = {}) {
       return removeCompanionFile(baseline, verifiedWorkspaceRoot, filePath, expectedHash);
     }
   );
+}
+
+export type AutoRenameDocumentResult =
+  | { ok: true; node: FileTreeNode; relativePath: string }
+  | { ok: false; reason: "changed" | "under_review" | "collision" | "failed" };
+
+/** `stem`, `stem-2` … `stem-9`. */
+export const AUTO_RENAME_MAX_SUFFIX = 9;
+const AUTO_RENAME_MAX_STEM_CHARS = 120;
+
+type AutoRenameBaseline = Pick<WorkspaceBaselineService, "runQueuedIliadMutation" | "hasPendingReview">;
+
+function autoRenameCandidates(filePath: string, stem: string): string[] | null {
+  const extension = path.extname(filePath);
+  const candidates: string[] = [];
+
+  try {
+    for (let index = 1; index <= AUTO_RENAME_MAX_SUFFIX; index += 1) {
+      const name = validateMarkdownRenameName(`${index === 1 ? stem : `${stem}-${index}`}${extension}`);
+      candidates.push(path.join(path.dirname(filePath), name));
+    }
+  } catch {
+    return null;
+  }
+
+  return candidates;
+}
+
+/**
+ * `file:auto-rename-document` (spec 2026-09-27, Review "Guarded rename in
+ * main"): on the baseline write queue, rename an untitled document to the
+ * first free `stem`, `stem-2` … `stem-9` for its whole group, only if its disk
+ * content still hashes to `expectedHash` and it has no pending outside
+ * review. The move is the normal document-group rename with the normal move
+ * record. Never throws for an expected refusal.
+ */
+export async function autoRenameDocument(
+  baseline: AutoRenameBaseline,
+  workspaceRoot: string,
+  filePath: unknown,
+  request: unknown
+): Promise<AutoRenameDocumentResult> {
+  const record = request && typeof request === "object" ? (request as Record<string, unknown>) : {};
+  const expectedHash = typeof record.expectedHash === "string" ? record.expectedHash : "";
+  const stem = typeof record.stem === "string" ? record.stem.trim() : "";
+
+  if (typeof filePath !== "string" || !expectedHash || !stem || stem.length > AUTO_RENAME_MAX_STEM_CHARS) {
+    return { ok: false, reason: "failed" };
+  }
+
+  try {
+    ensureMarkdownFile(workspaceRoot, filePath);
+  } catch {
+    return { ok: false, reason: "failed" };
+  }
+
+  const candidates = isCompanionPath(filePath) ? null : autoRenameCandidates(filePath, stem);
+
+  if (!candidates) {
+    return { ok: false, reason: "failed" };
+  }
+
+  const fromRelativePath = workspaceRelativePosix(workspaceRoot, filePath);
+
+  try {
+    return await baseline.runQueuedIliadMutation<AutoRenameDocumentResult>(workspaceRoot, {
+      paths: groupRelativePaths(workspaceRoot, [filePath, ...candidates]),
+      operation: async () => {
+        if (baseline.hasPendingReview(workspaceRoot, fromRelativePath)) {
+          return { ok: false, reason: "under_review" };
+        }
+
+        const current = await readDiskPathState(workspaceRoot, fromRelativePath);
+
+        if (current.status === "unsafe") {
+          return { ok: false, reason: "failed" };
+        }
+
+        if (current.status !== "present" || hashMarkdown(current.content) !== expectedHash) {
+          return { ok: false, reason: "changed" };
+        }
+
+        // A name with outside changes waiting (e.g. a deleted file) is not free.
+        const node = await renameDocumentToFirstFreePath(workspaceRoot, filePath, candidates, (candidate) =>
+          baseline.hasPendingReview(workspaceRoot, workspaceRelativePosix(workspaceRoot, candidate))
+        );
+
+        return node
+          ? { ok: true, node, relativePath: workspaceRelativePosix(workspaceRoot, node.path) }
+          : { ok: false, reason: "collision" };
+      },
+      record: (result) => (result.ok ? moveRecords(workspaceRoot, fromRelativePath, result.node) : [])
+    });
+  } catch {
+    return { ok: false, reason: "failed" };
+  }
 }
 
 export interface TrashResult {

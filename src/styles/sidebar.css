@@ -658,6 +658,54 @@
   text-overflow: ellipsis;
 }
 
+/* A name Iliad just gave an untitled document types itself (tree row and
+   breadcrumb): a thin caret while typing, then a small ✦ that fades. */
+.typed-name {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.typed-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.typed-name-caret {
+  display: inline-block;
+  width: 1px;
+  height: 1em;
+  margin-left: 1px;
+  background: currentColor;
+  vertical-align: text-bottom;
+}
+
+.typed-name-spark {
+  flex: 0 0 auto;
+  color: var(--muted-2);
+  font-size: 0.85em;
+  opacity: 0;
+  animation: typed-name-spark 1.6s ease-out;
+}
+
+@keyframes typed-name-spark {
+  0%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typed-name-spark {
+    display: none;
+  }
+}
+
 .tree-search-mark {
   padding: 0 1px;
   border-radius: 3px;

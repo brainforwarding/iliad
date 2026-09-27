@@ -20,6 +20,9 @@ import { useSettingsPanel } from "./app/useSettingsPanel";
 import { useSidebarPeek } from "./app/useSidebarPeek";
 import { useWindowChrome } from "./app/useWindowChrome";
 import { useWorkspace } from "./app/useWorkspace";
+import { useDocumentNaming } from "./app/useDocumentNaming";
+import { applyPathRelocation } from "./app/pathRelocation";
+import { BreadcrumbName } from "./components/BreadcrumbName";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
 import {
   EditorPane,
@@ -43,9 +46,12 @@ import { fileHasMutableReview } from "./review/reviewFiles";
 import { logReviewNavigation } from "./review/reviewDebug";
 import { buildReviewQueueSummary, pendingFileTreeChangesFromQueue, shownFilesByProposal } from "./review/reviewQueue";
 import type { ContentSearchRevealTarget } from "./editor/contentSearchReveal";
-import { useFileActions } from "./files/fileActions";
+import { useFileActions, type AutoRenameOutcome } from "./files/fileActions";
 import { findNode, findNodeByRelativePath } from "./files/fileTree";
 import { documentBreadcrumbParts } from "./files/pathUtils";
+import { isCompanionPath } from "./files/companionFiles";
+import { fileNameFromRenameInput } from "./files/documentNaming";
+import { useNamingCandidates, type PathRelocation } from "./preferences/namingCandidates";
 import { useAppLanguage } from "./i18n/appLanguage";
 import { useEditorPreferences } from "./preferences/editorPreferences";
 import { recentDocumentItems, useRecentDocuments } from "./preferences/recentDocuments";
@@ -149,8 +155,11 @@ export default function App() {
     clearDocument,
     flushSave: flushDocumentSave,
     handleEditorChange,
+    isDocumentSettled,
     loadDocument,
-    resumeAfterConflict
+    noteActiveFileRelocated,
+    resumeAfterConflict,
+    runWithAutosavePaused
   } = useDocumentPersistence({ activeFile, messages: strings.documentMessages, onError: setError, workspace });
   const activeFileInConflict = saveStatus === "conflict";
   const {
@@ -268,6 +277,24 @@ export default function App() {
     [recordRecent]
   );
   const {
+    candidates: namingCandidates,
+    dropCandidate: dropNamingCandidate,
+    recordCandidate: recordNamingCandidate,
+    relocateCandidates: relocateNamingCandidates
+  } = useNamingCandidates(workspace?.path ?? null);
+  const handleDocumentCreated = useCallback(
+    (workspaceRoot: string, node: FileTreeNode) => recordNamingCandidate(workspaceRoot, node.relativePath),
+    [recordNamingCandidate]
+  );
+  // The one relocation path for renames (manual or automatic) and moves:
+  // recents, Back/Forward history and naming candidates all follow.
+  const handlePathRelocated = useCallback(
+    (relocation: PathRelocation) =>
+      applyPathRelocation(relocation, { relocateRecent, relocateHistoryPaths, relocateNamingCandidates }),
+    [relocateHistoryPaths, relocateNamingCandidates, relocateRecent]
+  );
+  const {
+    autoRenameDocument,
     copyNodePath,
     createFolder,
     createMarkdownFile,
@@ -291,10 +318,9 @@ export default function App() {
     loadDocument,
     onMarkdownNavigation: recordNormalNavigation,
     onDocumentOpened: handleDocumentOpened,
-    onPathRelocated: relocateRecent,
-    onTreeNodeMoved: ({ oldNode, newNode }) => {
-      relocateHistoryPaths(oldNode.path, newNode.path);
-    },
+    onPathRelocated: handlePathRelocated,
+    onDocumentCreated: handleDocumentCreated,
+    onActiveFileRelocated: noteActiveFileRelocated,
     refreshTree,
     renamingPath,
     selectedTreePath,
@@ -495,6 +521,63 @@ export default function App() {
     [reviewQueue.items]
   );
   const pendingReviewFileCount = reviewQueue.items.length;
+  const reviewedRelativePaths = useMemo(
+    () => pendingTreeChanges.map((change) => change.normalizedRelativePath),
+    [pendingTreeChanges]
+  );
+  // The auto-named document's name types itself (tree row and breadcrumb).
+  const [namingAnimation, setNamingAnimation] = useState<{ path: string; id: number } | null>(null);
+  const [breadcrumbRenaming, setBreadcrumbRenaming] = useState(false);
+  const handleDocumentNamed = useCallback((node: FileTreeNode) => {
+    setNamingAnimation({ path: node.path, id: Date.now() });
+  }, []);
+
+  useEffect(() => {
+    if (!namingAnimation) {
+      return;
+    }
+
+    const timer = window.setTimeout(
+      () => setNamingAnimation((current) => (current?.id === namingAnimation.id ? null : current)),
+      2400
+    );
+
+    return () => window.clearTimeout(timer);
+  }, [namingAnimation]);
+
+  // Pending comment edits are written first, so the comments file main moves
+  // with the document is complete (a failed write skips the rename).
+  const autoRenameWithComments = useCallback(
+    async (node: FileTreeNode, stem: string, expectedHash: string): Promise<AutoRenameOutcome> => {
+      try {
+        await flushSelectionComments();
+      } catch {
+        return { ok: false, reason: "failed" };
+      }
+
+      return autoRenameDocument(node, stem, expectedHash);
+    },
+    [autoRenameDocument, flushSelectionComments]
+  );
+
+  useDocumentNaming({
+    workspace,
+    activeFile,
+    editorShowsActiveFile: !virtualReviewFile,
+    documentText,
+    saveStatus,
+    tree,
+    candidates: namingCandidates,
+    reviewedRelativePaths,
+    renaming: renamingPath !== null || breadcrumbRenaming,
+    language,
+    stateRef,
+    isDocumentSettled,
+    runWithAutosavePaused,
+    autoRenameDocument: autoRenameWithComments,
+    dropCandidate: dropNamingCandidate,
+    onNamed: handleDocumentNamed
+  });
   const pendingReviewActive = Boolean(
     activeReview &&
       fileHasMutableReview(activeReview.file) &&
@@ -1110,6 +1193,11 @@ export default function App() {
     }
   }, [activeFile, clearHistory]);
 
+  // The breadcrumb's rename field belongs to one document shown with the sidebar hidden.
+  useEffect(() => {
+    setBreadcrumbRenaming(false);
+  }, [activeFile?.path, sidebarOpen]);
+
   useEffect(() => {
     if (!notice) {
       return;
@@ -1502,6 +1590,27 @@ export default function App() {
         ? activeReview.file.baseContent
         : documentText;
   const breadcrumbParts = editorFile ? documentBreadcrumbParts(workspace?.name ?? "", editorFile.relativePath) : [];
+  // Only the real open document renames from the breadcrumb (no review ghosts, companions or pending reviews).
+  const breadcrumbCanRename = Boolean(
+    activeFile &&
+      activeFile.kind === "markdown" &&
+      editorFile === activeFile &&
+      !isCompanionPath(activeFile.path) &&
+      !activeFileHasPendingReview
+  );
+  const commitBreadcrumbRename = (value: string) => {
+    setBreadcrumbRenaming(false);
+
+    if (!activeFile) {
+      return;
+    }
+
+    const nextName = fileNameFromRenameInput(activeFile, value);
+
+    if (nextName && nextName !== activeFile.name) {
+      void renameNode(activeFile, nextName);
+    }
+  };
   const sidebarToggleLabel = sidebarOpen ? strings.topbar.hideSidebar : strings.topbar.showSidebar;
   const backLabel = backTarget ? strings.topbar.backTo(markdownDisplayName(backTarget.node, strings.appName)) : "";
   const forwardLabel = forwardTarget ? strings.topbar.forwardTo(markdownDisplayName(forwardTarget.node, strings.appName)) : "";
@@ -1622,6 +1731,8 @@ export default function App() {
       onCloseContextMenu={closeTreeContextMenu}
       onCancelRename={() => setRenamingPath(null)}
       onCommitRename={renameNode}
+      onStartRename={startRenameFromContextMenu}
+      namingAnimation={namingAnimation}
       contentSearchProvider={fileTreeContentSearchProvider}
       companionCommentCount={activeFile && commentsEnabled ? { documentPath: activeFile.path, count: commentCount } : null}
       onOpenSettings={toggleSettings}
@@ -1680,15 +1791,25 @@ export default function App() {
           {!sidebarOpen && !sidebarPeekOpen && breadcrumbParts.length > 0 ? (
             <nav className="topbar-breadcrumb" aria-label={strings.topbar.documentLocation}>
               <bdi className="topbar-breadcrumb-path">
-                {breadcrumbParts.map((part, index) => (
-                  <span
-                    key={`${index}:${part}`}
-                    className={index === breadcrumbParts.length - 1 ? "topbar-breadcrumb-current" : "topbar-breadcrumb-part"}
-                    aria-current={index === breadcrumbParts.length - 1 ? "page" : undefined}
-                  >
-                    {part}
-                  </span>
-                ))}
+                {breadcrumbParts.map((part, index) =>
+                  index === breadcrumbParts.length - 1 ? (
+                    <BreadcrumbName
+                      key={`${index}:current`}
+                      name={part}
+                      typingKey={namingAnimation && namingAnimation.path === editorFile?.path ? namingAnimation.id : null}
+                      canRename={breadcrumbCanRename}
+                      renaming={breadcrumbRenaming}
+                      renameLabel={strings.sidebar.rename(part)}
+                      onStartRename={() => setBreadcrumbRenaming(true)}
+                      onCancelRename={() => setBreadcrumbRenaming(false)}
+                      onCommitRename={commitBreadcrumbRename}
+                    />
+                  ) : (
+                    <span key={`${index}:${part}`} className="topbar-breadcrumb-part">
+                      {part}
+                    </span>
+                  )
+                )}
               </bdi>
             </nav>
           ) : null}

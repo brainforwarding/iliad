@@ -388,6 +388,24 @@ export class WorkspaceBaselineService {
     }
   }
 
+  /**
+   * `runIliadMutation` serialized on the write queue, so it never interleaves
+   * with a guarded save, remove or review action on this workspace (the
+   * automatic rename of an untitled document checks the disk hash and then
+   * renames; spec 2026-09-27 Review, "Guarded rename in main").
+   */
+  runQueuedIliadMutation<T>(
+    workspaceRoot: string,
+    options: {
+      paths: string[];
+      operation: () => Promise<T>;
+      record?: (result: T) => BaselineRecord[];
+    }
+  ): Promise<T> {
+    const state = this.states.get(path.resolve(workspaceRoot));
+    return this.enqueueWrite(state, () => this.runIliadMutation(workspaceRoot, options));
+  }
+
   hasPendingReview(workspaceRoot: string, relativePath: string): boolean {
     const state = this.states.get(path.resolve(workspaceRoot));
     const normalized = normalizeMarkdownRelativePath(relativePath);

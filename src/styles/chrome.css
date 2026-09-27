@@ -110,6 +110,25 @@
   color: var(--muted-2);
 }
 
+/* Double-clicking the document name renames it in place. */
+.topbar-breadcrumb-rename {
+  direction: ltr;
+}
+
+.topbar-breadcrumb-input {
+  width: 16ch;
+  min-width: 8ch;
+  max-width: 40ch;
+  height: 22px;
+  padding: 0 5px;
+  border: 1px solid var(--accent-wash);
+  border-radius: 5px;
+  background: var(--editor);
+  color: var(--ink-1);
+  font-size: var(--text-ui);
+  outline: none;
+}
+
 /* EditorPane portals the document's outside-review controls here. */
 .topbar-slot {
   display: flex;

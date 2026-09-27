@@ -1,10 +1,14 @@
 // Pure entry point of the versioned prompt module (no Node, Electron or DOM
-// imports). The app always builds with the newest version; the Iliad AI proxy
-// Worker serves every version it still lists in SUPPORTED_PROMPT_VERSIONS.
-// Spec: specs/2026-09-25-groq-ai-free-tier.md §2, §4.
+// imports). The app sends each task with the version pinned for it in
+// TASK_PROMPT_VERSIONS (not always the newest: autocomplete and selection stay
+// on v1 until a Worker serving v2 is deployed); the Iliad AI proxy Worker
+// serves every version it still lists in SUPPORTED_PROMPT_VERSIONS.
+// Spec: specs/2026-09-25-groq-ai-free-tier.md §2, §4;
+// specs/2026-09-27-name-untitled-documents.md (prompt v2, versions per task).
 
 import { GROQ_PINNED_PARAMS } from "./limits.js";
 import { buildPromptV1, parseWritingAiTaskV1, type TaskValidation, type WritingAiPrompt, type WritingAiTaskV1 } from "./v1.js";
+import { buildPromptV2, parseWritingAiTaskV2, type WritingAiTaskV2 } from "./v2.js";
 
 export * from "./limits.js";
 export {
@@ -24,19 +28,42 @@ export {
   type WritingAiTaskV1,
   type WritingLanguage
 } from "./v1.js";
+export {
+  buildPromptV2,
+  nameInstruction,
+  nameModelInput,
+  parseWritingAiTaskV2,
+  type AutocompleteTaskV2,
+  type NameTaskV2,
+  type SelectionTaskV2,
+  type WritingAiTaskV2
+} from "./v2.js";
 
 /** Every task shape of every version still served. */
-export type WritingAiTask = WritingAiTaskV1;
+export type WritingAiTask = WritingAiTaskV1 | WritingAiTaskV2;
 export type PromptVersion = WritingAiTask["v"];
 
-export const LATEST_PROMPT_VERSION = 1 as const satisfies PromptVersion;
+export const LATEST_PROMPT_VERSION = 2 as const satisfies PromptVersion;
+
+/**
+ * The version the app sends for each task. Only `name` (new in v2) is sent as
+ * v2, so a Worker without v2 support disables only document naming
+ * (spec 2026-09-27 Review, "Versions per task").
+ */
+export const TASK_PROMPT_VERSIONS = Object.freeze({
+  autocomplete: 1,
+  selection: 1,
+  name: 2
+} as const satisfies Record<WritingAiTask["task"], PromptVersion>);
 
 const BUILDERS: { [V in PromptVersion]: (task: Extract<WritingAiTask, { v: V }>) => WritingAiPrompt } = {
-  1: buildPromptV1
+  1: buildPromptV1,
+  2: buildPromptV2
 };
 
 const PARSERS: { [V in PromptVersion]: (input: unknown) => TaskValidation<Extract<WritingAiTask, { v: V }>> } = {
-  1: parseWritingAiTaskV1
+  1: parseWritingAiTaskV1,
+  2: parseWritingAiTaskV2
 };
 
 export const PROMPT_VERSIONS: readonly PromptVersion[] = Object.freeze(Object.keys(BUILDERS).map(Number) as PromptVersion[]);
@@ -47,7 +74,7 @@ export function isPromptVersion(value: unknown): value is PromptVersion {
 
 /** Messages, completion budget and output cap for a task, by its own `v`. */
 export function buildWritingAiPrompt(task: WritingAiTask): WritingAiPrompt {
-  return BUILDERS[task.v](task);
+  return task.v === 2 ? BUILDERS[2](task) : BUILDERS[1](task);
 }
 
 /**
@@ -57,7 +84,8 @@ export function buildWritingAiPrompt(task: WritingAiTask): WritingAiPrompt {
  */
 export function parseWritingAiTask(input: unknown): TaskValidation<WritingAiTask> {
   const v = typeof input === "object" && input !== null ? (input as { v?: unknown }).v : undefined;
-  return isPromptVersion(v) ? PARSERS[v](input) : { ok: false, field: "v" };
+  if (!isPromptVersion(v)) return { ok: false, field: "v" };
+  return v === 2 ? PARSERS[2](input) : PARSERS[1](input);
 }
 
 /**

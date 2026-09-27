@@ -67,7 +67,8 @@ electron/
 src/
   App.tsx
   main.tsx
-  app/             useWorkspace, useDocumentPersistence, useDocumentHistory,
+  app/             useWorkspace, useDocumentPersistence (+ autosaveFence),
+                   useDocumentHistory, useDocumentNaming, pathRelocation,
                    useOutsideReview, useSelectionComments, useCliBridge
   comments/        comments file format, session and three-way merge
   components/      EditorPane, FileTree, menus (Typography, Language,
@@ -75,7 +76,8 @@ src/
   editor/          CodeMirrorHost, documentSync, aiReview/ (inline review),
                    ideaAutocomplete/, selectionComments/, writingCorrector/,
                    visualMarkdown/, imageDropPaste, paths
-  files/           fileActions, fileTree, pathUtils, companionFiles, search
+  files/           fileActions, fileTree, pathUtils, companionFiles,
+                   documentNaming, search
   i18n/            appLanguage, strings
   markdown/        math delimiters
   preferences/     editor, sidebar, autocomplete, writing assist preferences
@@ -123,7 +125,7 @@ The app manages Markdown documents and folders in the sidebar.
 - After creation, the new file opens and enters inline rename mode.
 - Users edit the visible document stem only. The UI does not show or require `.md`.
 - The app appends/preserves `.md` internally.
-- Rename is available from the file tree right-click context menu, not a hover button.
+- Rename is available from the file tree right-click context menu (not a hover button), by double-clicking a document's name text in the tree (not the whole row; never for companions or review rows), and by double-clicking the breadcrumb's document name while the sidebar is hidden (a small inline field; Enter saves, Esc cancels). All three commit through `renameNode`.
 - Duplicate and Move to Trash are also context-menu actions.
 - Markdown and external files can be duplicated, renamed, and moved to Trash.
 - Folders can be renamed and moved to Trash; folder duplication is intentionally out of scope.
@@ -154,6 +156,53 @@ Relevant files:
 - `electron/fs/fileOps.ts`
 - `electron/fs/pathSafety.ts`
 - `electron/ipc/files.ts`
+
+## Naming Untitled Documents
+
+Spec: `specs/2026-09-27-name-untitled-documents.md`; ADR-0024. A document
+Iliad created and the writer has not named gets a name once, at the first
+pause, with no confirm step: the name types itself in the tree row (and the
+breadcrumb) with a small ✦ that fades. Renaming it yourself is the undo.
+
+- **Candidates** (`src/preferences/namingCandidates.ts`): localStorage
+  `iliad:naming-candidates`, a map workspace root → workspace-relative paths.
+  `createMarkdownFile` records the exact path creation returned (⌘N, the
+  header button and the empty-state link all go through it). Never matched by
+  name: a file called `untitled.md` that Iliad did not create is not a
+  candidate. Dropped when its path vanishes from the tree (once seen there),
+  gets an outside review, enters conflict (changed outside Iliad), or when
+  the guarded rename answers `changed` / `under_review`.
+- **One relocation path**: `renameNode`, `moveNode` and the auto-rename all
+  report `onPathRelocated({ …paths, reason })`; `src/app/pathRelocation.ts`
+  relocates recents, Back/Forward history and candidates from it. A manual
+  rename drops the candidate (typing a real name in the create-time name
+  field counts), a move relocates it, an auto-rename consumes it; documents
+  inside a renamed or moved folder follow.
+- **Controller** (`src/app/useDocumentNaming.ts`): for the active candidate,
+  ~2 s after the last change, only when saved (no dirty text, timer or save in
+  flight), not under outside review, no rename field open (tree or
+  breadcrumb), the window focused, and with enough text (a finished
+  first-line heading, or ≥ ~200 characters of prose). A first-line ATX heading
+  names it directly (no AI); otherwise one `suggestDocumentName` call with the
+  opening ~1,500 characters and the app language. The title is formatted in
+  the folder's style (`src/files/documentNaming.ts`: kebab unless strictly
+  more sibling documents have spaced names; ≤ 60 characters at a boundary).
+  Any typing, candidate change, review, rename field, workspace switch or
+  unmount invalidates the attempt (a late AI answer is dropped and
+  cancelled). At most two dispatched attempts per candidate per session, in
+  memory. Failures are silent.
+- **Guarded rename**: inside the autosave fence the controller re-checks the
+  text, hashes it (`hashDocumentText`, the same identity saves assert) and
+  calls `autoRenameDocument` (main verifies the hash, refuses a path under
+  review, resolves collisions over the document group and moves the comments
+  file). On success `fileActions.autoRenameDocument` refreshes the tree,
+  relocates (reason `auto-rename`) and updates the active file; the renderer
+  talks to main only through `src/app/documentNamingApi.ts`, which tolerates a
+  preload without the naming methods.
+- **UI**: `src/components/TypedName.tsx` (≈0.5 s typing, thin caret, ✦ fading
+  after ≈1 s; the accessible text is the final name at once; reduced motion
+  shows the name without typing or ✦), used by `FileTree` rows and
+  `BreadcrumbName`.
 
 ## Companion Files (Comments)
 
@@ -328,6 +377,7 @@ The app keeps one active document, not tabs. Back/Forward history is an in-memor
 - Stale history paths are skipped only after a successful Back/Forward navigation to the next valid target.
 - External files, external web/mail links, folder expansion, and same-document links do not record document history.
 - History is cleared when the workspace changes or the active document is cleared.
+- Renames (manual or automatic) and moves relocate history entries through the one relocation callback (`src/app/pathRelocation.ts`), so Back/Forward keep working after a rename.
 - Do not add tabs until there is evidence the file tree plus Back/Forward history is insufficient.
 
 Relevant files:
@@ -766,6 +816,14 @@ buffer stays editable, autosave is disarmed, and a banner offers Restore
 previous version (the writer's edits win and save normally) or Keep outside
 changes (confirmed, discards the buffer and reloads from disk). Last-writer-wins
 is never acceptable.
+
+The autosave fence (`src/app/autosaveFence.ts`, owned by
+`useDocumentPersistence` as `runWithAutosavePaused`) serializes operations
+that move the active document with its saves: entering it disarms the timer
+and awaits any tracked save in flight; while it is held, typing only marks the
+buffer dirty and `flushSave` waits for it; leaving it re-arms autosave, which
+saves to the document's new path (the persistence ref follows the relocated
+active file immediately). Only the auto-rename uses it today.
 
 Relevant files:
 

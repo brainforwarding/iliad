@@ -4,6 +4,7 @@ Status: living decision log. Started 2026-05-26. ADR-0001–0020 describe the
 removed internal agent and are kept as history; ADR-0021 supersedes them.
 ADR-0022 removes writing notes and automatic suggestions. ADR-0023 moves
 built-in AI from Gemini to Groq (free through Iliad's proxy, or your own key).
+ADR-0024 lets the AI name untitled documents without review (the one exception).
 
 ## ADR-0001: Context Is Built Per Turn
 
@@ -509,3 +510,32 @@ rule. Gemini keys saved by earlier versions are deleted. Login and a paid plan
 can be added later on the same token and quota model.
 
 Spec: [2026-09-25 Groq AI free tier](../specs/2026-09-25-groq-ai-free-tier.md).
+
+## ADR-0024: AI Names Untitled Documents Without Review — The One Deliberate Exception
+
+Status: accepted (2026-09-27). Narrow exception to ADR-0021 / ADR-0023
+("built-in AI output is reviewed").
+
+A document Iliad created (⌘N, the new-document button, the empty-state link)
+whose name the writer has not changed gets a file name automatically, once, at
+the first pause: from the writer's first-line heading when there is one,
+otherwise from a short AI title. No confirm step, hint or toast; the name
+types itself in the tree and breadcrumb, and renaming it yourself is the undo.
+
+Scope, and why it does not widen:
+
+- Only documents Iliad created and the writer has not named (a local list of
+  exact paths; never "any file called untitled").
+- Only the file name; never the document's text, headings or companions'
+  content (the comments file just follows the rename).
+- Once per document; at most two attempts per session; any failure leaves the
+  document untitled, silently.
+- Only through main's guarded rename: the expected disk hash must match, no
+  pending outside review, collisions resolved without overwriting.
+
+Why: "untitled-3.md" is noise the writer never chose, and asking them to name
+a document before writing interrupts the moment Iliad is meant to protect.
+A file name is cheap to change and fully visible, unlike text edits, which
+stay review-first. Any other model-authored change still needs review.
+
+Spec: [2026-09-27 name untitled documents](../specs/2026-09-27-name-untitled-documents.md).

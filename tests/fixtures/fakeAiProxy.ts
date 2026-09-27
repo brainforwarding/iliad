@@ -53,6 +53,8 @@ export interface FakeAiProxy {
     globalCapReached: boolean;
     freeTierEnabled: boolean;
     minClientVersion: string | null;
+    /** Prompt versions this fake Worker serves (`SUPPORTED_PROMPT_VERSIONS`); others → client_outdated. */
+    supportedPromptVersions: number[];
     /** Next /v1/generate answers with this HTTP refusal (then clears). */
     nextGenerateError: { status: number; code: string } | null;
     /** Every /v1/generate answers 401 with this code. */
@@ -86,6 +88,9 @@ const QA_REPLIES = {
 } as const;
 
 export function defaultFakeReply(task: WritingAiTask): FakeReply {
+  if (task.task === "name") {
+    return { deltas: [task.language === "es" ? "Plan de la sesión" : "Spring workshop plan"], finishReason: "stop" };
+  }
   if (task.task === "autocomplete") {
     // Sentences keep the fixed reply the tests assert; longer kinds differ so
     // the app's echo checks do not reject them during manual QA.
@@ -128,6 +133,7 @@ export async function startFakeAiProxy(options: FakeAiProxyOptions = {}, port = 
       globalCapReached: false,
       freeTierEnabled: true,
       minClientVersion: null,
+      supportedPromptVersions: [1, 2],
       nextGenerateError: null,
       alwaysUnauthorized: null,
       reply: options.reply ?? defaultFakeReply
@@ -209,6 +215,10 @@ export async function startFakeAiProxy(options: FakeAiProxyOptions = {}, port = 
       if (!record) return refuse(response, 401, "invalid_token");
       if (record.expired) return refuse(response, 401, "token_expired");
 
+      const promptVersion = body && typeof body === "object" ? (body as { v?: unknown }).v : undefined;
+      if (typeof promptVersion !== "number" || !proxy.state.supportedPromptVersions.includes(promptVersion)) {
+        return refuse(response, 426, "client_outdated");
+      }
       const parsed = parseWritingAiTask(body);
       if (!parsed.ok) return parsed.field === "v" ? refuse(response, 426, "client_outdated") : refuse(response, 400, "bad_request");
 

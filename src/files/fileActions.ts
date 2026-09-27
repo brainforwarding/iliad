@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { resolveMarkdownAssetPath } from "../editor/paths";
 import type { FileTreeNode, WorkspaceInfo } from "../types/iliad";
+import { documentNamingApi, type AutoRenameDocumentResult } from "../app/documentNamingApi";
+import type { PathRelocation, PathRelocationReason } from "../preferences/namingCandidates";
 import { findNode } from "./fileTree";
 import { resolveCreationDirectoryPath } from "./fileTreeMove";
 import { pathIsSameOrInside, relocatePath } from "./pathUtils";
@@ -22,14 +24,16 @@ interface UseFileActionsOptions {
   onMarkdownNavigation: (previousPath: string, nextPath: string) => void;
   /** A Markdown document really opened (its text was read and loaded). */
   onDocumentOpened?: (workspaceRoot: string, node: FileTreeNode) => void;
-  /** A file or folder was renamed or moved (workspace-relative paths). */
-  onPathRelocated?: (workspaceRoot: string, oldRelativePath: string, newRelativePath: string) => void;
-  onTreeNodeMoved?: (move: {
-    oldNode: FileTreeNode;
-    newNode: FileTreeNode;
-    nextTree: FileTreeNode[];
-    activeFileAfterMove: FileTreeNode | null;
-  }) => void;
+  /**
+   * The one relocation callback: a file or folder was renamed (by the writer
+   * or by auto-naming) or moved. Recents, Back/Forward history and naming
+   * candidates all follow from here.
+   */
+  onPathRelocated?: (relocation: PathRelocation) => void;
+  /** Iliad created this Markdown document (the exact node creation returned). */
+  onDocumentCreated?: (workspaceRoot: string, node: FileTreeNode) => void;
+  /** The active document's node changed path; the persistence ref follows at once. */
+  onActiveFileRelocated?: (node: FileTreeNode) => void;
   refreshTree: (workspacePath: string) => Promise<FileTreeNode[]>;
   renamingPath: string | null;
   selectedTreePath: string | null;
@@ -72,6 +76,10 @@ interface FileActionMessages {
   headingLinksUnsupported: string;
   trashConfirmation: (name: string, kind: "directory" | "file") => string;
 }
+
+export type AutoRenameOutcome =
+  | { ok: true; node: FileTreeNode }
+  | { ok: false; reason: Extract<AutoRenameDocumentResult, { ok: false }>["reason"] };
 
 export type OpenNodeResult =
   | { kind: "markdown"; path: string }
@@ -125,7 +133,8 @@ export function useFileActions({
   onMarkdownNavigation,
   onDocumentOpened,
   onPathRelocated,
-  onTreeNodeMoved,
+  onDocumentCreated,
+  onActiveFileRelocated,
   refreshTree,
   renamingPath,
   selectedTreePath,
@@ -250,6 +259,9 @@ export function useFileActions({
         throw new Error(messages.createdFileMissing);
       }
 
+      // Recorded before the open so the naming controller already knows it.
+      onDocumentCreated?.(workspace.path, hydratedNode);
+
       const openResult = await openNode(hydratedNode);
       if (openResult.kind !== "markdown") {
         return;
@@ -267,6 +279,7 @@ export function useFileActions({
     creationDirectoryPath,
     flushSave,
     messages,
+    onDocumentCreated,
     openNode,
     refreshTree,
     setError,
@@ -275,6 +288,20 @@ export function useFileActions({
     setSelectedTreePath,
     workspace
   ]);
+
+  const reportRelocation = useCallback(
+    (workspaceRoot: string, oldNode: FileTreeNode, newNode: FileTreeNode, reason: PathRelocationReason) => {
+      onPathRelocated?.({
+        workspaceRoot,
+        oldPath: oldNode.path,
+        newPath: newNode.path,
+        oldRelativePath: oldNode.relativePath,
+        newRelativePath: newNode.relativePath,
+        reason
+      });
+    },
+    [onPathRelocated]
+  );
 
   /**
    * Creates "untitled folder". Without an argument the target follows the
@@ -345,7 +372,7 @@ export function useFileActions({
         throw new Error(messages.renamedFileMissing);
       }
 
-      onPathRelocated?.(workspace.path, node.relativePath, hydratedNode.relativePath);
+      reportRelocation(workspace.path, node, hydratedNode, "manual-rename");
 
       const currentActiveFile = stateRef.current.activeFile;
 
@@ -371,8 +398,8 @@ export function useFileActions({
   }, [
     flushSave,
     messages,
-    onPathRelocated,
     refreshTree,
+    reportRelocation,
     selectedTreePath,
     setActiveFile,
     setError,
@@ -381,6 +408,53 @@ export function useFileActions({
     stateRef,
     workspace
   ]);
+
+  /**
+   * Names an untitled document through main's guarded rename (the caller
+   * holds the autosave fence). Follows the same path as a manual rename —
+   * refreshed tree, relocation (reason "auto-rename"), active file and
+   * selection — but shows nothing: a failure only returns its reason.
+   */
+  const autoRenameDocument = useCallback(
+    async (node: FileTreeNode, stem: string, expectedHash: string): Promise<AutoRenameOutcome> => {
+      const api = documentNamingApi();
+      const currentWorkspace = stateRef.current.workspace;
+
+      if (!api || !currentWorkspace || node.kind !== "markdown") {
+        return { ok: false, reason: "failed" };
+      }
+
+      try {
+        const result = await api.autoRenameDocument(currentWorkspace.path, node.path, { expectedHash, stem });
+
+        if (!result.ok) {
+          return { ok: false, reason: result.reason };
+        }
+
+        const nextTree = await refreshTree(currentWorkspace.path).catch(() => null);
+        const hydratedNode = (nextTree && findNode(nextTree, result.node.path)) ?? result.node;
+
+        if (stateRef.current.workspace?.path !== currentWorkspace.path) {
+          return { ok: false, reason: "failed" };
+        }
+
+        reportRelocation(currentWorkspace.path, node, hydratedNode, "auto-rename");
+
+        if (stateRef.current.activeFile?.path === node.path) {
+          onActiveFileRelocated?.(hydratedNode);
+          setActiveFile(hydratedNode);
+        }
+
+        setSelectedTreePath((selected) => (selected === node.path ? hydratedNode.path : selected));
+        setRenamingPath((renaming) => (renaming === node.path ? null : renaming));
+
+        return { ok: true, node: hydratedNode };
+      } catch {
+        return { ok: false, reason: "failed" };
+      }
+    },
+    [onActiveFileRelocated, refreshTree, reportRelocation, setActiveFile, setRenamingPath, setSelectedTreePath, stateRef]
+  );
 
   const duplicateNode = useCallback(async (node: FileTreeNode) => {
     if (!workspace || node.kind === "directory") {
@@ -431,10 +505,9 @@ export function useFileActions({
         throw new Error(messages.movedFileMissing);
       }
 
-      onPathRelocated?.(workspace.path, node.relativePath, hydratedNode.relativePath);
+      reportRelocation(workspace.path, node, hydratedNode, "move");
 
       const currentActiveFile = stateRef.current.activeFile;
-      let activeFileAfterMove = currentActiveFile;
 
       if (currentActiveFile && pathIsSameOrInside(node.path, currentActiveFile.path)) {
         const relocatedActivePath = relocatePath(node.path, hydratedNode.path, currentActiveFile.path);
@@ -442,11 +515,9 @@ export function useFileActions({
 
         if (relocatedActiveNode?.kind === "markdown") {
           setActiveFile(relocatedActiveNode);
-          activeFileAfterMove = relocatedActiveNode;
         } else {
           setActiveFile(null);
           clearDocument();
-          activeFileAfterMove = null;
         }
       }
 
@@ -456,7 +527,6 @@ export function useFileActions({
 
       setSelectedTreePath(hydratedNode.path);
       setRevealFolderPath(hydratedNode.path);
-      onTreeNodeMoved?.({ oldNode: node, newNode: hydratedNode, nextTree, activeFileAfterMove });
       setNotice(messages.movedItem(hydratedNode.relativePath));
       setError(null);
       return hydratedNode;
@@ -469,10 +539,9 @@ export function useFileActions({
     closeTreeContextMenu,
     flushSave,
     messages,
-    onPathRelocated,
-    onTreeNodeMoved,
     refreshTree,
     renamingPath,
+    reportRelocation,
     setActiveFile,
     setError,
     setNotice,
@@ -705,6 +774,7 @@ export function useFileActions({
   }, [messages, openNode, setError, setNotice, stateRef, tree]);
 
   return {
+    autoRenameDocument,
     copyNodePath,
     createFolder,
     createMarkdownFile,

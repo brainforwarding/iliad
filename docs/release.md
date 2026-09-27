@@ -120,6 +120,13 @@ npm audit --omit=dev --audit-level=high
 `npm audit --audit-level=high` may report dev/build-tool advisories. The
 production release gate is `npm audit --omit=dev --audit-level=high`.
 
+- [ ] **AI proxy Worker first.** If this release sends a prompt version the
+  deployed Iliad AI proxy does not serve yet (prompt v2: naming untitled
+  documents, `TASK_PROMPT_VERSIONS.name = 2`), deploy the Worker
+  (`relay/ai-proxy`, `SUPPORTED_PROMPT_VERSIONS = "1,2"`) before shipping the
+  app. Until then the free route answers `client_outdated` for v2 and naming
+  silently does nothing (autocomplete and selection stay on v1).
+
 ## macOS Signing And Notarization
 
 The app is signed with the Developer ID Application certificate:

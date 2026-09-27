@@ -61,6 +61,21 @@ describe("preload API surface", () => {
     expect(invoke.mock.calls.map((call) => call[0])).toEqual(["writing:get-groq-key-state", "writing:set-groq-key"]);
   });
 
+  it("routes document naming and the guarded auto-rename to their IPC channels", async () => {
+    const { ipcRenderer } = await import("electron");
+    const invoke = vi.mocked(ipcRenderer.invoke);
+    invoke.mockClear();
+    const api = exposed.api as Record<string, (...args: unknown[]) => unknown>;
+    await api.suggestDocumentName({ requestId: "r1", language: "en", text: "Some text" });
+    api.cancelSuggestDocumentName("r1");
+    await api.autoRenameDocument("/ws", "/ws/untitled.md", { expectedHash: "h", stem: "plan" });
+    expect(invoke.mock.calls).toEqual([
+      ["ai-name:run", { requestId: "r1", language: "en", text: "Some text" }],
+      ["ai-name:cancel", "r1"],
+      ["file:auto-rename-document", "/ws", "/ws/untitled.md", { expectedHash: "h", stem: "plan" }]
+    ]);
+  });
+
   it("exposes window chrome: full-screen state and menu commands, nothing else", async () => {
     const windowApi = exposed.api?.window as Record<string, (...args: unknown[]) => unknown>;
     expect(Object.keys(windowApi).sort()).toEqual(["isFullscreen", "onFullscreenChanged", "onMenuCommand"]);

@@ -44,6 +44,8 @@ import {
   type FileTreeSearchScope
 } from "../files/fileTreeContentSearch";
 import { findNode } from "../files/fileTree";
+import { fileNameFromRenameInput } from "../files/documentNaming";
+import { TypedName } from "./TypedName";
 import {
   createFileTreeMoveDragPayload,
   fileTreeMoveDragMimeType,
@@ -89,6 +91,10 @@ interface FileTreeProps {
   onCloseContextMenu?: () => void;
   onCancelRename: () => void;
   onCommitRename: (node: FileTreeNode, requestedName: string) => void;
+  /** Double-clicking a document's name text opens its rename field. */
+  onStartRename?: (node: FileTreeNode) => void;
+  /** A document Iliad just named: its row's name types itself (`id` restarts it). */
+  namingAnimation?: { path: string; id: number } | null;
   contentSearchProvider?: FileTreeContentSearchProvider;
   /** Entries in the active document's comments file, once read ("Comments · N"). */
   companionCommentCount?: { documentPath: string; count: number | null } | null;
@@ -198,6 +204,8 @@ interface TreeRowProps {
   onShowContextMenu: (node: FileTreeNode, position: { x: number; y: number }) => void;
   onCancelRename: () => void;
   onCommitRename: (node: FileTreeNode, requestedName: string) => void;
+  onStartRename?: (node: FileTreeNode) => void;
+  namingAnimation?: { path: string; id: number } | null;
   companionCommentCount?: { documentPath: string; count: number | null } | null;
 }
 
@@ -349,13 +357,7 @@ export function PendingReviewStrip({
 }
 
 function nodeFileNameFromInput(node: FileTreeNode, value: string) {
-  const trimmedValue = value.trim();
-
-  if (!trimmedValue) {
-    return "";
-  }
-
-  return node.kind === "markdown" ? `${markdownStem(trimmedValue)}.md` : trimmedValue;
+  return fileNameFromRenameInput(node, value);
 }
 
 function displayName(node: FileTreeNode) {
@@ -724,6 +726,8 @@ function TreeRow({
   onShowContextMenu,
   onCancelRename,
   onCommitRename,
+  onStartRename,
+  namingAnimation,
   companionCommentCount
 }: TreeRowProps) {
   const pathDescriptionId = useId();
@@ -736,6 +740,7 @@ function TreeRow({
   const isActive = activePath === nodePath;
   const isSelected = node.source === "real" && selectedPath === node.node.path && !isActive;
   const isRenaming = node.source === "real" && renamingPath === node.node.path;
+  const typingId = node.source === "real" && namingAnimation?.path === node.node.path ? namingAnimation.id : null;
   const companionKind = displayNodeCompanionKind(node);
   const companionDocumentPath = node.source === "real" ? node.node.companion?.documentPath ?? null : null;
   const displayedName =
@@ -765,6 +770,16 @@ function TreeRow({
         : "is-edit";
   const canDragImageReference = node.source === "real" && nodeKind === "external" && isImageNode(node.node);
   const canDragMove = node.source === "real" && !node.pendingTarget && !node.hasPendingDescendant && !companionKind;
+  // Only a real document's name text renames on double-click: not companions,
+  // not review ghosts or rows with a pending review.
+  const canRenameByDoubleClick =
+    node.source === "real" &&
+    nodeKind === "markdown" &&
+    !companionKind &&
+    !node.pendingTarget &&
+    !node.hasPendingDescendant &&
+    !isRenaming &&
+    Boolean(onStartRename);
   const isDragging = node.source === "real" && draggingRelativePath === normalizeDisplayRelativePath(node.node.relativePath);
   const rowDropTargetKey =
     node.source === "real" && node.node.kind === "directory"
@@ -912,8 +927,25 @@ function TreeRow({
                 <TreeChevron isDirectory={isDirectory} isExpanded={isExpanded} />
               </span>
               <span className="tree-name">
-                <span className="tree-name-text">
-                  {companionKind ? displayedName : renderSearchHighlightedName(displayedName, searchMeta?.selfRanges ?? [])}
+                <span
+                  className="tree-name-text"
+                  onDoubleClick={
+                    canRenameByDoubleClick
+                      ? (event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onStartRename?.(node.node);
+                        }
+                      : undefined
+                  }
+                >
+                  {companionKind ? (
+                    displayedName
+                  ) : typingId ? (
+                    <TypedName key={typingId} text={displayedName} />
+                  ) : (
+                    renderSearchHighlightedName(displayedName, searchMeta?.selfRanges ?? [])
+                  )}
                 </span>
                 {showDescendantMatchCount ? (
                   <span
@@ -976,6 +1008,8 @@ function TreeRow({
               onShowContextMenu={onShowContextMenu}
               onCancelRename={onCancelRename}
               onCommitRename={onCommitRename}
+              onStartRename={onStartRename}
+              namingAnimation={namingAnimation}
               companionCommentCount={companionCommentCount}
             />
           ))
@@ -1067,6 +1101,8 @@ export function FileTree({
   onCloseContextMenu,
   onCancelRename,
   onCommitRename,
+  onStartRename,
+  namingAnimation = null,
   contentSearchProvider,
   companionCommentCount,
   onOpenSettings,
@@ -2379,6 +2415,8 @@ export function FileTree({
               onShowContextMenu={onShowContextMenu}
               onCancelRename={onCancelRename}
               onCommitRename={onCommitRename}
+              onStartRename={onStartRename}
+              namingAnimation={namingAnimation}
               companionCommentCount={companionCommentCount}
             />
           ))

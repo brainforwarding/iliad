@@ -83,6 +83,8 @@ const api = {
     invoke("folder:create", workspaceRoot, directoryPath, requestedName),
   renamePath: (workspaceRoot: string, filePath: string, requestedName: string) =>
     invoke("file:rename", workspaceRoot, filePath, requestedName),
+  autoRenameDocument: (workspaceRoot: string, filePath: string, request: { expectedHash: string; stem: string }) =>
+    invoke("file:auto-rename-document", workspaceRoot, filePath, request),
   movePath: (workspaceRoot: string, sourcePath: string, targetDirectoryPath: string) =>
     invoke("file:move", workspaceRoot, sourcePath, targetDirectoryPath),
   duplicatePath: (workspaceRoot: string, filePath: string) =>
@@ -186,6 +188,11 @@ const api = {
   }) => invoke("tighten:run", request),
   cancelTighten: (requestId: string) => {
     void invoke("tighten:cancel", requestId);
+  },
+  suggestDocumentName: (request: { requestId: string; language: "en" | "es"; text: string }) =>
+    invoke("ai-name:run", request),
+  cancelSuggestDocumentName: (requestId: string) => {
+    void invoke("ai-name:cancel", requestId);
   },
   autocompleteIdea: (request: {
     requestId: string;
