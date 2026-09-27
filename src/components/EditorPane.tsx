@@ -1,4 +1,5 @@
 import { markdown } from "@codemirror/lang-markdown";
+import type { SelectionDocumentSnapshot } from "../editor/aiRequestSnapshot";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap, type ViewUpdate } from "@codemirror/view";
@@ -89,7 +90,7 @@ export interface EditorTightenProps {
     requestId: string,
     text: string,
     selection: { from: number; to: number },
-    options?: { mode?: "tighten" | "edit"; instruction?: string }
+    options?: { mode?: "tighten" | "edit"; instruction?: string; document?: SelectionDocumentSnapshot }
   ) => Promise<TightenResult>;
   cancel: (requestId: string) => void;
 }
@@ -99,6 +100,13 @@ export interface EditorWritingAssistsProps {
   onPartial?: (listener: (event: { requestId: string; insert: string }) => void) => () => void;
   correctorEnabled: boolean;
   autocompleteEnabled: boolean;
+  /**
+   * False while built-in AI may not run on this document (a `*.comments.md`
+   * companion is open): autocomplete stays off without the "turn it on" hint.
+   */
+  aiAssistsAvailable?: boolean;
+  /** Writer's preferences for AI requests (trimmed, undefined when empty), read at request time. */
+  writingPreferences?: () => string | undefined;
   /** The current AI route, for route-specific notice copy (null while unknown). */
   aiRoute?: AiRoute | null;
   /** Opens Writing assists with the Groq key form expanded (notice "Use my key" / "Update key"). */
@@ -971,14 +979,14 @@ export function EditorPane({
   // Preserve the autocomplete controller when unrelated decorations (such as
   // spelling issues or selection comments) are refreshed.
   const autocompleteExtensions = useMemo(() => {
-    if (!file || !writingAssists?.autocompleteEnabled || !writingAssists.workspaceSessionId ||
+    if (!file || !writingAssists?.autocompleteEnabled || writingAssists.aiAssistsAvailable === false || !writingAssists.workspaceSessionId ||
         !writingAssists.documentRelativePath || activeWritingIssue || review || readOnly) return [];
     return ideaAutocompleteExtension({
       preferences: writingAssists.preferences, onPartial: writingAssists.onPartial,
       enabled: true, language: writingAssists.language,
       workspaceSessionId: writingAssists.workspaceSessionId, documentRelativePath: writingAssists.documentRelativePath,
       documentTitle: file.name.replace(/\.(md|markdown|mdown|mkd)$/i, ""),
-      blockedLineRanges, requestAutocomplete: writingAssists.autocompleteIdea,
+      blockedLineRanges, writingPreferences: writingAssists.writingPreferences, requestAutocomplete: writingAssists.autocompleteIdea,
       cancelAutocomplete: writingAssists.cancelAutocompleteIdea, onStatusChange: handleAutocompleteStatusChange
     });
   }, [file?.path, file?.name, writingAssists, activeWritingIssue, review, readOnly, blockedLineRanges, handleAutocompleteStatusChange]);
@@ -1001,11 +1009,12 @@ export function EditorPane({
     return [Prec.highest(keymap.of(guarded.map((kind) => ({
       key: keys[kind],
       run: () => {
-        setLengthKeyHint(true);
+        // The hint explains the switch; blocked documents (review, companions) just swallow the key.
+        if (!writingAssists?.autocompleteEnabled) setLengthKeyHint(true);
         return true;
       }
     }))))];
-  }, [file, autocompleteExtensions, writingAssists?.preferences?.shortcuts, writingAssists?.correctorEnabled]);
+  }, [file, autocompleteExtensions, writingAssists?.preferences?.shortcuts, writingAssists?.correctorEnabled, writingAssists?.autocompleteEnabled]);
 
   const extensions = useMemo(
     () => {

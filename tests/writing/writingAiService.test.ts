@@ -213,6 +213,72 @@ describe("WritingAiService finish reasons and leak guard", () => {
   });
 });
 
+describe("whole-document context and preferences per route (spec 2026-09-27)", () => {
+  const DOC = "# Harbor\n\nMara Quint ran the Kestrel ferry.\n\n## Morning\n\nShe walked into the ";
+  const contextRequest = {
+    requestId: "r2", workspaceSessionId: "s", documentRelativePath: "a.md", language: "en", prefix: "She walked into the ", suffix: "",
+    headingPath: ["Harbor", "Morning"], documentTitle: "a", nearbyHeadings: [], suggestionKind: "sentence",
+    document: { text: DOC, cursor: DOC.length }, preferences: "  Short sentences.  "
+  };
+  const deps = (service: WritingAiService) => ({ service, controllers: new Map(), resolveWorkspaceRootForSession: () => "/ws" });
+
+  it("own key: prompt v2 with the document, the outline and the preferences", async () => {
+    const { service, groq } = await ownKeyService((_request, _body, response) => groqStream(response, "quiet room."));
+    expect(await handleAutocompleteIpc(event, contextRequest, deps(service))).toEqual({ ok: true, insert: "quiet room." });
+    const user = (groq.seen[0].body as { messages: Array<{ content: string }> }).messages[1].content;
+    expect(user).toContain(`<<<DOCUMENT>>>\n${DOC}<<<CURSOR>>>\n<<<END_DOCUMENT>>>`);
+    expect(user).toContain("## Morning  ← cursor");
+    expect(user).toContain("<<<PREFERENCES>>>\nShort sentences.\n<<<END_PREFERENCES>>>");
+  });
+
+  it("free route: autocomplete and selection still send v1 tasks, exactly as before", async () => {
+    const proxy = await startFakeAiProxy();
+    cleanups.push(() => proxy.close());
+    const service = new WritingAiService(await userDataDir(), {
+      isPackaged: false,
+      env: { ILIAD_AI_PROXY_URL: proxy.url },
+      clientVersion: "0.4.0",
+      diagnostics: quietDiagnostics()
+    });
+    await handleAutocompleteIpc(event, contextRequest, deps(service));
+    const generate = proxy.requests.find((request) => request.path === "/v1/generate");
+    expect(generate?.body).toEqual({
+      v: 1, task: "autocomplete", language: "en", kind: "sentence", extend: false, prefix: "She walked into the ", suffix: "",
+      documentTitle: "a", headingPath: ["Harbor", "Morning"], nearbyHeadings: [], direction: "", avoid: []
+    });
+  });
+
+  it("rejects preferences over the limit as too_long before any request", async () => {
+    const { service, groq } = await ownKeyService((_request, _body, response) => groqStream(response, "x"));
+    const preferences = "p".repeat(1001);
+    expect(await handleAutocompleteIpc(event, { ...contextRequest, preferences }, deps(service))).toEqual({ ok: false, reason: "too_long" });
+    expect(await handleTightenIpc(event, { requestId: "t", text: TEXT, selection: { from: 16, to: 29 }, language: "en", preferences }, { service, controllers: new Map() })).toEqual({ ok: false, reason: "too_long" });
+    expect(groq.seen).toHaveLength(0);
+  });
+
+  it("✦ AI edit: sends the reference and the passage separately and rejects an answer copying the reference", async () => {
+    const distant = "The Kestrel Point lighthouse was decommissioned in 1987 after the new radar station opened.";
+    const doc = `# Harbor\n\n${distant}\n\n${TEXT}\n\nEnd.`;
+    const selectionFrom = doc.indexOf(TEXT) + 16;
+    const request = {
+      requestId: "t2", text: TEXT, selection: { from: 16, to: 29 }, language: "en", mode: "edit", instruction: "Expand.",
+      document: { text: doc, selectionFrom, selectionTo: selectionFrom + 13 }, preferences: "Plain words."
+    };
+    const echo = await ownKeyService((_request, _body, response) => groqStream(response, `wordy. ${distant}`));
+    expect(await handleTightenIpc(event, request, { service: echo.service, controllers: new Map() })).toEqual({ ok: false, reason: "provider" });
+    const user = (echo.groq.seen[0].body as { messages: Array<{ content: string }> }).messages[1].content;
+    expect(user).toContain(`<<<REFERENCE>>>\n# Harbor\n\n${distant}\n\n<<<PASSAGE>>>\n\nEnd.\n<<<END_REFERENCE>>>`);
+    expect(user).toContain("<<<EDITABLE_PASSAGE>>>\nThis passage is <<<ILIAD_TIGHTEN_SELECTION_START>>>rather wordy.<<<ILIAD_TIGHTEN_SELECTION_END>>>\n<<<END_EDITABLE_PASSAGE>>>");
+
+    const fine = await ownKeyService((_request, _body, response) => groqStream(response, "rather long-winded."));
+    expect(await handleTightenIpc(event, request, { service: fine.service, controllers: new Map() })).toEqual({
+      ok: true,
+      rewrite: "This passage is rather long-winded.",
+      unchanged: false
+    });
+  });
+});
+
 describe("Groq key IPC (validated before saving)", () => {
   const trusted = { sender: { id: 1 }, senderFrame: { url: "file:///app/index.html" } } as never;
 

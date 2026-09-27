@@ -5,6 +5,7 @@ import { buildAutocompleteContext, type BlockedLineRange } from "../writingAssis
 import type { IdeaAutocompleteFailureReason, IdeaAutocompleteResult } from "../../types/iliad";
 import { defaultAutocompletePreferences, type AutocompletePreferences } from "./options";
 import { recordAutocompleteMetric } from "./metrics";
+import { autocompleteDocumentSnapshot, autocompleteSnapshotIsCurrent, type AutocompleteDocumentSnapshot } from "../aiRequestSnapshot";
 
 /**
  * Suggestions come only on request: the length keys (sentence, paragraph,
@@ -37,6 +38,10 @@ export interface IdeaAutocompleteRequestPayload {
   suggestionKind: IdeaAutocompleteSuggestionKind;
   /** The prefix ends with the visible, unaccepted suggestion, which the model continues. */
   extend?: boolean;
+  /** The full current document at request time and the cursor (spec 2026-09-27); main trims it. */
+  document?: AutocompleteDocumentSnapshot;
+  /** Writer's preferences, trimmed; omitted when empty. */
+  preferences?: string;
 }
 
 export interface IdeaAutocompleteExtensionOptions {
@@ -48,6 +53,8 @@ export interface IdeaAutocompleteExtensionOptions {
   documentRelativePath?: string;
   documentTitle: string;
   blockedLineRanges?: readonly BlockedLineRange[];
+  /** Read at request time, so editing preferences never rebuilds the extension. */
+  writingPreferences?: () => string | undefined;
   requestAutocomplete: (request: IdeaAutocompleteRequestPayload) => Promise<IdeaAutocompleteResult>;
   cancelAutocomplete: (requestId: string) => void;
   onStatusChange?: (status: IdeaAutocompleteStatus) => void;
@@ -413,9 +420,12 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           includePreviousBlockOnShortPrefix: true,
           blockedLineRanges: options.blockedLineRanges
         };
-        const context = buildAutocompleteContext(this.view.state.doc.toString(), selection.from, contextOptions);
+        const documentText = this.view.state.doc.toString();
+        const context = buildAutocompleteContext(documentText, selection.from, contextOptions);
+        // The whole document, captured now; the answer is discarded if it changes.
+        const snapshot = autocompleteDocumentSnapshot(documentText, selection.from);
 
-        if (!context) {
+        if (!context || !snapshot) {
           this.setStatus({ state: "idle" });
           return;
         }
@@ -456,7 +466,9 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
             suggestionKind,
             extend: Boolean(base),
             direction,
-            avoid: base ? [] : previousVariants
+            avoid: base ? [] : previousVariants,
+            document: snapshot,
+            preferences: options.writingPreferences?.()
           });
 
           if (this.inFlightRequestId !== requestId) {
@@ -490,9 +502,15 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           }
 
           const latestSelection = this.view.state.selection.main;
-          const latestContext = buildAutocompleteContext(this.view.state.doc.toString(), latestSelection.from, contextOptions);
+          const latestText = this.view.state.doc.toString();
+          const latestContext = buildAutocompleteContext(latestText, latestSelection.from, contextOptions);
 
           if (
+            !autocompleteSnapshotIsCurrent(snapshot, {
+              text: latestText,
+              cursor: latestSelection.from,
+              selectionEmpty: latestSelection.empty && this.view.state.selection.ranges.length === 1
+            }) ||
             !latestSelection.empty ||
             latestSelection.from !== selection.from ||
             !latestContext ||

@@ -1,5 +1,11 @@
 import { app, ipcMain } from "electron";
 import type { IpcMainInvokeEvent } from "electron";
+import {
+  WritingAiTooLongError,
+  normalizeSelectionDocument,
+  validateWritingPreferences,
+  type SelectionDocumentSnapshot
+} from "../writing/aiTasks.js";
 import { normalizeAgentError } from "../writing/errors.js";
 import { WritingAiService } from "../writing/writingAiService.js";
 import {
@@ -7,11 +13,13 @@ import {
   cleanTightenOutput,
   isTightenUnchanged,
   looksLikePreambleEcho,
+  looksLikeReferenceEcho,
   looksLikeTightenContextEcho,
   mergeTightenSelectionRewrite,
   normalizeTightenLanguage,
   normalizeTightenMode,
   normalizeTightenSelectionRange,
+  referenceTextForEchoCheck,
   tightenSelectedText,
   tightenReasonFromAgentError,
   validateTightenInstruction,
@@ -32,6 +40,8 @@ interface TightenRequest {
   selection?: unknown;
   mode?: unknown;
   instruction?: unknown;
+  document?: unknown;
+  preferences?: unknown;
 }
 
 interface TightenRuntimeService {
@@ -42,6 +52,8 @@ interface TightenRuntimeService {
     language: TightenLanguage;
     mode?: TightenMode;
     instruction?: string;
+    document?: SelectionDocumentSnapshot;
+    preferences?: string;
     signal: AbortSignal;
   }): Promise<string>;
 }
@@ -103,6 +115,13 @@ export async function handleTightenIpc(
     return { ok: false, reason: instruction.reason };
   }
 
+  const preferences = validateWritingPreferences(request?.preferences);
+
+  if (!preferences.ok) {
+    return { ok: false, reason: preferences.reason };
+  }
+
+  const documentSnapshot = normalizeSelectionDocument(request?.document);
   const text = validation.text;
   const key = senderControllerKey(event.sender.id, request?.requestId);
   const requestId = typeof request?.requestId === "string" && request.requestId ? request.requestId : "anon";
@@ -134,6 +153,8 @@ export async function handleTightenIpc(
         language,
         mode,
         instruction: instruction.instruction,
+        document: documentSnapshot,
+        preferences: preferences.preferences,
         signal: controller.signal
       }),
       selectedText
@@ -143,13 +164,15 @@ export async function handleTightenIpc(
     if (
       !selectedRewrite.trim() ||
       looksLikePreambleEcho(selectedRewrite, selectedText) ||
-      looksLikeTightenContextEcho(selectedRewrite, text, selection)
+      looksLikeTightenContextEcho(selectedRewrite, text, selection) ||
+      looksLikeReferenceEcho(selectedRewrite, referenceTextForEchoCheck(text, selection, documentSnapshot), selectedText)
     ) {
       return { ok: false, reason: "provider" };
     }
 
     return { ok: true, rewrite, unchanged: isTightenUnchanged(rewrite, text) };
   } catch (error) {
+    if (error instanceof WritingAiTooLongError) return { ok: false, reason: "too_long" };
     const agentError = normalizeAgentError(error, { wasCanceled: controller.signal.aborted });
     const reason = tightenReasonFromAgentError(agentError, timedOut);
     // `resetAt` (from the proxy) reaches the renderer only with the "out" reason.

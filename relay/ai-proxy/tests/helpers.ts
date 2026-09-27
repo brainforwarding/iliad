@@ -377,6 +377,35 @@ export function autocompleteTask(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** A prompt v2 completion: the whole document with the cursor marked. */
+export function autocompleteTaskV2(overrides: Record<string, unknown> = {}) {
+  return {
+    v: 2,
+    task: "autocomplete",
+    language: "en",
+    kind: "sentence",
+    extend: false,
+    documentTitle: "Notes",
+    headingPath: ["Chapter one"],
+    direction: "",
+    avoid: [],
+    document: "# Chapter one\n\nThe harbor was quiet that morning, and <<<CURSOR>>>\n\n# Chapter two\n\nMara left.",
+    outline: "# Chapter one  ← cursor\n# Chapter two",
+    preferences: "Short sentences.",
+    ...overrides
+  };
+}
+
+/** A prompt v2 ✦ AI edit: the passage plus the read-only reference document. */
+export function selectionTaskV2(overrides: Record<string, unknown> = {}) {
+  return {
+    ...selectionTask({ v: 2 }),
+    document: "# Plan\n\nMara leads the Kestrel project.\n\n<<<PASSAGE>>>\n\nNext steps follow.",
+    preferences: "",
+    ...overrides
+  };
+}
+
 export function nameTask(overrides: Record<string, unknown> = {}) {
   return {
     v: 2,

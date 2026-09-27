@@ -7,7 +7,15 @@ import { ProxyEndpointResolver, parseDevProxyUrl } from "./groq/endpoint.js";
 import { InstallTokenStore } from "./groq/installToken.js";
 import { GroqKeyStore, type GroqKeyStateName, type SafeStorageLike } from "./groq/keyStore.js";
 import { createAutocompletePartialEmitter } from "./groq/partials.js";
-import { GROQ_MODEL, TASK_PROMPT_VERSIONS, parseWritingAiTask, type WritingAiTask } from "./groq/prompts/index.js";
+import {
+  GROQ_MODEL,
+  parseWritingAiTask,
+  promptVersionFor,
+  type PromptVersion,
+  type WritingAiTask,
+  type WritingAiTaskKind
+} from "./groq/prompts/index.js";
+import { buildAutocompleteTask, buildSelectionTask, type SelectionDocumentSnapshot } from "./aiTasks.js";
 import { IliadAiProxyClient } from "./groq/proxyClient.js";
 import { containsReasoningMarkers } from "./groq/sse.js";
 import type { TightenLanguage, TightenMode, TightenSelectionRange } from "./tighten.js";
@@ -38,6 +46,10 @@ export interface TightenSelectionRequest {
   language: TightenLanguage;
   mode?: TightenMode;
   instruction?: string;
+  /** The full document with the absolute selection (read-only reference on v2). */
+  document?: SelectionDocumentSnapshot;
+  /** Validated writing preferences; "" or undefined = none. */
+  preferences?: string;
   signal: AbortSignal;
 }
 
@@ -129,22 +141,23 @@ export class WritingAiService {
   }
 
   async autocompleteIdea(request: IdeaAutocompleteTextRequest): Promise<string> {
-    const task = checkedTask({
-      v: TASK_PROMPT_VERSIONS.autocomplete,
-      task: "autocomplete",
-      language: request.language,
-      kind: request.suggestionKind,
-      extend: request.extend === true,
-      prefix: request.prefix,
-      suffix: request.suffix,
-      documentTitle: request.documentTitle,
-      headingPath: request.headingPath,
-      nearbyHeadings: request.nearbyHeadings,
-      direction: request.direction ?? "",
-      avoid: request.avoid ?? []
-    });
+    const build = (version: PromptVersion) =>
+      buildAutocompleteTask(version, {
+        language: request.language,
+        kind: request.suggestionKind,
+        extend: request.extend === true,
+        prefix: request.prefix,
+        suffix: request.suffix,
+        documentTitle: request.documentTitle,
+        headingPath: request.headingPath,
+        nearbyHeadings: request.nearbyHeadings,
+        direction: request.direction ?? "",
+        avoid: request.avoid ?? [],
+        document: request.document,
+        preferences: request.preferences
+      });
     const emitPartial = request.onPartial ? createAutocompletePartialEmitter(request.onPartial) : null;
-    const result = await this.run("autocomplete", request.signal, task, emitPartial ? (_delta, text) => emitPartial(text) : undefined, {
+    const result = await this.run("autocomplete", request.signal, "autocomplete", build, emitPartial ? (_delta, text) => emitPartial(text) : undefined, {
       suggestionKind: request.suggestionKind
     });
 
@@ -156,16 +169,17 @@ export class WritingAiService {
 
   async tightenSelection(request: TightenSelectionRequest): Promise<string> {
     const mode = request.mode ?? "tighten";
-    const task = checkedTask({
-      v: TASK_PROMPT_VERSIONS.selection,
-      task: "selection",
-      language: request.language,
-      mode,
-      ...(mode === "edit" ? { instruction: request.instruction ?? "" } : {}),
-      text: request.text,
-      selection: { from: request.selection.from, to: request.selection.to }
-    });
-    const result = await this.run("selection_ai", request.signal, task, undefined, { mode });
+    const build = (version: PromptVersion) =>
+      buildSelectionTask(version, {
+        language: request.language,
+        mode,
+        ...(mode === "edit" ? { instruction: request.instruction ?? "" } : {}),
+        text: request.text,
+        selection: { from: request.selection.from, to: request.selection.to },
+        document: request.document,
+        preferences: request.preferences
+      });
+    const result = await this.run("selection_ai", request.signal, "selection", build, undefined, { mode });
 
     switch (result.finishReason) {
       case "stop":
@@ -197,13 +211,12 @@ export class WritingAiService {
    * markers is returned; anything else throws.
    */
   async suggestName(request: { language: DocumentNameLanguage; text: string }, signal: AbortSignal): Promise<string> {
-    const task = checkedTask({
-      v: TASK_PROMPT_VERSIONS.name,
-      task: "name",
-      language: request.language,
-      text: request.text
-    });
-    const result = await this.run("document_name", signal, task, undefined, {});
+    const build = (version: PromptVersion): WritingAiTask => {
+      // `name` exists only from v2 on.
+      if (version < 2) throw new Error("name task needs prompt v2");
+      return { v: 2, task: "name", language: request.language, text: request.text };
+    };
+    const result = await this.run("document_name", signal, "name", build, undefined, {});
 
     if (result.finishReason === "stop" && !containsReasoningMarkers(result.text)) return result.text;
     if (result.finishReason === "content_filter") {
@@ -231,7 +244,8 @@ export class WritingAiService {
   private async run(
     area: "autocomplete" | "selection_ai" | "document_name",
     signal: AbortSignal,
-    task: WritingAiTask,
+    taskKind: WritingAiTaskKind,
+    buildTask: (version: PromptVersion) => WritingAiTask,
     onDelta: ((delta: string, text: string) => void) | undefined,
     details: Record<string, string>
   ): Promise<GroqStreamResult> {
@@ -241,6 +255,11 @@ export class WritingAiService {
     try {
       // An unreadable own key blocks AI: never sent through the free proxy.
       if (!route.route) throw keyUnreadableError();
+      // The version is resolved after the route (own key → v2; free → per task
+      // until the Worker with v2 is deployed). `promptVersionFor` is temporary.
+      const promptVersion = promptVersionFor(route.route.kind, taskKind);
+      details = { ...details, promptVersion: String(promptVersion) };
+      const task = checkedTask(buildTask(promptVersion));
       const result = await streamGroqText({ route: route.route, task, signal, onDelta, fetchImpl: this.fetchImpl });
       // Diagnostics: codes, counts and timings only — never text, keys, tokens or bodies.
       this.diagnostics.info({

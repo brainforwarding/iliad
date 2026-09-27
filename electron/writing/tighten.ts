@@ -227,6 +227,84 @@ export function looksLikeTightenContextEcho(rewrite: string, originalText: strin
   return contextSnippetEchoed(cleaned, prefixContext, "end") || contextSnippetEchoed(cleaned, suffixContext, "start");
 }
 
+/** A copied run this long (whitespace collapsed) from outside the selection rejects the answer. */
+export const REFERENCE_ECHO_MIN_RUN_CHARS = 60;
+/** …or copied windows covering this share of an answer at least REFERENCE_ECHO_MIN_RUN_CHARS long. */
+export const REFERENCE_ECHO_MAX_SHARE = 0.5;
+const REFERENCE_ECHO_WINDOW_CHARS = 30;
+/** Around the passage and at the start, the reference checked is a superset of what the model can see. */
+const REFERENCE_ECHO_SPAN_CHARS = 50000;
+
+/**
+ * The text outside the selection an answer must not copy: the passage's
+ * surrounding context and, when the renderer sent the document, the document
+ * start and the text around the passage (a bounded superset of the reference
+ * the model saw). Parts are joined by a line break so no run spans a gap.
+ */
+export function referenceTextForEchoCheck(
+  passageText: string,
+  selection: TightenSelectionRange,
+  documentSnapshot?: { text: string; selectionFrom: number; selectionTo: number }
+): string {
+  const focus = normalizeTightenSelectionRange(passageText, selection);
+  const parts = [passageText.slice(0, focus.from), passageText.slice(focus.to)];
+
+  if (documentSnapshot) {
+    const { text, selectionFrom, selectionTo } = documentSnapshot;
+    const startEnd = Math.min(selectionFrom, REFERENCE_ECHO_SPAN_CHARS);
+    const nearFrom = Math.max(startEnd, selectionFrom - REFERENCE_ECHO_SPAN_CHARS);
+    parts.push(text.slice(0, startEnd), text.slice(nearFrom, selectionFrom), text.slice(selectionTo, selectionTo + REFERENCE_ECHO_SPAN_CHARS));
+  }
+
+  return parts.filter(Boolean).join("\n");
+}
+
+/**
+ * Edit scope guard (spec 2026-09-27 Review): the answer replaces only the
+ * selection, so one that copies substantial text from elsewhere — a run of
+ * REFERENCE_ECHO_MIN_RUN_CHARS or more, or copied windows over half of it —
+ * is rejected. Text also present in the selection itself never counts.
+ * Whitespace is collapsed before comparing.
+ */
+export function looksLikeReferenceEcho(rewrite: string, reference: string, selectedText: string): boolean {
+  const size = REFERENCE_ECHO_WINDOW_CHARS;
+  const answer = collapseWhitespace(rewrite);
+  if (answer.length < size) return false;
+  const outside = collapseWhitespace(reference);
+  if (outside.length < size) return false;
+
+  const selected = new Set(windowsOf(collapseWhitespace(selectedText), size));
+  const referenceWindows = new Set(windowsOf(outside, size));
+  const covered = new Uint8Array(answer.length);
+  let run = 0;
+  let longestRun = 0;
+
+  for (let index = 0; index + size <= answer.length; index += 1) {
+    const window = answer.slice(index, index + size);
+    if (referenceWindows.has(window) && !selected.has(window)) {
+      covered.fill(1, index, index + size);
+      run += 1;
+      longestRun = Math.max(longestRun, run + size - 1);
+    } else {
+      run = 0;
+    }
+  }
+
+  if (longestRun >= REFERENCE_ECHO_MIN_RUN_CHARS) return true;
+  const coveredChars = covered.reduce((sum, value) => sum + value, 0);
+  return answer.length >= REFERENCE_ECHO_MIN_RUN_CHARS && coveredChars / answer.length >= REFERENCE_ECHO_MAX_SHARE;
+}
+
+function collapseWhitespace(text: string) {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function windowsOf(text: string, size: number): string[] {
+  const windows: string[] = [];
+  for (let index = 0; index + size <= text.length; index += 1) windows.push(text.slice(index, index + size));
+  return windows;
+}
+
 /**
  * Trailing-whitespace/line-ending normalization only — interior whitespace
  * (including hard-break trailing spaces) is significant and never collapsed.

@@ -185,6 +185,8 @@ const api = {
     selection?: { from: number; to: number };
     instruction?: string;
     language: string;
+    document?: { text: string; selectionFrom: number; selectionTo: number };
+    preferences?: string;
   }) => invoke("tighten:run", request),
   cancelTighten: (requestId: string) => {
     void invoke("tighten:cancel", requestId);
@@ -209,6 +211,8 @@ const api = {
     extend?: boolean;
     direction?: string;
     avoid?: string[];
+    document?: { text: string; cursor: number };
+    preferences?: string;
   }) => invoke("autocomplete:run", request),
   onAutocompletePartial: (listener: (event: { requestId: string; insert: string }) => void) => {
     const handler = (_event: IpcRendererEvent, event: { requestId: string; insert: string }) => listener(event);

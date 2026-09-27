@@ -10,6 +10,7 @@ import { recordShortcutKeyDown, type ShortcutRecording } from "../../editor/idea
 import type { AppStrings } from "../../i18n/strings";
 import type { GroqKeyState, SetGroqKeyResult } from "../../types/iliad";
 import { RowCopy } from "./SettingsRow";
+import { WRITING_PREFERENCES_COUNT_FROM, WRITING_PREFERENCES_MAX_CHARS } from "../../preferences/writingPreferences";
 
 export const GROQ_KEY_URL = "https://console.groq.com/keys";
 
@@ -18,6 +19,11 @@ interface WritingAssistsSettingsProps {
   preferences: AutocompletePreferences;
   onPreferencesChange: (preferences: AutocompletePreferences) => void;
   onResetShortcuts: () => void;
+  /** The writer's preferences text box value (app data, never Markdown). */
+  writingPreferences: string;
+  onWritingPreferencesChange: (value: string) => void;
+  /** Test/preview hook: render with the text box open. */
+  initialWritingPreferencesEditing?: boolean;
   correctorEnabled: boolean;
   autocompleteEnabled: boolean;
   correctorAvailable: boolean;
@@ -93,6 +99,73 @@ function SwitchRow({
         <span />
       </span>
     </button>
+  );
+}
+
+/**
+ * "Writing preferences" (spec 2026-09-27, Figma 19): a row with Add/Edit and
+ * no preview; the link opens a text box in place, saved as you type, with a
+ * count only near the limit. Independent of the Autocomplete switch (✦ AI
+ * edits use it too).
+ */
+export function WritingPreferencesRow({
+  value,
+  labels,
+  onChange,
+  initialEditing = false
+}: {
+  value: string;
+  labels: Pick<AppStrings["writingAssists"], "writingPreferences" | "writingPreferencesAdd" | "writingPreferencesEdit" | "writingPreferencesDone" | "writingPreferencesCount">;
+  onChange: (value: string) => void;
+  initialEditing?: boolean;
+}) {
+  const [editing, setEditing] = useState(initialEditing);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (editing) textareaRef.current?.focus();
+  }, [editing]);
+
+  if (!editing) {
+    return (
+      <div className="writing-assist-row">
+        <RowCopy label={labels.writingPreferences} />
+        <button type="button" className="writing-assist-link" onClick={() => setEditing(true)}>
+          {value.trim() ? labels.writingPreferencesEdit : labels.writingPreferencesAdd}
+        </button>
+      </div>
+    );
+  }
+
+  const count = value.length;
+  return (
+    <div className="writing-assist-row writing-preferences">
+      <label className="writing-assist-row-label" htmlFor="writing-preferences-text">
+        {labels.writingPreferences}
+      </label>
+      <button type="button" className="writing-assist-link" onClick={() => setEditing(false)}>
+        {labels.writingPreferencesDone}
+      </button>
+      <textarea
+        ref={textareaRef}
+        id="writing-preferences-text"
+        rows={4}
+        maxLength={WRITING_PREFERENCES_MAX_CHARS}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            setEditing(false);
+          }
+        }}
+      />
+      {count >= WRITING_PREFERENCES_COUNT_FROM ? (
+        <span className="writing-assist-row-note writing-preferences-count" aria-live="polite">
+          {labels.writingPreferencesCount(count, WRITING_PREFERENCES_MAX_CHARS)}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -354,6 +427,9 @@ export function WritingAssistsSettings({
   preferences,
   onPreferencesChange,
   onResetShortcuts,
+  writingPreferences,
+  onWritingPreferencesChange,
+  initialWritingPreferencesEditing,
   labels,
   correctorEnabled,
   autocompleteEnabled,
@@ -383,6 +459,8 @@ export function WritingAssistsSettings({
   }, [isRecording]);
   return (
     <div className="settings-rows">
+      <WritingPreferencesRow value={writingPreferences} labels={labels} onChange={onWritingPreferencesChange}
+        initialEditing={initialWritingPreferencesEditing} />
       <SwitchRow
         label={labels.corrector}
         checked={correctorAvailable && correctorEnabled}

@@ -5,8 +5,11 @@ import {
   cleanTightenOutput,
   editInstruction,
   isTightenUnchanged,
+  REFERENCE_ECHO_MIN_RUN_CHARS,
   looksLikePreambleEcho,
+  looksLikeReferenceEcho,
   mergeTightenSelectionRewrite,
+  referenceTextForEchoCheck,
   normalizeTightenLanguage,
   normalizeTightenMode,
   normalizeTightenSelectionRange,
@@ -297,5 +300,48 @@ describe("tightenReasonFromAgentError", () => {
   it("maps everything else to provider", () => {
     expect(tightenReasonFromAgentError(agentError("provider_unavailable"), false)).toBe("provider");
     expect(tightenReasonFromAgentError(agentError("unknown"), false)).toBe("provider");
+  });
+});
+
+describe("reference echo guard (edit scope, spec 2026-09-27)", () => {
+  const distant = "The Kestrel Point lighthouse was decommissioned in 1987 after the new radar station opened on the ridge.";
+  const passage = "Mara walked to the light, slowly.";
+  const documentText = `# Harbor\n\n${distant}\n\n## Later\n\nMany things happened.\n\n${passage}\n\nThe end.`;
+  const selectionFrom = documentText.indexOf(passage);
+  const snapshot = { text: documentText, selectionFrom, selectionTo: selectionFrom + passage.length };
+  const reference = referenceTextForEchoCheck(passage, { from: 0, to: passage.length }, snapshot);
+
+  it("rejects an answer that copies a distant paragraph of the reference", () => {
+    expect(looksLikeReferenceEcho(`Mara walked to the light. ${distant}`, reference, passage)).toBe(true);
+    // Whitespace changes do not hide the copy.
+    expect(looksLikeReferenceEcho(distant.replace(/ /g, "\n  "), reference, passage)).toBe(true);
+  });
+
+  it("rejects an answer made mostly of shorter copied runs", () => {
+    // Two 45-char runs: each under REFERENCE_ECHO_MIN_RUN_CHARS, together most of the answer.
+    expect(45).toBeLessThan(REFERENCE_ECHO_MIN_RUN_CHARS);
+    expect(looksLikeReferenceEcho(`${distant.slice(0, 45)} ${distant.slice(55, 100)}`, reference, passage)).toBe(true);
+  });
+
+  it("accepts a normal rewrite, even one reusing names and short phrases", () => {
+    expect(looksLikeReferenceEcho("Mara crossed to the Kestrel Point lighthouse, step by careful step.", reference, passage)).toBe(false);
+    expect(looksLikeReferenceEcho("Slowly, Mara walked toward the light.", reference, passage)).toBe(false);
+  });
+
+  it("never counts text that is also in the selection", () => {
+    const repeated = "This refrain appears in the chorus and again in the final verse of the song.";
+    const docWithRepeat = `${repeated}\n\n${repeated}`;
+    const from = docWithRepeat.lastIndexOf(repeated);
+    const ref = referenceTextForEchoCheck(repeated, { from: 0, to: repeated.length }, { text: docWithRepeat, selectionFrom: from, selectionTo: from + repeated.length });
+    expect(looksLikeReferenceEcho(`${repeated} Now louder.`, ref, repeated)).toBe(false);
+  });
+
+  it("without a document, checks the passage's own context", () => {
+    const context = "This is a long piece of surrounding context that should never come back in the answer text.";
+    const text = `${context} Short selected bit.`;
+    const selection = { from: context.length + 1, to: text.length };
+    const ref = referenceTextForEchoCheck(text, selection);
+    expect(looksLikeReferenceEcho(`Tiny bit. ${context}`, ref, "Short selected bit.")).toBe(true);
+    expect(looksLikeReferenceEcho("A tiny selected bit.", ref, "Short selected bit.")).toBe(false);
   });
 });

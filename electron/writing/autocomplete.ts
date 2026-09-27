@@ -1,3 +1,4 @@
+import type { AutocompleteDocumentSnapshot } from "./aiTasks.js";
 import type { AgentError } from "./errors.js";
 import {
   AUTOCOMPLETE_MAX_IDEA_OUTPUT_CHARS,
@@ -39,6 +40,10 @@ export interface IdeaAutocompleteTextRequest {
   extend?: boolean;
   direction?: string;
   avoid?: string[];
+  /** The full current document at request time (no draft) and the cursor. */
+  document?: AutocompleteDocumentSnapshot;
+  /** Validated writing preferences; "" or undefined = none. */
+  preferences?: string;
   onPartial?: (raw: string) => void;
   signal: AbortSignal;
 }

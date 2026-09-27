@@ -79,3 +79,24 @@ export const NAME_MAX_INPUT_CHARS = 1500;
 export const NAME_MAX_OUTPUT_CHARS = 80;
 /** Reasoning headroom plus a short title (bounds reasoning + content on gpt-oss). */
 export const GROQ_NAME_MAX_COMPLETION_TOKENS = 512;
+
+// Whole-document context and writing preferences (prompt v2 `autocomplete` and
+// `selection`; spec 2026-09-27-ai-context-and-preferences.md, Review).
+/**
+ * One shared maximum for the UTF-8 length of `JSON.stringify(task)` — the
+ * free route's request body. Safely below the Worker's 64 KiB body limit
+ * (`MAX_BODY_BYTES`); main trims the document to fit it and fails as
+ * `too_long` when the non-document fields alone don't.
+ */
+export const WRITING_AI_MAX_TASK_BYTES = 56 * 1024;
+/** The trimmed document (markers included) is at most this many UTF-16 code units. */
+export const WRITING_AI_MAX_DOCUMENT_CHARS = 40000;
+/** Of the document budget, the document start gets at most this many bytes before the text nearest the cursor/passage. */
+export const WRITING_AI_DOCUMENT_START_BYTES = 6 * 1024;
+/** Document outline (headings only): at most this many headings and UTF-8 bytes. */
+export const WRITING_AI_MAX_OUTLINE_HEADINGS = 80;
+export const WRITING_AI_MAX_OUTLINE_BYTES = 4096;
+/** Each outline heading's text is cut to this many chars. */
+export const WRITING_AI_MAX_OUTLINE_HEADING_CHARS = 120;
+/** Writing preferences (Settings → Writing): trimmed, at most this many chars; rejected over it (never sliced). */
+export const WRITING_PREFERENCES_MAX_CHARS = 1000;

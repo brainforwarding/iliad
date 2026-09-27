@@ -71,7 +71,7 @@ function walk(entry: string) {
 describe("prompts/ purity", () => {
   it("imports nothing outside prompts/ and uses no Node, Electron or DOM globals", () => {
     const { files, problems } = walk(ENTRY);
-    expect(files).toEqual(["index.ts", "limits.ts", "v1.ts", "v2.ts"]);
+    expect(files).toEqual(["context.ts", "index.ts", "limits.ts", "v1.ts", "v2.ts"]);
     expect(problems).toEqual([]);
   });
 

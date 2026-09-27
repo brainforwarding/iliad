@@ -246,6 +246,14 @@ export interface TightenSelectionRequest {
   selection?: { from: number; to: number };
   instruction?: string;
   language: "en" | "es";
+  /**
+   * Full current document captured at request time, with the absolute
+   * selection range; read-only reference for consistency (spec 2026-09-27).
+   * Main trims it to the byte budget.
+   */
+  document?: { text: string; selectionFrom: number; selectionTo: number };
+  /** Writer's preferences (trimmed, ≤ 1,000 characters); omitted when empty. */
+  preferences?: string;
 }
 
 export type TightenFailureReason =
@@ -325,6 +333,13 @@ export interface IdeaAutocompleteRequest {
   suggestionKind?: "sentence" | "paragraph" | "idea";
   /** The prefix ends with the visible, unaccepted suggestion being extended. */
   extend?: boolean;
+  /**
+   * Full current document captured at request time plus the cursor offset
+   * (spec 2026-09-27). Main trims it to the byte budget and builds the outline.
+   */
+  document?: { text: string; cursor: number };
+  /** Writer's preferences (trimmed, ≤ 1,000 characters); omitted when empty. */
+  preferences?: string;
 }
 
 export type IdeaAutocompleteFailureReason =

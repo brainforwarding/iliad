@@ -5,6 +5,7 @@ import type { EditorView } from "@codemirror/view";
 import { EditorPane } from "../../src/components/EditorPane";
 import { WritingAssistsSettings } from "../../src/components/settings/WritingAssistsSettings";
 import { useAutocompletePreferences } from "../../src/preferences/autocompletePreferences";
+import { useWritingPreferences } from "../../src/preferences/writingPreferences";
 import { appStrings } from "../../src/i18n/strings";
 import type { IdeaAutocompleteRequest, IdeaAutocompleteResult, FileTreeNode } from "../../src/types/iliad";
 import "../../src/styles/app.css";
@@ -54,6 +55,7 @@ function Preview() {
   const [language, setLanguage] = useState<"en" | "es">("en");
   const strings = appStrings[language];
   const options = useAutocompletePreferences();
+  const writing = useWritingPreferences();
   const writingAssists = useMemo(() => ({
     correctorEnabled: false, autocompleteEnabled: enabled,
     workspaceSessionId: "preview", documentRelativePath: files[chapter].relativePath, language,
@@ -71,7 +73,8 @@ function Preview() {
         autocompleteEnabled={enabled} onSetAutocompleteEnabled={setEnabled}
         groqKey={{ state: "none", last4: null, rejected: false }} onSaveGroqKey={async () => ({ ok: true, state: { state: "none", last4: null, rejected: false } })} onGetGroqKey={() => undefined} onOpenPrivacy={() => undefined}
         preferences={options.preferences} onPreferencesChange={options.setPreferences}
-        onResetShortcuts={options.resetShortcuts} /></div></div> : null}
+        onResetShortcuts={options.resetShortcuts}
+        writingPreferences={writing.writingPreferences} onWritingPreferencesChange={writing.setWritingPreferences} /></div></div> : null}
       </div>
     </header>
     <EditorPane file={files[chapter]} value={text[chapter]} editorFontSize={19} editorFontPreset="serif" labels={strings.editor} review={null}

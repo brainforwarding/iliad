@@ -1,6 +1,6 @@
 # AI: whole-document context and writing preferences
 
-Date: 2026-09-27. Status: reviewed (Codex xhigh, 2026-09-27); waiting for naming to land. Branch: `premium-pass`.
+Date: 2026-09-27. Status: implemented and verified locally with an own Groq key (2026-09-27); free route stays on v1 until the Worker is deployed. Branch: `premium-pass`.
 Endpoint (owner): implemented and verified locally with an own Groq key; the
 proxy side is written and tested but **not deployed** (ships at release).
 Figma: `i2BTwgceho8SqRYGZKjLhB`, page "Writing preferences (2026-09-27)",
@@ -149,7 +149,17 @@ clearly worse, lower the cap.
 
 ## Progress
 
-- [ ] Spec reviewed
-- [ ] Context + prompts v2 + per-route versions + proxy
-- [ ] Writing preferences (store, settings UI, sent with requests)
-- [ ] Benchmark, live verification, docs
+- [x] Spec reviewed
+- [x] Context + prompts v2 + per-route versions + proxy
+- [x] Writing preferences (store, settings UI, sent with requests)
+- [x] Benchmark, live verification, docs
+
+Live QA (2026-09-27, own key, 9 requests): all 7 checks pass — a Full idea
+at the end of a 15k-character story used a name from section 1; preferences
+visibly shortened Paragraph/Longer/Rewrite (Sentence less so); ✦ AI Rewrite
+kept a term defined elsewhere and changed only the selection; Longer
+continued without repeating; typing during a request cancels it; AI is off in
+comments files; the free route still sends v1 (preferences have no effect
+there until the Worker is deployed). First visible word ~0.7–0.9 s on a
+16k-character document.
+

@@ -394,7 +394,7 @@ writer's Markdown in two ways, and both keep every change visible and
 reversible.
 
 **Built-in writing AI** works on the current document and the current selection
-only, runs on Groq (`openai/gpt-oss-120b`, `reasoning_effort: "low"`,
+only (the whole current document is context; nothing else is sent), runs on Groq (`openai/gpt-oss-120b`, `reasoning_effort: "low"`,
 streaming; `electron/writing/`), and is review-first: nothing lands in the
 buffer without Tab or Accept. Spec: `specs/2026-09-25-groq-ai-free-tier.md`
 (ADR-0023, proposed).
@@ -463,7 +463,48 @@ buffer without Tab or Accept. Spec: `specs/2026-09-25-groq-ai-free-tier.md`
   "Use my key" (free-route notices) or "Update key" (own key rejected or
   unreadable). Free "out" and key/connection notices set no cooldown: every
   request is explicit. ✦ AI is enabled with no key.
+- **Whole-document context and writing preferences** (prompt v2,
+  `specs/2026-09-27-ai-context-and-preferences.md`). The renderer sends, with
+  each completion and ✦ AI edit, a snapshot of the full current document
+  captured at request time (`document: { text, cursor }` for completions — the
+  document without a visible draft, the draft stays the tail of `prefix`;
+  `document: { text, selectionFrom, selectionTo }` for edits, omitted when the
+  safe passage no longer matches) and the writer's preferences (Settings →
+  Writing, app data, ≤ 1,000 characters). Main decides the rest
+  (`electron/writing/aiTasks.ts`): preferences are trimmed and rejected over
+  the limit (`too_long`, never sliced); the v2 task carries the document
+  trimmed to one shared byte budget — the UTF-8 length of
+  `JSON.stringify(task)` is at most `WRITING_AI_MAX_TASK_BYTES` (56 KiB,
+  below the Worker's 64 KiB body limit) and the document at most 40,000
+  characters — by the pure, deterministic `trimDocumentForContext`
+  (`prompts/context.ts`): the local window (completions) first, then the
+  document start (≤ 6 KiB), then the nearest text outward, `[…]` at gaps,
+  never splitting a surrogate pair, an oversized window → a cursor-centred
+  slice. Completions mark the cursor (`<<<CURSOR>>>`, with any draft being
+  extended re-inserted before it) and get the outline (`buildDocumentOutline`:
+  ATX headings outside front matter and fenced code, ≤ 80 headings and 4 KiB,
+  the cursor's section marked); edits get the rest of the document as a
+  read-only reference with the passage's place marked (`<<<PASSAGE>>>`) and
+  the editable passage in its own section. `<<<NAME>>>` delimiters inside
+  content are neutralized. Iliad's rules stay in the system message (they say
+  preferences cannot override the rules, output boundaries, the edit
+  instruction or the Steer direction); preferences, outline and document are
+  delimited user sections. Output rules, budgets and caps are v1's. Main adds
+  an edit scope guard (`looksLikeReferenceEcho` in `electron/writing/tighten.ts`):
+  an answer copying ≥ 60 contiguous characters (or copied windows over half of
+  it) from outside the selection is rejected; the existing echo guards and the
+  exact-text-before-accept check stay. Comments companions are never sent.
+- **Prompt versions per route** (temporary, `promptVersionFor(route, task)` in
+  `prompts/index.ts`, resolved in `WritingAiService.run` after the route):
+  own key → v2 for every task (built locally); free → v1 for autocomplete and
+  selection (built exactly as before, no document or preferences) and v2 for
+  `name`, until the Worker serving v2 is deployed; then the free route moves
+  to v2 and the split is removed (`docs/release.md`). The Worker parses every
+  version with the shared strict parser and reserves `UTF-8 prompt bytes +
+  PROMPT_OVERHEAD_TOKENS` input tokens, so the largest v2 body (~57 KB) reserves
+  about $0.011 at list prices before settling at actual usage.
 - Diagnostics (`autocomplete.ai.*`, `selection_ai.ai.*`) record route, model,
+  prompt version,
   timings, finish reason, output length and error codes, never text, keys,
   tokens or proxy bodies. Writing AI IPC is accepted only from trusted app
   windows (`electron/ipc/trust.ts`).

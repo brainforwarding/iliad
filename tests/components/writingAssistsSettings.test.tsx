@@ -13,7 +13,9 @@ function render({
   autocompleteEnabled = true,
   correctorAvailable = true,
   groqKey = FREE as GroqKeyState | null,
-  keyFieldFocusRequest = 0
+  keyFieldFocusRequest = 0,
+  writingPreferences = "",
+  editingPreferences = false
 } = {}) {
   const noop = () => undefined;
   return renderToStaticMarkup(
@@ -22,6 +24,8 @@ function render({
       autocompleteEnabled={autocompleteEnabled} onSetAutocompleteEnabled={noop}
       groqKey={groqKey} onSaveGroqKey={async () => ({ ok: true, state: FREE })} onGetGroqKey={noop} onOpenPrivacy={noop}
       keyFieldFocusRequest={keyFieldFocusRequest}
+      writingPreferences={writingPreferences} onWritingPreferencesChange={noop}
+      initialWritingPreferencesEditing={editingPreferences}
       preferences={defaultAutocompletePreferences} onPreferencesChange={noop} onResetShortcuts={noop} />
   );
 }
@@ -34,14 +38,14 @@ function rowLabels(html: string) {
 describe("Writing assists settings (Settings → Writing)", () => {
   it("lists every item as one row, in the spec order (EN)", () => {
     expect(rowLabels(render())).toEqual([
-      "Corrector", "Autocomplete", "✦ AI menu", "Sentence", "Paragraph", "Full idea",
+      "Writing preferences", "Corrector", "Autocomplete", "✦ AI menu", "Sentence", "Paragraph", "Full idea",
       "Accept", "Another", "Dismiss", "Reset shortcuts", "AI included", "Privacy"
     ]);
   });
 
   it("lists the same rows in Spanish", () => {
     expect(rowLabels(render({ language: "es" }))).toEqual([
-      "Corrector", "Autocompletar", "Menú ✦ IA", "Oración", "Párrafo", "Idea completa",
+      "Preferencias de escritura", "Corrector", "Autocompletar", "Menú ✦ IA", "Oración", "Párrafo", "Idea completa",
       "Aceptar", "Otra", "Descartar", "Restablecer atajos", "IA incluida", "Privacidad"
     ]);
   });
@@ -70,7 +74,7 @@ describe("Writing assists settings (Settings → Writing)", () => {
 
   it("shows key rows only while Autocomplete is on", () => {
     const labels = rowLabels(render({ autocompleteEnabled: false }));
-    expect(labels).toEqual(["Corrector", "Autocomplete", "AI included", "Privacy"]);
+    expect(labels).toEqual(["Writing preferences", "Corrector", "Autocomplete", "AI included", "Privacy"]);
   });
 
   it("notes the corrector's limit while it is unavailable", () => {
@@ -140,5 +144,52 @@ describe("Writing assists settings (Settings → Writing)", () => {
     const html = render() + render({ keyFieldFocusRequest: 1 }) + render({ groqKey: OWN_KEY }) + render({ language: "es", keyFieldFocusRequest: 1 });
     expect(html).not.toMatch(/gemini|codex|openai|fallback/i);
     expect(html).not.toMatch(/\d+ (left|requests|restantes)/i);
+  });
+
+  describe("Writing preferences row (Figma 19)", () => {
+    const link = (html: string) => html.match(/Writing preferences<\/span><\/span><button[^>]*class="writing-assist-link"[^>]*>([^<]*)</)?.[1]
+      ?? html.match(/Preferencias de escritura<\/span><\/span><button[^>]*class="writing-assist-link"[^>]*>([^<]*)</)?.[1];
+
+    it("is empty by default: Add, no note or preview, no text box (EN/ES)", () => {
+      const en = render();
+      expect(link(en)).toBe("Add");
+      expect(en).not.toContain("<textarea");
+      expect(link(render({ language: "es" }))).toBe("Añadir");
+    });
+
+    it("reads Edit once set, still without a preview of the text (EN/ES)", () => {
+      const text = "Plain, natural Spanish. Short sentences.";
+      const en = render({ writingPreferences: text });
+      expect(link(en)).toBe("Edit");
+      expect(en).not.toContain(text);
+      expect(link(render({ language: "es", writingPreferences: text }))).toBe("Editar");
+      // Whitespace alone is empty.
+      expect(link(render({ writingPreferences: "   \n" }))).toBe("Add");
+    });
+
+    it("stays visible and independent of the Autocomplete switch", () => {
+      expect(rowLabels(render({ autocompleteEnabled: false }))[0]).toBe("Writing preferences");
+      expect(link(render({ autocompleteEnabled: false, writingPreferences: "x" }))).toBe("Edit");
+    });
+
+    it("opens an inline text box with Done, limited to 1,000 characters (EN/ES)", () => {
+      const en = render({ editingPreferences: true, writingPreferences: "Keep my voice." });
+      expect(en).toMatch(/<label class="writing-assist-row-label" for="writing-preferences-text">Writing preferences<\/label>/);
+      expect(en).toMatch(/class="writing-assist-link"[^>]*>Done</);
+      expect(en).toContain('maxLength="1000"');
+      expect(en).toContain(">Keep my voice.</textarea>");
+      expect(en).not.toContain("writing-preferences-count");
+      const es = render({ language: "es", editingPreferences: true });
+      expect(es).toContain(">Preferencias de escritura</label>");
+      expect(es).toMatch(/>Listo</);
+    });
+
+    it("shows the count only near the limit", () => {
+      expect(render({ editingPreferences: true, writingPreferences: "a".repeat(899) })).not.toContain("writing-preferences-count");
+      const near = render({ editingPreferences: true, writingPreferences: "a".repeat(950) });
+      expect(near).toContain("writing-preferences-count");
+      expect(near).toContain(">950 / 1,000<");
+      expect(render({ language: "es", editingPreferences: true, writingPreferences: "a".repeat(1000) })).toContain(">1.000 / 1.000<");
+    });
   });
 });

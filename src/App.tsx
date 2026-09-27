@@ -64,6 +64,8 @@ import {
 import { TooltipLayer } from "./components/TooltipLayer";
 import { useWritingAssistPreferences } from "./preferences/writingAssistPreferences";
 import { useAutocompletePreferences } from "./preferences/autocompletePreferences";
+import { useWritingPreferences, writingPreferencesForRequest } from "./preferences/writingPreferences";
+import { builtInAiAssistsAllowed } from "./editor/aiRequestSnapshot";
 import type { EditorView } from "@codemirror/view";
 import type {
   FileTreeNode,
@@ -205,6 +207,12 @@ export default function App() {
   const { correctorEnabled, autocompleteEnabled, setCorrectorEnabled, setAutocompleteEnabled } =
     useWritingAssistPreferences();
   const autocompleteOptions = useAutocompletePreferences();
+  // Sent with autocomplete and ✦ AI edits only (never naming or the corrector);
+  // read at request time so typing in Settings never rebuilds the editor.
+  const { writingPreferences, setWritingPreferences } = useWritingPreferences();
+  const writingPreferencesRef = useRef(writingPreferences);
+  writingPreferencesRef.current = writingPreferences;
+  const requestWritingPreferences = useCallback(() => writingPreferencesForRequest(writingPreferencesRef.current), []);
   // Pinned sidebar. The hover peek (useSidebarPeek) is separate, transient state.
   const [sidebarOpen, setSidebarOpen] = useState(true);
   // Right-side top-row slot; EditorPane portals into it once it exists (stage 5).
@@ -1496,7 +1504,8 @@ export default function App() {
     [activeFileHasPendingReview, deleteSelectionComment, detachedComments, editorSelectionComments]
   );
   const editorTighten = useMemo<EditorTightenProps | undefined>(() => {
-    if (!activeFile || activeFile.kind !== "markdown" || editorFile !== activeFile) {
+    // No ✦ AI edits inside a comments companion (spec 2026-09-27).
+    if (!activeFile || activeFile.kind !== "markdown" || editorFile !== activeFile || !builtInAiAssistsAllowed(activeFile.path)) {
       return undefined;
     }
 
@@ -1516,11 +1525,13 @@ export default function App() {
           selection,
           language,
           mode: options?.mode,
-          instruction: options?.instruction
+          instruction: options?.instruction,
+          document: options?.document,
+          preferences: requestWritingPreferences()
         }),
       cancel: (requestId) => window.iliad.cancelTighten(requestId)
     };
-  }, [activeFile, aiRoute, editorFile, language, requestGroqKey, strings.editor.aiNotices, strings.editor.tighten]);
+  }, [activeFile, aiRoute, editorFile, language, requestGroqKey, requestWritingPreferences, strings.editor.aiNotices, strings.editor.tighten]);
   const editorWritingAssists = useMemo<EditorWritingAssistsProps | undefined>(() => {
     if (!activeFile || activeFile.kind !== "markdown" || editorFile !== activeFile) {
       return undefined;
@@ -1533,6 +1544,8 @@ export default function App() {
     return {
       correctorEnabled,
       autocompleteEnabled,
+      aiAssistsAvailable: builtInAiAssistsAllowed(activeFile.path),
+      writingPreferences: requestWritingPreferences,
       aiRoute,
       onRequestAiKey: requestGroqKey,
       preferences: autocompleteOptions.preferences,
@@ -1573,6 +1586,7 @@ export default function App() {
     correctorEnabled,
     aiRoute,
     requestGroqKey,
+    requestWritingPreferences,
     strings.editor.aiNotices,
     autocompleteOptions.preferences,
     editorFile,
@@ -1920,6 +1934,8 @@ export default function App() {
               preferences={autocompleteOptions.preferences}
               onPreferencesChange={autocompleteOptions.setPreferences}
               onResetShortcuts={autocompleteOptions.resetShortcuts}
+              writingPreferences={writingPreferences}
+              onWritingPreferencesChange={setWritingPreferences}
               labels={strings.writingAssists}
               correctorEnabled={correctorEnabled}
               autocompleteEnabled={autocompleteEnabled}

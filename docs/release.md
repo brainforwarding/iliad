@@ -122,10 +122,19 @@ production release gate is `npm audit --omit=dev --audit-level=high`.
 
 - [ ] **AI proxy Worker first.** If this release sends a prompt version the
   deployed Iliad AI proxy does not serve yet (prompt v2: naming untitled
-  documents, `TASK_PROMPT_VERSIONS.name = 2`), deploy the Worker
+  documents, `FREE_ROUTE_PROMPT_VERSIONS.name = 2`), deploy the Worker
   (`relay/ai-proxy`, `SUPPORTED_PROMPT_VERSIONS = "1,2"`) before shipping the
   app. Until then the free route answers `client_outdated` for v2 and naming
   silently does nothing (autocomplete and selection stay on v1).
+- [ ] **Then switch the free route to v2.** After deploying the Worker with
+  v2 (whole-document context and writing preferences,
+  `specs/2026-09-27-ai-context-and-preferences.md`), switch the free route to
+  v2 for every task and remove `promptVersionFor`'s split
+  (`FREE_ROUTE_PROMPT_VERSIONS` in `electron/writing/groq/prompts/index.ts`;
+  the own-key route already sends v2). Verify one free completion and one ✦
+  AI edit against the deployed Worker, and that the privacy wording (app
+  link target, website EN/ES, README) says the current document and the
+  writer's preferences are sent.
 
 ## macOS Signing And Notarization
 

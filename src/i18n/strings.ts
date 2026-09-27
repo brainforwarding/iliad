@@ -167,6 +167,11 @@ export const appStrings = {
       shortcutConflict: (row: string, key: string) => `${row} uses ${key} · ↵ swap · Esc cancel`,
       shortcutTaken: (key: string) => `${key} is taken`,
       shortcutNeedsModifier: (mac: boolean) => (mac ? "Add ⌘ or ⌃" : "Add Ctrl"),
+      writingPreferences: "Writing preferences",
+      writingPreferencesAdd: "Add",
+      writingPreferencesEdit: "Edit",
+      writingPreferencesDone: "Done",
+      writingPreferencesCount: (count: number, max: number) => `${count.toLocaleString("en-US")} / ${max.toLocaleString("en-US")}`,
       privacy: "Privacy", privacyUrl: "https://iliad.md/privacy/"
     },
     updates: {
@@ -537,6 +542,11 @@ export const appStrings = {
       shortcutConflict: (row: string, key: string) => `${row} usa ${key} · ↵ intercambiar · Esc cancelar`,
       shortcutTaken: (key: string) => `${key} ya está en uso`,
       shortcutNeedsModifier: (mac: boolean) => (mac ? "Añade ⌘ o ⌃" : "Añade Ctrl"),
+      writingPreferences: "Preferencias de escritura",
+      writingPreferencesAdd: "Añadir",
+      writingPreferencesEdit: "Editar",
+      writingPreferencesDone: "Listo",
+      writingPreferencesCount: (count: number, max: number) => `${count.toLocaleString("es-CL")} / ${max.toLocaleString("es-CL")}`,
       privacy: "Privacidad", privacyUrl: "https://iliad.md/es/privacidad/"
     },
     updates: {

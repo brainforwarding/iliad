@@ -1,16 +1,34 @@
 // Pure entry point of the versioned prompt module (no Node, Electron or DOM
-// imports). The app sends each task with the version pinned for it in
-// TASK_PROMPT_VERSIONS (not always the newest: autocomplete and selection stay
-// on v1 until a Worker serving v2 is deployed); the Iliad AI proxy Worker
-// serves every version it still lists in SUPPORTED_PROMPT_VERSIONS.
+// imports). The app sends each task with the version `promptVersionFor`
+// picks for its route (not always the newest: on the free route autocomplete
+// and selection stay on v1 until a Worker serving v2 is deployed); the Iliad
+// AI proxy Worker serves every version it still lists in
+// SUPPORTED_PROMPT_VERSIONS.
 // Spec: specs/2026-09-25-groq-ai-free-tier.md §2, §4;
-// specs/2026-09-27-name-untitled-documents.md (prompt v2, versions per task).
+// specs/2026-09-27-name-untitled-documents.md (prompt v2, versions per task);
+// specs/2026-09-27-ai-context-and-preferences.md (versions per route).
 
 import { GROQ_PINNED_PARAMS } from "./limits.js";
 import { buildPromptV1, parseWritingAiTaskV1, type TaskValidation, type WritingAiPrompt, type WritingAiTaskV1 } from "./v1.js";
 import { buildPromptV2, parseWritingAiTaskV2, type WritingAiTaskV2 } from "./v2.js";
 
 export * from "./limits.js";
+export {
+  CONTEXT_CURSOR_MARKER,
+  CONTEXT_OMISSION,
+  CONTEXT_PASSAGE_MARKER,
+  OUTLINE_CURSOR_MARK,
+  buildDocumentOutline,
+  collectOutlineHeadings,
+  containsPromptDelimiter,
+  jsonStringUtf8Bytes,
+  neutralizePromptDelimiters,
+  safeBoundary,
+  trimDocumentForContext,
+  type OutlineHeading,
+  type TrimDocumentInput,
+  type TrimmedDocument
+} from "./context.js";
 export {
   autocompleteMaxOutputChars,
   buildPromptV1,
@@ -29,7 +47,9 @@ export {
   type WritingLanguage
 } from "./v1.js";
 export {
+  autocompleteModelInputV2,
   buildPromptV2,
+  selectionModelInputV2,
   nameInstruction,
   nameModelInput,
   parseWritingAiTaskV2,
@@ -45,16 +65,33 @@ export type PromptVersion = WritingAiTask["v"];
 
 export const LATEST_PROMPT_VERSION = 2 as const satisfies PromptVersion;
 
+export type WritingAiTaskKind = WritingAiTask["task"];
+export type WritingAiRouteKind = "free" | "own-key";
+
 /**
- * The version the app sends for each task. Only `name` (new in v2) is sent as
- * v2, so a Worker without v2 support disables only document naming
- * (spec 2026-09-27 Review, "Versions per task").
+ * TEMPORARY — removed at release, once the Worker serving v2 is deployed
+ * (docs/release.md): then every route sends v2 and `promptVersionFor` goes.
+ *
+ * The version the free route sends per task. Only `name` (new in v2) is sent
+ * as v2 there, so the deployed Worker (v1 prompts for autocomplete/selection)
+ * keeps working and a Worker without v2 disables only document naming
+ * (specs 2026-09-27 name-untitled-documents and ai-context-and-preferences).
  */
-export const TASK_PROMPT_VERSIONS = Object.freeze({
+export const FREE_ROUTE_PROMPT_VERSIONS = Object.freeze({
   autocomplete: 1,
   selection: 1,
   name: 2
-} as const satisfies Record<WritingAiTask["task"], PromptVersion>);
+} as const satisfies Record<WritingAiTaskKind, PromptVersion>);
+
+/**
+ * The prompt version for a task, resolved after the route (spec 2026-09-27
+ * Review "Versions"): the own-key route builds prompts locally, so it always
+ * sends the newest; the free route follows FREE_ROUTE_PROMPT_VERSIONS.
+ * TEMPORARY: removed at release when everything is v2.
+ */
+export function promptVersionFor(route: WritingAiRouteKind, task: WritingAiTaskKind): PromptVersion {
+  return route === "own-key" ? LATEST_PROMPT_VERSION : FREE_ROUTE_PROMPT_VERSIONS[task];
+}
 
 const BUILDERS: { [V in PromptVersion]: (task: Extract<WritingAiTask, { v: V }>) => WritingAiPrompt } = {
   1: buildPromptV1,

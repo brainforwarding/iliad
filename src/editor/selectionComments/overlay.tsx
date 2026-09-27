@@ -1,4 +1,5 @@
 import type { EditorView, ViewUpdate } from "@codemirror/view";
+import { selectionDocumentSnapshot, type SelectionDocumentSnapshot } from "../aiRequestSnapshot";
 import {
   useCallback,
   useEffect,
@@ -88,7 +89,7 @@ export interface TightenOverlayApi {
     requestId: string,
     text: string,
     selection: { from: number; to: number },
-    options?: { mode?: "tighten" | "edit"; instruction?: string }
+    options?: { mode?: "tighten" | "edit"; instruction?: string; document?: SelectionDocumentSnapshot }
   ) => Promise<TightenResult>;
   cancel: (requestId: string) => void;
   onProposedRangeChange: (range: { from: number; to: number } | null) => void;
@@ -598,12 +599,16 @@ export function SelectionCommentsOverlay({
       to: safeRange.from + safeRange.selectedTo
     });
 
+    // The whole current document goes along as read-only reference, captured
+    // now (request time) from the editor (spec 2026-09-27).
+    const documentSnapshot = view ? selectionDocumentSnapshot(view.state.doc.toString(), safeRange) : undefined;
+
     activeTighten
       .run(
         requestId,
         safeRange.originalText,
         { from: safeRange.selectedFrom, to: safeRange.selectedTo },
-        mode === "edit" ? { mode: "edit", instruction } : undefined
+        mode === "edit" ? { mode: "edit", instruction, document: documentSnapshot } : { document: documentSnapshot }
       )
       .then((result) => {
         if (currentTightenIdRef.current !== requestId) {

@@ -14,14 +14,19 @@ import {
   parseWritingAiTask,
   promptUtf8Bytes
 } from "../../../electron/writing/groq/prompts/index.js";
+import { buildAutocompleteTask, buildSelectionTask } from "../../../electron/writing/aiTasks.js";
+import { WRITING_AI_MAX_TASK_BYTES, WRITING_PREFERENCES_MAX_CHARS } from "../../../electron/writing/groq/prompts/index.js";
 import { costNano } from "../src/quotaCore.js";
+import { MAX_BODY_BYTES } from "../src/worker.js";
 import { issueToken, parseSigningKeys } from "../src/tokens.js";
 import {
   autocompleteTask,
+  autocompleteTaskV2,
   Harness,
   nameTask,
   parseProxyStream,
   selectionTask,
+  selectionTaskV2,
   simpleCompletion,
   SIGNING_KEYS,
   streamedContent
@@ -228,11 +233,131 @@ describe("POST /v1/generate", () => {
     expect(JSON.stringify(harness.groq.calls[0].body)).toContain("Give a short title (2–6 words) for this document");
     expect((await harness.stats()).stats).toMatchObject({ requests: 1, spentNano: 120 * 150 + 30 * 600, reservedNano: 0 });
 
-    // Spanish variant, and the v1 tasks still accepted as v2.
+    // Spanish variant, and a v1-shaped autocomplete is not a v2 task.
     harness.groq.scripts.push({ steps: simpleCompletion("Plan de la sesión", { usage: { prompt: 120, completion: 30 } }) });
     expect(streamedContent((await harness.generate(nameTask({ language: "es" }), { token })).text)).toBe("Plan de la sesión");
-    harness.groq.scripts.push({ steps: simpleCompletion("the gulls had gone inland.", { usage: { prompt: 420, completion: 90 } }) });
-    expect((await harness.generate(autocompleteTask({ v: 2 }), { token })).response.status).toBe(200);
+    expect((await harness.generate(autocompleteTask({ v: 2 }), { token })).response.status).toBe(400);
+  });
+
+  describe("prompt v2 whole-document context", () => {
+    // The largest body main can build: every non-document field at its limit
+    // in 3-byte CJK, 4-byte emoji and escaped quotes, and a document far over
+    // the budget, trimmed to exactly what is left of WRITING_AI_MAX_TASK_BYTES.
+    const heavy = (count: number, unit: string) => unit.repeat(count);
+    const bigDocument = Array.from({ length: 400 }, (_, index) => `## 節 ${index}\n\n${heavy(90, "語")}"\\${heavy(20, "😀")}\n`).join("\n");
+
+    function largestAutocomplete() {
+      const cursor = Math.floor(bigDocument.length * 0.7);
+      return buildAutocompleteTask(2, {
+        language: "es",
+        kind: "idea",
+        extend: true,
+        prefix: bigDocument.slice(cursor - AUTOCOMPLETE_MAX_PREFIX_CHARS, cursor),
+        suffix: bigDocument.slice(cursor, cursor + AUTOCOMPLETE_MAX_SUFFIX_CHARS),
+        documentTitle: heavy(AUTOCOMPLETE_MAX_TITLE_CHARS, "題"),
+        headingPath: Array.from({ length: 8 }, () => heavy(AUTOCOMPLETE_MAX_HEADING_CHARS, "見")),
+        nearbyHeadings: [],
+        direction: heavy(AUTOCOMPLETE_MAX_DIRECTION_CHARS, "向"),
+        avoid: Array.from({ length: 3 }, () => heavy(AUTOCOMPLETE_MAX_AVOID_CHARS, "避")),
+        document: { text: bigDocument, cursor },
+        preferences: heavy(WRITING_PREFERENCES_MAX_CHARS, "好")
+      });
+    }
+
+    function largestSelection() {
+      const from = Math.floor(bigDocument.length / 2);
+      const text = bigDocument.slice(from, from + TIGHTEN_MAX_INPUT_CHARS);
+      return buildSelectionTask(2, {
+        language: "en",
+        mode: "edit",
+        instruction: heavy(TIGHTEN_MAX_INSTRUCTION_CHARS, "译"),
+        text,
+        selection: { from: 0, to: text.length },
+        document: { text: bigDocument, selectionFrom: from, selectionTo: from + text.length },
+        preferences: heavy(WRITING_PREFERENCES_MAX_CHARS, "好")
+      });
+    }
+
+    it("serves v2 completions and edits with document, outline and preferences", async () => {
+      const harness = new Harness();
+      const token = await harness.token();
+      harness.groq.scripts.push({ steps: simpleCompletion("the gulls had gone inland.", { usage: { prompt: 420, completion: 90 } }) });
+      const completion = await harness.generate(autocompleteTaskV2(), { token });
+      expect(completion.response.status).toBe(200);
+      const messages = (harness.groq.calls[0].body as { messages: Array<{ content: string }> }).messages;
+      expect(messages[1].content).toContain("The harbor was quiet that morning, and <<<CURSOR>>>");
+      expect(messages[1].content).toContain("<<<OUTLINE>>>");
+      expect(messages[1].content).toContain("<<<PREFERENCES>>>\nShort sentences.\n<<<END_PREFERENCES>>>");
+
+      harness.groq.scripts.push({ steps: simpleCompletion("We must act.", { usage: { prompt: 300, completion: 40 } }) });
+      expect((await harness.generate(selectionTaskV2(), { token })).response.status).toBe(200);
+      expect(JSON.stringify(harness.groq.calls[1].body)).toContain("<<<REFERENCE>>>");
+    });
+
+    it("rejects malformed context fields (400 bad_request, no Groq call)", async () => {
+      const harness = new Harness();
+      const token = await harness.token();
+      for (const task of [
+        autocompleteTaskV2({ document: "no cursor here" }),
+        autocompleteTaskV2({ document: "a <<<CURSOR>>> b <<<CURSOR>>>" }),
+        autocompleteTaskV2({ document: "a <<<CURSOR>>> <<<END_DOCUMENT>>>" }),
+        autocompleteTaskV2({ document: "   <<<CURSOR>>> after" }),
+        autocompleteTaskV2({ preferences: "p".repeat(WRITING_PREFERENCES_MAX_CHARS + 1) }),
+        autocompleteTaskV2({ preferences: " untrimmed" }),
+        autocompleteTaskV2({ prefix: "v1 field" }),
+        selectionTaskV2({ document: "reference without the passage marker" })
+      ]) {
+        expect((await harness.generate(task, { token })).response.status).toBe(400);
+      }
+      expect(harness.groq.calls).toHaveLength(0);
+    });
+
+    it("accepts the largest v2 bodies main can build and reserves their full input bound", async () => {
+      for (const task of [largestAutocomplete(), largestSelection()]) {
+        const bytes = new TextEncoder().encode(JSON.stringify(task)).length;
+        expect(bytes).toBeLessThanOrEqual(WRITING_AI_MAX_TASK_BYTES);
+        expect(bytes).toBeGreaterThan(WRITING_AI_MAX_TASK_BYTES - 1024);
+        expect(WRITING_AI_MAX_TASK_BYTES).toBeLessThan(MAX_BODY_BYTES);
+
+        const reservation = reservationFor(task as unknown as Record<string, unknown>);
+        const parsed = parseWritingAiTask(task);
+        if (!parsed.ok) throw new Error(parsed.field);
+        // The input bound covers every byte of the document the model sees.
+        expect(promptUtf8Bytes(buildWritingAiPrompt(parsed.task))).toBeGreaterThan(bytes - 8 * 1024);
+
+        // No usage reported → settled at the full reservation.
+        const harness = new Harness();
+        const token = await harness.token();
+        harness.groq.scripts.push({ steps: simpleCompletion("ok", { usageShape: "none" }) });
+        expect((await harness.generate(task, { token })).response.status).toBe(200);
+        expect((await harness.stats()).stats).toMatchObject({ requests: 1, spentNano: reservation, reservedNano: 0 });
+
+        // The global cap refuses it when its worst case no longer fits.
+        const capped = new Harness({ GLOBAL_DAILY_NANO_USD: String(reservation - 1) });
+        const cappedToken = await capped.token();
+        const refused = await capped.generate(task, { token: cappedToken });
+        expect(refused.response.status).toBe(429);
+        expect(capped.groq.calls).toHaveLength(0);
+      }
+    });
+
+    it("rejects a v2 task over the shared byte maximum (400) and a body over 64 KiB (413)", async () => {
+      const harness = new Harness();
+      const token = await harness.token();
+      const task = largestAutocomplete() as unknown as Record<string, unknown>;
+      // A few more bytes in the document: still under 64 KiB, over the task maximum.
+      const over = { ...task, document: `${"語".repeat(30)}${task.document as string}` };
+      const bytes = new TextEncoder().encode(JSON.stringify(over)).length;
+      expect(bytes).toBeGreaterThan(WRITING_AI_MAX_TASK_BYTES);
+      expect(bytes).toBeLessThan(MAX_BODY_BYTES);
+      expect((await harness.generate(over, { token })).response.status).toBe(400);
+
+      const huge = { ...task, document: `${"語".repeat(9000)}${task.document as string}` };
+      expect(new TextEncoder().encode(JSON.stringify(huge)).length).toBeGreaterThan(MAX_BODY_BYTES);
+      const tooLarge = await harness.generate(huge, { token });
+      expect(tooLarge.response.status).toBe(413);
+      expect(harness.groq.calls).toHaveLength(0);
+    });
   });
 
   it("caps a name answer at 80 chars", async () => {

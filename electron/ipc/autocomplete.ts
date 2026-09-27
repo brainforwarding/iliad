@@ -17,6 +17,12 @@ import {
   type IdeaAutocompleteResult,
   type IdeaAutocompleteSuggestionKind
 } from "../writing/autocomplete.js";
+import {
+  WritingAiTooLongError,
+  normalizeAutocompleteDocument,
+  validateWritingPreferences,
+  type AutocompleteDocumentSnapshot
+} from "../writing/aiTasks.js";
 import { normalizeAgentError } from "../writing/errors.js";
 import { WritingAiService } from "../writing/writingAiService.js";
 import { ensureMarkdownFile } from "../fs/pathSafety.js";
@@ -43,6 +49,8 @@ interface AutocompleteIdeaRequest {
   extend?: unknown;
   direction?: unknown;
   avoid?: unknown;
+  document?: unknown;
+  preferences?: unknown;
 }
 
 interface AutocompleteRuntimeService {
@@ -58,6 +66,8 @@ interface AutocompleteRuntimeService {
     extend?: boolean;
     direction?: string;
     avoid?: string[];
+    document?: AutocompleteDocumentSnapshot;
+    preferences?: string;
     onPartial?: (raw: string) => void;
     signal: AbortSignal;
   }): Promise<string>;
@@ -146,6 +156,7 @@ export async function handleAutocompleteIpc(
 
     return insert ? { ok: true, insert } : { ok: false, reason: "no_suggestion" };
   } catch (error) {
+    if (error instanceof WritingAiTooLongError) return { ok: false, reason: "too_long" };
     const agentError = normalizeAgentError(error, { wasCanceled: controller.signal.aborted });
     const reason = autocompleteReasonFromAgentError(agentError, timedOut);
     // `resetAt` (from the proxy) reaches the renderer only with the "out" reason.
@@ -178,6 +189,8 @@ async function normalizeAutocompleteRequest(
         extend: boolean;
         direction?: string;
         avoid?: string[];
+        document?: AutocompleteDocumentSnapshot;
+        preferences: string;
       };
     }
   | { ok: false; reason: AutocompleteFailureReason }
@@ -216,6 +229,11 @@ async function normalizeAutocompleteRequest(
     return { ok: false, reason: "too_long" };
   }
 
+  const preferences = validateWritingPreferences(request.preferences);
+  if (!preferences.ok) {
+    return { ok: false, reason: "too_long" };
+  }
+
   // Every request is explicit (a length key); there is no automatic trigger.
   const suggestionKind = normalizeAutocompleteSuggestionKind(request.suggestionKind);
   return {
@@ -231,7 +249,9 @@ async function normalizeAutocompleteRequest(
       suggestionKind,
       extend: request.extend === true,
       direction: sanitizeString(request.direction, 240),
-      avoid: Array.isArray(request.avoid) ? request.avoid.filter((text): text is string => typeof text === "string").slice(-3).map((text) => text.slice(0, AUTOCOMPLETE_MAX_IDEA_OUTPUT_CHARS)) : []
+      avoid: Array.isArray(request.avoid) ? request.avoid.filter((text): text is string => typeof text === "string").slice(-3).map((text) => text.slice(0, AUTOCOMPLETE_MAX_IDEA_OUTPUT_CHARS)) : [],
+      document: normalizeAutocompleteDocument(request.document),
+      preferences: preferences.preferences
     }
   };
 }
