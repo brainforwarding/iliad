@@ -13,6 +13,7 @@ import {
 import {
   CONTEXT_CURSOR_MARKER,
   CONTEXT_PASSAGE_MARKER,
+  WRITING_AI_CONTEXT_BUDGETS,
   WRITING_AI_MAX_DOCUMENT_CHARS,
   WRITING_AI_MAX_TASK_BYTES,
   WRITING_PREFERENCES_MAX_CHARS,
@@ -92,7 +93,7 @@ describe("buildAutocompleteTask", () => {
   it("fits a huge document into the shared byte maximum, keeping the start and the local window", () => {
     const body = Array.from({ length: 3000 }, (_, index) => `Line ${index}: "quoted" \\ ñ 語 😀 text.`).join("\n");
     const text = `# Start\n\nOpening line.\n\n${body}\n\nShe walked into the `;
-    const task = buildAutocompleteTask(2, input({ preferences: "好".repeat(WRITING_PREFERENCES_MAX_CHARS), document: { text, cursor: text.length } }));
+    const task = buildAutocompleteTask(2, input({ kind: "idea", preferences: "好".repeat(WRITING_PREFERENCES_MAX_CHARS), document: { text, cursor: text.length } }));
     const bytes = new TextEncoder().encode(JSON.stringify(task)).length;
     expect(bytes).toBeLessThanOrEqual(WRITING_AI_MAX_TASK_BYTES);
     expect(parseWritingAiTask(task).ok).toBe(true);
@@ -103,6 +104,59 @@ describe("buildAutocompleteTask", () => {
     expect(doc.startsWith("# Start\n\nOpening line.")).toBe(true);
     expect(doc.endsWith(`She walked into the ${CONTEXT_CURSOR_MARKER}`)).toBe(true);
     expect(doc).toContain("[…]");
+  });
+
+  describe("per-kind context budgets", () => {
+    // ~60k chars of plain prose between a recognizable start and the cursor.
+    const body = Array.from({ length: 1500 }, (_, index) => `Paragraph ${index} about the harbor and its ferries.`).join("\n\n");
+    const text = `# Start\n\nMara Quint ran the Kestrel ferry.\n\n${body}\n\nAfter the cursor.\n\n${body}\n\nShe walked into the `;
+    const cursor = text.length;
+    const documentOf = (task: unknown) => (task as { document: string }).document;
+
+    it.each(["sentence", "paragraph", "idea"] as const)("%s: trimmed to its own character budget, start and local window kept", (kind) => {
+      const { maxDocumentChars } = WRITING_AI_CONTEXT_BUDGETS[kind];
+      const task = buildAutocompleteTask(2, input({ kind, document: { text, cursor } }));
+      const doc = documentOf(task);
+      expect(doc.length).toBeLessThanOrEqual(maxDocumentChars);
+      // Nearly filled: the cap, not something smaller, is what binds.
+      expect(doc.length).toBeGreaterThan(maxDocumentChars - 500);
+      expect(doc.startsWith("# Start\n\nMara Quint ran the Kestrel ferry.")).toBe(true);
+      expect(doc.endsWith(`She walked into the ${CONTEXT_CURSOR_MARKER}`)).toBe(true);
+      expect(doc).toContain("[…]");
+      expect(parseWritingAiTask(task).ok).toBe(true);
+    });
+
+    it("budgets grow with the kind: sentence < paragraph < idea (the full maximum)", () => {
+      const lengths = (["sentence", "paragraph", "idea"] as const).map((kind) => documentOf(buildAutocompleteTask(2, input({ kind, document: { text, cursor } }))).length);
+      expect(lengths[0]).toBeLessThan(lengths[1]);
+      expect(lengths[1]).toBeLessThan(lengths[2]);
+      expect(WRITING_AI_CONTEXT_BUDGETS.sentence.maxDocumentChars).toBe(6000);
+      expect(WRITING_AI_CONTEXT_BUDGETS.paragraph.maxDocumentChars).toBe(15000);
+      expect(WRITING_AI_CONTEXT_BUDGETS.idea.maxDocumentChars).toBe(WRITING_AI_MAX_DOCUMENT_CHARS);
+    });
+
+    it("sentence: the start gets its small share, the rest is the text nearest the cursor", () => {
+      const doc = documentOf(buildAutocompleteTask(2, input({ kind: "sentence", document: { text, cursor } })));
+      const [head, tail] = doc.split("\n[…]\n");
+      expect(new TextEncoder().encode(head).length).toBeLessThanOrEqual(WRITING_AI_CONTEXT_BUDGETS.sentence.startBytes);
+      expect(tail.length).toBeGreaterThan(doc.length - WRITING_AI_CONTEXT_BUDGETS.sentence.startBytes - 20);
+      expect(tail).toContain(`Paragraph 1499 about the harbor and its ferries.\n\nShe walked into the ${CONTEXT_CURSOR_MARKER}`);
+    });
+
+    it("sentence: text after the cursor is kept too (cursor-centred)", () => {
+      const middle = text.indexOf("After the cursor.");
+      const doc = documentOf(buildAutocompleteTask(2, input({ kind: "sentence", prefix: "", suffix: "After the cursor.", document: { text, cursor: middle } })));
+      expect(doc.length).toBeLessThanOrEqual(6000);
+      const at = doc.indexOf(CONTEXT_CURSOR_MARKER);
+      expect(doc.slice(at)).toContain("After the cursor.\n\nParagraph 0");
+      expect(doc.slice(0, at)).toContain("Paragraph 1499");
+    });
+
+    it("a short document goes out whole for every kind", () => {
+      for (const kind of ["sentence", "paragraph", "idea"] as const) {
+        expect(documentOf(buildAutocompleteTask(2, input({ kind, document: { text: DOC, cursor: DOC.length } })))).toBe(`${DOC}${CONTEXT_CURSOR_MARKER}`);
+      }
+    });
   });
 
   it("fails as too_long when the non-document fields alone do not fit", () => {
@@ -154,6 +208,21 @@ describe("buildSelectionTask", () => {
       from: passageFrom,
       to: passageFrom + passage.length
     });
+  });
+
+  it("v2: a long reference is trimmed to the ✦ AI budget, start and nearest text kept", () => {
+    const body = Array.from({ length: 1500 }, (_, index) => `Paragraph ${index} about the harbor.`).join("\n\n");
+    const doc = `# Harbor\n\nMara Quint ran the Kestrel ferry.\n\n${body}\n\n${passage}\n\n${body}`;
+    const from = doc.indexOf(passage);
+    const task = buildSelectionTask(2, { ...base, document: { text: doc, selectionFrom: from, selectionTo: from + passage.length } });
+    const reference = (task as { document: string }).document;
+    const { maxDocumentChars } = WRITING_AI_CONTEXT_BUDGETS.selection;
+    expect(maxDocumentChars).toBe(20000);
+    expect(reference.length).toBeLessThanOrEqual(maxDocumentChars);
+    expect(reference.length).toBeGreaterThan(maxDocumentChars - 500);
+    expect(reference.startsWith("# Harbor\n\nMara Quint ran the Kestrel ferry.")).toBe(true);
+    expect(reference).toContain(`Paragraph 1499 about the harbor.\n\n${CONTEXT_PASSAGE_MARKER}\n\nParagraph 0 about the harbor.`);
+    expect(parseWritingAiTask(task).ok).toBe(true);
   });
 
   it("v2: the selection inside a larger passage maps to the passage's place", () => {

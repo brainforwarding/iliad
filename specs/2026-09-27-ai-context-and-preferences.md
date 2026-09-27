@@ -163,3 +163,82 @@ comments files; the free route still sends v1 (preferences have no effect
 there until the Worker is deployed). First visible word ~0.7–0.9 s on a
 16k-character document.
 
+
+## Follow-up (2026-09-27): per-kind context and speed
+
+Owner-approved follow-ups, own-key route / prompt v2 only (v1 and the free
+route unchanged until the Worker is deployed).
+
+1. **Per-kind context budgets** (`WRITING_AI_CONTEXT_BUDGETS` in
+   `prompts/limits.ts`, used by `aiTasks.ts` → `trimDocumentForContext`):
+   Sentence 6,000 characters of document (start share 1 KiB), Paragraph
+   15,000 (2.5 KiB), Full idea 40,000 (6 KiB, the previous maximum), ✦ AI
+   edits 20,000 (3 KiB); same priority as before (local window, start,
+   nearest text outward) plus the outline; the 56 KiB task budget still
+   bounds everything and the shared parser (Worker too) still accepts up to
+   40,000 for any kind. Tests per kind in `tests/writing/aiTasks.test.ts`.
+2. **Warm connection** (`electron/writing/groq/connection.ts`). Measured:
+   Node's global fetch drops idle sockets after 4 s (Groq and Cloudflare send
+   no Keep-Alive hint), so every request after a short pause paid DNS + TCP +
+   TLS (~70–90 ms to Groq, ~190 ms to the proxy from Santiago). AI requests on
+   both routes now share one undici keep-alive Agent (`undici` dependency,
+   the same fetch/errors as Node's; 2-minute idle sockets — both servers kept
+   an idle socket ≥ 125 s in a probe). While autocomplete is on and AI isn't
+   blocked, typing or focusing the editor sends `writing-ai:warm`
+   (renderer-throttled to one IPC a minute); main warms the active origin at
+   most once a minute and not while real requests keep it in use: own key →
+   unauthenticated `HEAD https://api.groq.com/openai/v1/models`; free →
+   `GET <proxy>/healthz` (no token, no quota, never `/v1/generate`, never
+   `ai.json`). Tests: `tests/writing/groq/connection.test.ts`,
+   `writingAiService.test.ts` ("connection warm-up"),
+   `tests/editor/warmConnection.test.ts`.
+3. **Prompt caching** — checked
+   https://console.groq.com/docs/prompt-caching (2026-09-27): automatic, no
+   parameter; supported on `openai/gpt-oss-20b`, `openai/gpt-oss-120b` and
+   `openai/gpt-oss-safeguard-20b`; exact prefix match against recent
+   requests; minimum cacheable prompt 128–1024 tokens depending on the model;
+   50% discount on cached input tokens, which don't count toward rate limits;
+   expires after 2 h unused; "not guaranteed"; reported as
+   `usage.prompt_tokens_details.cached_tokens`. Applied: the v2 autocomplete
+   user message is now preferences → title → outline → document (text before
+   the cursor, marker, text after) → request (heading path, kind, direction,
+   avoid); the system rules stay first and unchanged, preferences stay a
+   delimited user section and the document stays content. ✦ AI edits were
+   already ordered (preferences → reference → editable passage). v2 golden
+   snapshots updated; v1 unchanged. Not changed: the system prompt still
+   carries the kind (and, for edits, the chosen/typed instruction), so the
+   cache prefix is shared only between requests of the same kind/instruction
+   — moving them out of the system message would weaken the Review's
+   structure. `cachedPromptTokens` is now parsed from usage (benchmark only).
+4. **Instant feedback**: a length key shows a faint ✦
+   (`.cm-idea-autocomplete-pending`, ghost colour, gentle pulse, static under
+   reduced motion) at the cursor — after the visible draft when extending —
+   from the moment the request starts; the first streamed delta replaces it;
+   cancel, typing, Escape, errors and stale answers remove it. The existing
+   "Working…" status stays. Tests in `ideaAutocompleteLifecycle.test.ts`.
+
+### Benchmark (run 3, 2026-09-27, own key direct, 5 cases × v1/v2 × 2 trials = 20 requests)
+
+`--only=late-en-sentence,late-es-app-en,extend-en-paragraph,late-en-idea,edit-en-rewrite --trials=2`.
+The benchmark calls Groq with Node's fetch (no warm connection), so these
+numbers measure the smaller prompts only.
+
+| v2 kind (cases) | Body → prompt tokens | TTFT (ms) now | TTFT before (run 1 / run 2) |
+| --- | --- | --- | --- |
+| Sentence (late-en, late-es-app-en) | 6.4–6.8 KB → 1,713–2,017 tok (was 4,392–5,326) | 494, 726, 778, 976 → p50 752, max 976 | 859, 928 |
+| Paragraph (extend-en) | 15.7 KB → 3,658 tok (was 4,447) | 994, 590 | 642 |
+| Full idea (late-en) | 19.7 KB → 4,452 tok (unchanged) | 579, 829 | 533 |
+| ✦ AI edit (edit-en-rewrite) | 19.4 KB → 4,365 tok (unchanged, under 20k) | 699, 707 | 760 |
+
+All v2: p50 707 / max 994 ms TTFT (before: 820 / 1,638 run 1 incl. the
+56 KiB Unicode cases, 576 / 1,607 run 2); v1 p50 415 / max 536 ms. 20/20
+accepted, no errors; cost v2 $0.0059 for 10 requests (was $0.0121 in run 1).
+Read: Sentence prompts are ~60% smaller; TTFT moves less than the token
+count, and trial-to-trial variance (~±250 ms) is larger than the difference,
+so a ~5k-token document costs little first-token time on Groq either way.
+
+Prompt caching: Groq reports `cached_tokens`, but hits were small and rare —
+5 of 20 requests had 256 cached tokens (about the system prompt), and exact
+repeats of a v2 prompt a minute later showed no cache hit, consistent with
+"not guaranteed". The reordering costs nothing and helps when hits happen;
+don't count on it for latency.

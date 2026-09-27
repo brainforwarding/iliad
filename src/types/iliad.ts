@@ -649,6 +649,12 @@ export interface IliadApi {
   setGroqApiKey: (key: string | null) => Promise<SetGroqKeyResult>;
   /** Pauses the app menu's shortcuts in this window while a Writing assists key chip records keys. */
   setRecordingShortcut: (recording: boolean) => Promise<void>;
+  /**
+   * Keeps the connection to the active AI endpoint warm (main rate-limits it
+   * to once a minute per endpoint, sends no body and uses no quota; nothing
+   * when AI is blocked). Fire and forget.
+   */
+  warmWritingAi?: () => void;
   assetUrl: (absolutePath: string) => string;
   agent: AgentApi;
 }

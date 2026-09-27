@@ -226,6 +226,9 @@ const api = {
   getGroqKeyState: () => invoke("writing:get-groq-key-state"),
   setGroqApiKey: (key: string | null) => invoke("writing:set-groq-key", key),
   setRecordingShortcut: (recording: boolean) => invoke("writing:set-recording-shortcut", recording),
+  warmWritingAi: () => {
+    void invoke("writing-ai:warm");
+  },
   companions: {
     read: (workspaceRoot: string, filePath: string) => invoke("file:read-companion", workspaceRoot, filePath),
     remove: (workspaceRoot: string, filePath: string, expectedHash: string) =>

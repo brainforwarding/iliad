@@ -555,6 +555,8 @@ interface ContextRow {
   promptBytes: number;
   error?: string;
   promptTokens?: number;
+  /** Prompt tokens Groq served from its prompt cache (`prompt_tokens_details.cached_tokens`), when reported. */
+  cachedPromptTokens?: number | null;
   completionTokens?: number;
   firstDeltaMs?: number | null;
   completeMs?: number;
@@ -605,6 +607,7 @@ async function runContextCase(apiKey: string, entry: ContextCase, version: 1 | 2
     return {
       ...base,
       promptTokens: result.usage?.promptTokens,
+      cachedPromptTokens: result.usage?.cachedPromptTokens ?? null,
       completionTokens: result.usage?.completionTokens,
       firstDeltaMs: result.firstDeltaMs === null ? null : Math.round(result.firstDeltaMs),
       completeMs: Math.round(completeMs),
@@ -640,6 +643,8 @@ async function contextBenchmark(apiKey: string) {
       bodyBytesMax: Math.max(0, ...rows.filter((row) => row.version === version).map((row) => row.bodyBytes)),
       promptTokensP50: percentile(nums((row) => row.promptTokens), 0.5),
       promptTokensMax: Math.max(0, ...nums((row) => row.promptTokens)),
+      cachedPromptTokensTotal: nums((row) => row.cachedPromptTokens).reduce((a, b) => a + b, 0),
+      requestsWithCachedTokens: ok.filter((row) => (row.cachedPromptTokens ?? 0) > 0).length,
       firstDeltaP50: percentile(nums((row) => row.firstDeltaMs), 0.5),
       firstDeltaMax: Math.max(0, ...nums((row) => row.firstDeltaMs)),
       completeP50: percentile(nums((row) => row.completeMs), 0.5),

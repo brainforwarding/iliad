@@ -183,26 +183,35 @@ function preferencesSection(preferences: string): string[] {
     : [];
 }
 
+/**
+ * Ordered for Groq's prompt caching (prefix match; follow-up in spec
+ * 2026-09-27-ai-context-and-preferences.md): what stays the same between
+ * requests comes first — preferences, the title, the outline, then the
+ * document, whose text before the cursor changes least — and what changes
+ * most comes last: the text after the cursor, then the request itself
+ * (heading path, kind, direction, avoid).
+ */
 export function autocompleteModelInputV2(task: AutocompleteTaskV2): string {
   const headingPath = task.headingPath.length > 0 ? task.headingPath.join(" > ") : "(none)";
-  const header = [
-    `Document title: ${task.documentTitle || "(untitled)"}`,
-    `Heading path: ${headingPath}`,
+  const request = [
+    `Heading path at the cursor: ${headingPath}`,
     `Suggestion kind: ${task.kind}${task.extend ? " (extending the unaccepted draft that ends right before the cursor)" : ""}`,
     `Writing direction: ${task.direction || "Continue naturally"}`,
     ...(task.avoid.length ? ["Offer a different continuation from these previous suggestions:", ...task.avoid] : [])
   ].join("\n");
 
   return [
-    header,
     ...preferencesSection(task.preferences),
+    `Document title: ${task.documentTitle || "(untitled)"}`,
     ...(task.outline
       ? [section("Document outline (headings; the cursor's section is marked \"← cursor\"):", "<<<OUTLINE>>>", task.outline, "<<<END_OUTLINE>>>")]
       : []),
-    section(`Document (write only at ${CONTEXT_CURSOR_MARKER}; "[…]" marks omitted text):`, "<<<DOCUMENT>>>", task.document, "<<<END_DOCUMENT>>>")
+    section(`Document (write only at ${CONTEXT_CURSOR_MARKER}; "[…]" marks omitted text):`, "<<<DOCUMENT>>>", task.document, "<<<END_DOCUMENT>>>"),
+    request
   ].join("\n\n");
 }
 
+/** Already cache-ordered: preferences, then the reference document, then the editable passage. */
 export function selectionModelInputV2(task: SelectionTaskV2): string {
   return [
     ...preferencesSection(task.preferences),

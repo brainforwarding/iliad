@@ -93,6 +93,22 @@ export const WRITING_AI_MAX_TASK_BYTES = 56 * 1024;
 export const WRITING_AI_MAX_DOCUMENT_CHARS = 40000;
 /** Of the document budget, the document start gets at most this many bytes before the text nearest the cursor/passage. */
 export const WRITING_AI_DOCUMENT_START_BYTES = 6 * 1024;
+/**
+ * Per-kind document context (spec 2026-09-27-ai-context-and-preferences.md,
+ * "Follow-up: per-kind context and speed"): the trimmed document (markers
+ * included) is at most `maxDocumentChars` for that kind, and the document
+ * start gets at most `startBytes` of it; the rest goes to the text nearest the
+ * cursor/passage, with the same priority as the full budget. Short
+ * completions send less, so their first token comes sooner. The byte budget
+ * (WRITING_AI_MAX_TASK_BYTES) still bounds every task, and the shared parser
+ * accepts up to WRITING_AI_MAX_DOCUMENT_CHARS for any kind.
+ */
+export const WRITING_AI_CONTEXT_BUDGETS = {
+  sentence: { maxDocumentChars: 6000, startBytes: 1024 },
+  paragraph: { maxDocumentChars: 15000, startBytes: 2560 },
+  idea: { maxDocumentChars: WRITING_AI_MAX_DOCUMENT_CHARS, startBytes: WRITING_AI_DOCUMENT_START_BYTES },
+  selection: { maxDocumentChars: 20000, startBytes: 3072 }
+} as const satisfies Record<string, { maxDocumentChars: number; startBytes: number }>;
 /** Document outline (headings only): at most this many headings and UTF-8 bytes. */
 export const WRITING_AI_MAX_OUTLINE_HEADINGS = 80;
 export const WRITING_AI_MAX_OUTLINE_BYTES = 4096;

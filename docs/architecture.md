@@ -475,10 +475,13 @@ buffer without Tab or Accept. Spec: `specs/2026-09-25-groq-ai-free-tier.md`
   the limit (`too_long`, never sliced); the v2 task carries the document
   trimmed to one shared byte budget — the UTF-8 length of
   `JSON.stringify(task)` is at most `WRITING_AI_MAX_TASK_BYTES` (56 KiB,
-  below the Worker's 64 KiB body limit) and the document at most 40,000
-  characters — by the pure, deterministic `trimDocumentForContext`
-  (`prompts/context.ts`): the local window (completions) first, then the
-  document start (≤ 6 KiB), then the nearest text outward, `[…]` at gaps,
+  below the Worker's 64 KiB body limit) and the document at most the kind's
+  context budget (`WRITING_AI_CONTEXT_BUDGETS`: Sentence 6,000 characters,
+  Paragraph 15,000, Full idea 40,000, ✦ AI edits 20,000; the shared parser
+  accepts up to 40,000 for any kind) — by the pure, deterministic
+  `trimDocumentForContext` (`prompts/context.ts`): the local window
+  (completions) first, then the document start (the kind's share, ≤ 6 KiB),
+  then the nearest text outward, `[…]` at gaps,
   never splitting a surrogate pair, an oversized window → a cursor-centred
   slice. Completions mark the cursor (`<<<CURSOR>>>`, with any draft being
   extended re-inserted before it) and get the outline (`buildDocumentOutline`:
@@ -489,7 +492,10 @@ buffer without Tab or Accept. Spec: `specs/2026-09-25-groq-ai-free-tier.md`
   content are neutralized. Iliad's rules stay in the system message (they say
   preferences cannot override the rules, output boundaries, the edit
   instruction or the Steer direction); preferences, outline and document are
-  delimited user sections. Output rules, budgets and caps are v1's. Main adds
+  delimited user sections, ordered for Groq's automatic prompt caching (prefix
+  match): stable parts first (system rules, preferences, title, outline, the
+  document), what changes most last (the text after the cursor, then heading
+  path, kind, direction and avoid; for edits the editable passage). Output rules, budgets and caps are v1's. Main adds
   an edit scope guard (`looksLikeReferenceEcho` in `electron/writing/tighten.ts`):
   an answer copying ≥ 60 contiguous characters (or copied windows over half of
   it) from outside the selection is rejected; the existing echo guards and the
@@ -503,6 +509,18 @@ buffer without Tab or Accept. Spec: `specs/2026-09-25-groq-ai-free-tier.md`
   version with the shared strict parser and reserves `UTF-8 prompt bytes +
   PROMPT_OVERHEAD_TOKENS` input tokens, so the largest v2 body (~57 KB) reserves
   about $0.011 at list prices before settling at actual usage.
+- **Warm connection** (`groq/connection.ts`): AI requests on both routes go
+  through one undici keep-alive Agent (2-minute idle sockets; Node's global
+  fetch drops idle sockets after 4 s). While autocomplete is on and AI isn't
+  blocked, typing or focusing the editor asks main (`writing-ai:warm`,
+  renderer-throttled to one IPC a minute) to warm the active endpoint: own key
+  → an unauthenticated `HEAD` to Groq, free → `GET /healthz` on the proxy
+  (never `/v1/generate`, never `ai.json`, no token, no quota), at most once
+  per origin a minute and skipped while real requests keep it in use.
+- **Instant feedback**: a length key shows a faint ✦ at the cursor (after a
+  draft being extended) the moment its request starts; the first streamed
+  text replaces it, and a cancel or error removes it (static under reduced
+  motion).
 - Diagnostics (`autocomplete.ai.*`, `selection_ai.ai.*`) record route, model,
   prompt version,
   timings, finish reason, output length and error codes, never text, keys,

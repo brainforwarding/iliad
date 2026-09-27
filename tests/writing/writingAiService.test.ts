@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { handleAutocompleteIpc } from "../../electron/ipc/autocomplete";
 import { handleTightenCancelIpc, handleTightenIpc } from "../../electron/ipc/tighten";
-import { handleSetGroqKeyIpc, handleSetRecordingShortcutIpc, handleWritingAssistStatusIpc } from "../../electron/ipc/writingSettings";
+import { handleSetGroqKeyIpc, handleSetRecordingShortcutIpc, handleWarmWritingAiIpc, handleWritingAssistStatusIpc } from "../../electron/ipc/writingSettings";
 import { GroqKeyStore, type SafeStorageLike } from "../../electron/writing/groq/keyStore";
 import { GROQ_MODEL } from "../../electron/writing/groq/prompts/index";
 import { WritingAiService } from "../../electron/writing/writingAiService";
@@ -397,5 +397,73 @@ describe("writing:set-recording-shortcut", () => {
     handleSetRecordingShortcutIpc({ sender, senderFrame: { url: "file:///app/index.html" } } as never, true);
     handleSetRecordingShortcutIpc({ sender, senderFrame: { url: "file:///app/index.html" } } as never, false);
     expect(setIgnoreMenuShortcuts.mock.calls).toEqual([[true], [false]]);
+  });
+});
+
+describe("connection warm-up", () => {
+  const keyStoreIn = (state: "ok" | "none" | "unreadable") => ({
+    read: async () => (state === "ok" ? { state, key: "gsk_ownkey1234" } : { state }) as never,
+    getState: async () => ({ state, last4: state === "ok" ? "1234" : null }),
+    setKey: async () => ({ state, last4: null })
+  });
+  const warmService = async (state: "ok" | "none" | "unreadable", extra: Record<string, unknown> = {}) => {
+    let now = 1_000_000;
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("", { status: 200 }));
+    const service = new WritingAiService(await userDataDir(), {
+      keyStore: keyStoreIn(state), fetchImpl, isPackaged: true, env: {}, diagnostics: quietDiagnostics(), now: () => now, ...extra
+    });
+    return { service, fetchImpl, advance: (ms: number) => (now += ms) };
+  };
+
+  it("own key: one bodiless, unauthenticated HEAD to Groq, at most once a minute", async () => {
+    const { service, fetchImpl, advance } = await warmService("ok");
+    expect(await service.warmConnection()).toBe("own-key");
+    expect(await service.warmConnection()).toBe("skipped");
+    advance(59_999);
+    expect(await service.warmConnection()).toBe("skipped");
+    advance(1);
+    expect(await service.warmConnection()).toBe("own-key");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(String(url)).toBe("https://api.groq.com/openai/v1/models");
+    expect(init).toMatchObject({ method: "HEAD" });
+    expect(init?.headers).toBeUndefined();
+    expect(init?.body).toBeUndefined();
+  });
+
+  it("free: GET /healthz on the proxy (never /v1/generate or ai.json), rate-limited", async () => {
+    const { service, fetchImpl } = await warmService("none");
+    expect(await service.warmConnection()).toBe("free");
+    expect(await service.warmConnection()).toBe("skipped");
+    expect(fetchImpl.mock.calls.map(([url, init]) => [String(url), init?.method])).toEqual([
+      ["https://iliad-ai.quiet-bush-25b1.workers.dev/healthz", "GET"]
+    ]);
+  });
+
+  it("nothing when AI is blocked or the free proxy isn't configured", async () => {
+    const blocked = await warmService("unreadable");
+    expect(await blocked.service.warmConnection()).toBe("skipped");
+    expect(blocked.fetchImpl).not.toHaveBeenCalled();
+
+    const unconfigured = await warmService("none", { proxyEndpoint: { peek: async () => ({ ok: false, reason: "proxy_not_configured" }) } });
+    expect(await unconfigured.service.warmConnection()).toBe("skipped");
+    expect(unconfigured.fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("a real request counts as use: no warm-up right after it", async () => {
+    const { service, groq } = await ownKeyService((_request, _body, response) => groqStream(response, "quiet room."));
+    expect(await autocomplete(service)).toEqual({ ok: true, insert: "quiet room." });
+    expect(await service.warmConnection()).toBe("skipped");
+    expect(groq.seen).toHaveLength(1);
+  });
+
+  it("IPC: only trusted windows, and a failing warm-up never reaches the renderer", async () => {
+    const warmConnection = vi.fn(async (): Promise<"own-key" | "free" | "skipped"> => {
+      throw new Error("offline");
+    });
+    await handleWarmWritingAiIpc({ sender: { id: 1 }, senderFrame: { url: "https://evil.example" } } as never, { warmConnection });
+    expect(warmConnection).not.toHaveBeenCalled();
+    await expect(handleWarmWritingAiIpc(event, { warmConnection })).resolves.toBeUndefined();
+    expect(warmConnection).toHaveBeenCalledOnce();
   });
 });

@@ -82,7 +82,7 @@ describe("readChatCompletionStream", () => {
 
   it("captures usage from x_groq.usage or top-level usage", async () => {
     const fromXGroq = await read([content("a"), finish("stop", true), "data: [DONE]\n\n"]);
-    expect(fromXGroq.usage).toEqual({ promptTokens: 86, completionTokens: 21, totalTokens: 107, reasoningTokens: 7 });
+    expect(fromXGroq.usage).toEqual({ promptTokens: 86, completionTokens: 21, totalTokens: 107, reasoningTokens: 7, cachedPromptTokens: null });
 
     const topLevel = await read([
       content("a"),
@@ -90,7 +90,15 @@ describe("readChatCompletionStream", () => {
       chunk({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 4 } }),
       "data: [DONE]\n\n"
     ]);
-    expect(topLevel.usage).toEqual({ promptTokens: 10, completionTokens: 4, totalTokens: 14, reasoningTokens: null });
+    expect(topLevel.usage).toEqual({ promptTokens: 10, completionTokens: 4, totalTokens: 14, reasoningTokens: null, cachedPromptTokens: null });
+
+    const cached = await read([
+      content("a"),
+      finish("stop", false),
+      chunk({ choices: [], usage: { prompt_tokens: 2048, completion_tokens: 4, prompt_tokens_details: { cached_tokens: 1536 } } }),
+      "data: [DONE]\n\n"
+    ]);
+    expect(cached.usage).toMatchObject({ promptTokens: 2048, cachedPromptTokens: 1536 });
   });
 
   it("decodes UTF-8 split across chunks and frames split mid-line", async () => {

@@ -1,12 +1,13 @@
 // Builds the structured writing-AI task for a prompt version from a
 // normalized IPC request (spec 2026-09-27-ai-context-and-preferences.md). v1
 // tasks are built from the existing fields exactly as before; v2 tasks add the
-// whole current document (trimmed to the shared byte budget), its outline and
-// the writer's preferences. Pure (imports only the prompt module).
+// whole current document (trimmed to the shared byte budget and the kind's
+// context budget, WRITING_AI_CONTEXT_BUDGETS), its outline and the writer's
+// preferences. Pure (imports only the prompt module).
 
 import {
   WRITING_PREFERENCES_MAX_CHARS,
-  WRITING_AI_MAX_DOCUMENT_CHARS,
+  WRITING_AI_CONTEXT_BUDGETS,
   WRITING_AI_MAX_TASK_BYTES,
   buildDocumentOutline,
   neutralizePromptDelimiters,
@@ -108,7 +109,8 @@ export function buildAutocompleteTask(version: PromptVersion, input: Autocomplet
   if (budgetBytes <= 0) throw new WritingAiTooLongError();
 
   const view = autocompleteDocumentView(input);
-  const trimmed = trimDocumentForContext({ ...view, budgetBytes, maxChars: WRITING_AI_MAX_DOCUMENT_CHARS });
+  const context = WRITING_AI_CONTEXT_BUDGETS[input.kind];
+  const trimmed = trimDocumentForContext({ ...view, budgetBytes, maxChars: context.maxDocumentChars, startBytes: context.startBytes });
   if (!trimmed) throw new WritingAiTooLongError();
   return { ...base, document: trimmed.text };
 }
@@ -177,7 +179,8 @@ export function buildSelectionTask(version: PromptVersion, input: SelectionTaskI
   const { text } = input.document;
   // Nothing but the passage: no reference to send.
   if (!(text.slice(0, range.from) + text.slice(range.to)).trim()) return base;
-  const trimmed = trimDocumentForContext({ text, passage: range, budgetBytes, maxChars: WRITING_AI_MAX_DOCUMENT_CHARS });
+  const context = WRITING_AI_CONTEXT_BUDGETS.selection;
+  const trimmed = trimDocumentForContext({ text, passage: range, budgetBytes, maxChars: context.maxDocumentChars, startBytes: context.startBytes });
   return trimmed ? { ...base, document: trimmed.text } : base;
 }
 

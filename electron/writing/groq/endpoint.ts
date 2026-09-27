@@ -68,11 +68,20 @@ export class ProxyEndpointResolver {
   }
 
   /** The base URL for this free request; may start a background `ai.json` check. */
-  async resolve(): Promise<ProxyEndpoint> {
+  resolve(): Promise<ProxyEndpoint> {
+    return this.current(true);
+  }
+
+  /** The base URL as `resolve` would give it, without ever checking `ai.json` (connection warm-up). */
+  peek(): Promise<ProxyEndpoint> {
+    return this.current(false);
+  }
+
+  private async current(mayRefresh: boolean): Promise<ProxyEndpoint> {
     if (this.devOverrideUrl) return { ok: true, baseUrl: this.devOverrideUrl };
 
     const cache = await this.readCache();
-    if (!cache || this.now() - cache.checkedAt >= ILIAD_AI_RELOCATION_INTERVAL_MS) {
+    if (mayRefresh && (!cache || this.now() - cache.checkedAt >= ILIAD_AI_RELOCATION_INTERVAL_MS)) {
       void this.refreshInBackground();
     }
 

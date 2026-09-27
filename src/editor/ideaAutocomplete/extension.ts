@@ -1,4 +1,4 @@
-import { Prec, StateEffect } from "@codemirror/state";
+import { Prec, StateEffect, type Range } from "@codemirror/state";
 import { isolateHistory } from "@codemirror/commands";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { buildAutocompleteContext, type BlockedLineRange } from "../writingAssistContext";
@@ -58,6 +58,8 @@ export interface IdeaAutocompleteExtensionOptions {
   requestAutocomplete: (request: IdeaAutocompleteRequestPayload) => Promise<IdeaAutocompleteResult>;
   cancelAutocomplete: (requestId: string) => void;
   onStatusChange?: (status: IdeaAutocompleteStatus) => void;
+  /** The writer typed or came back to the editor (keeps the AI connection warm; the caller throttles it). */
+  onActivity?: () => void;
 }
 
 export type IdeaAutocompleteStatus =
@@ -175,17 +177,41 @@ class GhostTextWidget extends WidgetType {
   }
 }
 
-function buildDecorations(suggestion: ActiveSuggestion | null): DecorationSet {
-  if (!suggestion || !suggestion.insert) {
-    return Decoration.none;
+/**
+ * The instant "working" mark: shown at the cursor (after a draft being
+ * extended) from the moment a request starts until its first streamed text,
+ * a cancel or an error. Ghost-coloured; it pulses gently unless reduced motion.
+ */
+class PendingMarkWidget extends WidgetType {
+  toDOM() {
+    const element = document.createElement("span");
+    element.className = "cm-idea-autocomplete-pending";
+    element.textContent = "✦";
+    element.setAttribute("aria-hidden", "true");
+    element.setAttribute("contenteditable", "false");
+    return element;
   }
 
-  return Decoration.set([
-    Decoration.widget({
-      widget: new GhostTextWidget(suggestion.insert),
-      side: 1
-    }).range(suggestion.from)
-  ]);
+  eq() {
+    return true;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+}
+
+/** `pendingAt`: where the working mark shows (null = none). */
+export function buildDecorations(suggestion: ActiveSuggestion | null, pendingAt: number | null = null): DecorationSet {
+  const ranges: Range<Decoration>[] = [];
+  if (suggestion && suggestion.insert) {
+    ranges.push(Decoration.widget({ widget: new GhostTextWidget(suggestion.insert), side: 1 }).range(suggestion.from));
+  }
+  if (pendingAt !== null) {
+    // After a ghost at the same position (higher side sorts later).
+    ranges.push(Decoration.widget({ widget: new PendingMarkWidget(), side: 2 }).range(pendingAt));
+  }
+  return ranges.length ? Decoration.set(ranges, true) : Decoration.none;
 }
 
 export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOptions) {
@@ -209,6 +235,8 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
       private requestStartedAt = 0;
       private measuredVisible = false;
       private lastEditAccepted = false;
+      /** Where the working mark shows while a request has produced no text yet. */
+      private pendingAt: number | null = null;
 
       constructor(private readonly view: EditorView) {
         controllers.set(view, this);
@@ -219,6 +247,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           const insert = this.requestBase + event.insert;
           if (this.suggestion && !insert.startsWith(this.suggestion.insert)) return;
           this.suggestion = { requestId: event.requestId, ...this.requestContext, insert };
+          this.pendingAt = null;
           this.renderSuggestion(true);
         });
       }
@@ -250,8 +279,10 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
       }
 
       update(update: ViewUpdate) {
+        if (update.docChanged || (update.focusChanged && this.view.hasFocus)) options.onActivity?.();
+
         if (update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(refreshAutocompleteEffect)))) {
-          this.decorations = buildDecorations(this.suggestion);
+          this.decorations = buildDecorations(this.suggestion, this.pendingAt);
           return;
         }
 
@@ -274,7 +305,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           if (remaining) {
             this.cancelInFlight();
             this.suggestion = remaining;
-            this.decorations = buildDecorations(remaining);
+            this.decorations = buildDecorations(remaining, this.pendingAt);
             this.setStatus({ state: "shown", insert: remaining.insert, kind: this.lastKind });
             return;
           }
@@ -449,6 +480,9 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         this.measuredVisible = false;
         recordAutocompleteMetric("requested");
         this.inFlightRequestId = requestId;
+        // Instant feedback: the working mark shows now, before any network round trip.
+        this.pendingAt = selection.from;
+        this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
         this.setStatus({ state: "requesting" });
 
         try {
@@ -476,6 +510,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
           }
 
           this.inFlightRequestId = null;
+          this.pendingAt = null;
 
           if (!result.ok) {
             if (result.reason === "timeout") recordAutocompleteMetric("timeouts");
@@ -517,6 +552,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
             latestContext.prefix !== context.prefix ||
             latestContext.suffix !== context.suffix
           ) {
+            this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
             return;
           }
 
@@ -542,6 +578,7 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
         } catch {
           if (this.inFlightRequestId !== requestId) return;
           this.inFlightRequestId = null;
+          this.pendingAt = null;
           this.suggestion = base && this.suggestion ? { ...this.suggestion, insert: base } : null;
           this.view.dispatch({ effects: refreshAutocompleteEffect.of(undefined) });
 
@@ -555,16 +592,15 @@ export function ideaAutocompleteExtension(options: IdeaAutocompleteExtensionOpti
       }
 
       private clearSuggestion() {
-        if (this.suggestion) {
-          this.suggestion = null;
-          this.decorations = buildDecorations(null);
-        }
-
+        const hadMarks = Boolean(this.suggestion) || this.pendingAt !== null;
+        this.suggestion = null;
         this.cancelInFlight();
+        if (hadMarks) this.decorations = buildDecorations(null);
         this.setStatus({ state: "idle" });
       }
 
       private cancelInFlight() {
+        this.pendingAt = null;
         if (!this.inFlightRequestId) {
           return;
         }

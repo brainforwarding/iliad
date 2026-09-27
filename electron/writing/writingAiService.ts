@@ -2,8 +2,9 @@ import { createDiagnosticsLogger, type DiagnosticsLogger } from "../diagnostics/
 import type { IdeaAutocompleteTextRequest } from "./autocomplete.js";
 import { AgentRuntimeError, keyUnreadableError, normalizeAgentError } from "./errors.js";
 import { streamGroqText, validateGroqApiKey, type GroqKeyValidation, type GroqRoute, type GroqStreamResult } from "./groq/client.js";
-import { DEV_PROXY_URL_ENV } from "./groq/config.js";
-import { ProxyEndpointResolver, parseDevProxyUrl } from "./groq/endpoint.js";
+import { DEV_PROXY_URL_ENV, GROQ_MODELS_URL } from "./groq/config.js";
+import { ConnectionWarmer, createKeepAliveFetch } from "./groq/connection.js";
+import { ProxyEndpointResolver, parseDevProxyUrl, type ProxyEndpoint } from "./groq/endpoint.js";
 import { InstallTokenStore } from "./groq/installToken.js";
 import { GroqKeyStore, type GroqKeyStateName, type SafeStorageLike } from "./groq/keyStore.js";
 import { createAutocompletePartialEmitter } from "./groq/partials.js";
@@ -57,6 +58,10 @@ export interface WritingAiServiceOptions {
   keyStore?: Pick<GroqKeyStore, "read" | "getState" | "setKey">;
   /** The free route's proxy client (tests inject a fake-proxy-backed one). */
   proxy?: Pick<IliadAiProxyClient, "stream">;
+  /** The free route's endpoint, for connection warm-up (defaults to the proxy client's resolver). */
+  proxyEndpoint?: { peek(): Promise<ProxyEndpoint> };
+  /** Clock for the warm-up rate limit (tests). */
+  now?: () => number;
   diagnostics?: DiagnosticsLogger;
   fetchImpl?: typeof fetch;
   safeStorage?: SafeStorageLike | null;
@@ -80,6 +85,9 @@ export class WritingAiService {
   private readonly proxy: Pick<IliadAiProxyClient, "stream">;
   private readonly diagnostics: DiagnosticsLogger;
   private readonly fetchImpl: typeof fetch | undefined;
+  /** AI requests (both routes) and warm-ups share one keep-alive connection pool. */
+  private readonly warmer: ConnectionWarmer;
+  private readonly proxyEndpoint: { peek(): Promise<ProxyEndpoint> } | null;
   private readonly validateKey: (key: string) => Promise<GroqKeyValidation>;
   /** The saved key Groq rejected on a request (memory only), for the menu's error state. */
   private rejectedKey: string | null = null;
@@ -88,19 +96,24 @@ export class WritingAiService {
     const isPackaged = options.isPackaged ?? true;
     const env = options.env ?? process.env;
     this.fetchImpl = options.fetchImpl;
+    this.warmer = new ConnectionWarmer({ fetchImpl: options.fetchImpl ?? createKeepAliveFetch(), now: options.now });
     this.keyStore = options.keyStore ?? new GroqKeyStore(userDataPath, {
       safeStorage: options.safeStorage ?? null,
       allowEnvKey: !isPackaged,
       env
     });
+    const endpoint = options.proxy
+      ? null
+      : new ProxyEndpointResolver(userDataPath, {
+          devOverrideUrl: isPackaged ? null : parseDevProxyUrl(env[DEV_PROXY_URL_ENV]),
+          fetchImpl: options.fetchImpl
+        });
+    this.proxyEndpoint = options.proxyEndpoint ?? endpoint;
     this.proxy = options.proxy ?? new IliadAiProxyClient({
-      endpoint: new ProxyEndpointResolver(userDataPath, {
-        devOverrideUrl: isPackaged ? null : parseDevProxyUrl(env[DEV_PROXY_URL_ENV]),
-        fetchImpl: options.fetchImpl
-      }),
+      endpoint: endpoint!,
       tokens: new InstallTokenStore(userDataPath),
       clientVersion: options.clientVersion ?? "0.0.0",
-      fetchImpl: options.fetchImpl
+      fetchImpl: this.warmer.fetch
     });
     this.diagnostics = options.diagnostics ?? createDiagnosticsLogger(userDataPath);
     this.validateKey = options.validateKey ?? ((key) => validateGroqApiKey(key, { fetchImpl: this.fetchImpl }));
@@ -234,6 +247,24 @@ export class WritingAiService {
     void this.diagnostics.flush();
   }
 
+  /**
+   * Keeps the connection to the active endpoint warm (the renderer calls it
+   * when the writer returns to the editor): own key → a bodiless, unauthenticated
+   * `HEAD` to Groq; free → `GET /healthz` on the proxy (never `/v1/generate`,
+   * no install token, no quota). Nothing when AI is blocked or the proxy isn't
+   * configured; at most once per origin per WRITING_AI_WARM_INTERVAL_MS, and
+   * not at all while real requests keep the connection in use.
+   */
+  async warmConnection(): Promise<"own-key" | "free" | "skipped"> {
+    const state = (await this.keyStore.getState()).state;
+    const route = routeForKeyState(state);
+    if (route === "own-key") return this.warmer.warm(GROQ_MODELS_URL, "HEAD") ? "own-key" : "skipped";
+    if (route !== "free" || !this.proxyEndpoint) return "skipped";
+    const endpoint = await this.proxyEndpoint.peek().catch(() => null);
+    if (!endpoint?.ok) return "skipped";
+    return this.warmer.warm(`${endpoint.baseUrl}/healthz`, "GET") ? "free" : "skipped";
+  }
+
   private async route(): Promise<{ name: AiRoute; route: GroqRoute | null; key: string | null }> {
     const read = await this.keyStore.read();
     if (read.state === "ok") return { name: "own-key", route: { kind: "own-key", apiKey: read.key }, key: read.key };
@@ -260,7 +291,7 @@ export class WritingAiService {
       const promptVersion = promptVersionFor(route.route.kind, taskKind);
       details = { ...details, promptVersion: String(promptVersion) };
       const task = checkedTask(buildTask(promptVersion));
-      const result = await streamGroqText({ route: route.route, task, signal, onDelta, fetchImpl: this.fetchImpl });
+      const result = await streamGroqText({ route: route.route, task, signal, onDelta, fetchImpl: this.warmer.fetch });
       // Diagnostics: codes, counts and timings only — never text, keys, tokens or bodies.
       this.diagnostics.info({
         area: "provider",

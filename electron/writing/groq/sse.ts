@@ -20,6 +20,8 @@ export interface GroqUsage {
   totalTokens: number;
   /** `completion_tokens_details.reasoning_tokens` when Groq reports it. */
   reasoningTokens: number | null;
+  /** `prompt_tokens_details.cached_tokens`: prompt tokens served from Groq's prompt cache, when reported. */
+  cachedPromptTokens: number | null;
 }
 
 export type ChatCompletionStreamEvent =
@@ -155,11 +157,14 @@ function parseUsage(value: unknown): GroqUsage | null {
   if (!isCount(prompt) || !isCount(completion)) return null;
   const details = value.completion_tokens_details;
   const reasoning = isRecord(details) && isCount(details.reasoning_tokens) ? details.reasoning_tokens : null;
+  const promptDetails = value.prompt_tokens_details;
+  const cached = isRecord(promptDetails) && isCount(promptDetails.cached_tokens) ? promptDetails.cached_tokens : null;
   return {
     promptTokens: prompt,
     completionTokens: completion,
     totalTokens: isCount(total) ? total : prompt + completion,
-    reasoningTokens: reasoning
+    reasoningTokens: reasoning,
+    cachedPromptTokens: cached
   };
 }
 

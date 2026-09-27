@@ -4,7 +4,7 @@ import { GROQ_MODEL } from "../writing/groq/prompts/index.js";
 import type { SetGroqKeyResult, WritingAiService, WritingAssistStatus } from "../writing/writingAiService.js";
 import { isTrustedIpcSender, type TrustedIpcEvent } from "./trust.js";
 
-type WritingSettingsService = Pick<WritingAiService, "writingAssistStatus" | "getGroqKeyState" | "setGroqApiKey">;
+type WritingSettingsService = Pick<WritingAiService, "writingAssistStatus" | "getGroqKeyState" | "setGroqApiKey" | "warmConnection">;
 
 const untrustedStatus: WritingAssistStatus = {
   corrector: { available: false, provider: null },
@@ -17,6 +17,17 @@ export function registerWritingSettingsIpc({ service }: { service: WritingSettin
   ipcMain.handle("writing:get-groq-key-state", (event) => handleGetGroqKeyStateIpc(event, service));
   ipcMain.handle("writing:set-groq-key", (event, key: unknown) => handleSetGroqKeyIpc(event, key, service));
   ipcMain.handle("writing:set-recording-shortcut", (event, recording: unknown) => handleSetRecordingShortcutIpc(event, recording));
+  ipcMain.handle("writing-ai:warm", (event) => handleWarmWritingAiIpc(event, service));
+}
+
+/**
+ * The writer is back in the editor with AI on: keep the connection to the
+ * active endpoint warm (rate-limited and route-aware in the service; no
+ * request body, no quota). Fire and forget: never fails the renderer.
+ */
+export async function handleWarmWritingAiIpc(event: TrustedIpcEvent, service: Pick<WritingSettingsService, "warmConnection">) {
+  if (!isTrustedIpcSender(event)) return;
+  await service.warmConnection().catch(() => undefined);
 }
 
 /**

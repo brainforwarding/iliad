@@ -66,6 +66,7 @@ import { useWritingAssistPreferences } from "./preferences/writingAssistPreferen
 import { useAutocompletePreferences } from "./preferences/autocompletePreferences";
 import { useWritingPreferences, writingPreferencesForRequest } from "./preferences/writingPreferences";
 import { builtInAiAssistsAllowed } from "./editor/aiRequestSnapshot";
+import { createWarmConnectionThrottle } from "./editor/ideaAutocomplete/warmConnection";
 import type { EditorView } from "@codemirror/view";
 import type {
   FileTreeNode,
@@ -1532,6 +1533,8 @@ export default function App() {
       cancel: (requestId) => window.iliad.cancelTighten(requestId)
     };
   }, [activeFile, aiRoute, editorFile, language, requestGroqKey, requestWritingPreferences, strings.editor.aiNotices, strings.editor.tighten]);
+  // One throttle for the app: typing and focus keep the AI connection warm, at most one IPC a minute.
+  const warmWritingAiConnection = useMemo(() => createWarmConnectionThrottle(() => window.iliad.warmWritingAi?.()), []);
   const editorWritingAssists = useMemo<EditorWritingAssistsProps | undefined>(() => {
     if (!activeFile || activeFile.kind !== "markdown" || editorFile !== activeFile) {
       return undefined;
@@ -1547,6 +1550,7 @@ export default function App() {
       aiAssistsAvailable: builtInAiAssistsAllowed(activeFile.path),
       writingPreferences: requestWritingPreferences,
       aiRoute,
+      warmConnection: aiRoute && aiRoute !== "blocked" ? warmWritingAiConnection : undefined,
       onRequestAiKey: requestGroqKey,
       preferences: autocompleteOptions.preferences,
       onPartial: window.iliad.onAutocompletePartial,

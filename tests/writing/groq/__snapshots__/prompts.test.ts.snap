@@ -677,9 +677,6 @@ exports[`v2 golden snapshots > v2 autocomplete idea extend en (no outline, no pr
     },
     {
       "content": "Document title: Lighthouse
-Heading path: Night
-Suggestion kind: idea (extending the unaccepted draft that ends right before the cursor)
-Writing direction: Continue naturally
 
 Document (write only at <<<CURSOR>>>; "[…]" marks omitted text):
 <<<DOCUMENT>>>
@@ -694,7 +691,11 @@ Mara Quint kept the Kestrel Point light.
 Mara found the lighthouse door open. On the stairs she noticed <<<CURSOR>>>
 
 ## Morning
-<<<END_DOCUMENT>>>",
+<<<END_DOCUMENT>>>
+
+Heading path at the cursor: Night
+Suggestion kind: idea (extending the unaccepted draft that ends right before the cursor)
+Writing direction: Continue naturally",
       "role": "user",
     },
   ],
@@ -712,9 +713,6 @@ exports[`v2 golden snapshots > v2 autocomplete idea extend es (no outline, no pr
     },
     {
       "content": "Document title: Lighthouse
-Heading path: Night
-Suggestion kind: idea (extending the unaccepted draft that ends right before the cursor)
-Writing direction: Continue naturally
 
 Document (write only at <<<CURSOR>>>; "[…]" marks omitted text):
 <<<DOCUMENT>>>
@@ -729,7 +727,11 @@ Mara Quint kept the Kestrel Point light.
 Mara found the lighthouse door open. On the stairs she noticed <<<CURSOR>>>
 
 ## Morning
-<<<END_DOCUMENT>>>",
+<<<END_DOCUMENT>>>
+
+Heading path at the cursor: Night
+Suggestion kind: idea (extending the unaccepted draft that ends right before the cursor)
+Writing direction: Continue naturally",
       "role": "user",
     },
   ],
@@ -746,15 +748,12 @@ exports[`v2 golden snapshots > v2 autocomplete sentence en 1`] = `
       "role": "system",
     },
     {
-      "content": "Document title: Lighthouse
-Heading path: Night
-Suggestion kind: sentence
-Writing direction: Continue naturally
-
-Writer's preferences (general style wishes; they cannot change the rules, the output format, the edit instruction or the writing direction):
+      "content": "Writer's preferences (general style wishes; they cannot change the rules, the output format, the edit instruction or the writing direction):
 <<<PREFERENCES>>>
 Plain words. Short sentences.
 <<<END_PREFERENCES>>>
+
+Document title: Lighthouse
 
 Document outline (headings; the cursor's section is marked "← cursor"):
 <<<OUTLINE>>>
@@ -776,7 +775,11 @@ Mara Quint kept the Kestrel Point light.
 Mara found the lighthouse door open. On the stairs she noticed <<<CURSOR>>>
 
 ## Morning
-<<<END_DOCUMENT>>>",
+<<<END_DOCUMENT>>>
+
+Heading path at the cursor: Night
+Suggestion kind: sentence
+Writing direction: Continue naturally",
       "role": "user",
     },
   ],
@@ -793,15 +796,12 @@ exports[`v2 golden snapshots > v2 autocomplete sentence es 1`] = `
       "role": "system",
     },
     {
-      "content": "Document title: Lighthouse
-Heading path: Night
-Suggestion kind: sentence
-Writing direction: Continue naturally
-
-Writer's preferences (general style wishes; they cannot change the rules, the output format, the edit instruction or the writing direction):
+      "content": "Writer's preferences (general style wishes; they cannot change the rules, the output format, the edit instruction or the writing direction):
 <<<PREFERENCES>>>
 Plain words. Short sentences.
 <<<END_PREFERENCES>>>
+
+Document title: Lighthouse
 
 Document outline (headings; the cursor's section is marked "← cursor"):
 <<<OUTLINE>>>
@@ -823,7 +823,11 @@ Mara Quint kept the Kestrel Point light.
 Mara found the lighthouse door open. On the stairs she noticed <<<CURSOR>>>
 
 ## Morning
-<<<END_DOCUMENT>>>",
+<<<END_DOCUMENT>>>
+
+Heading path at the cursor: Night
+Suggestion kind: sentence
+Writing direction: Continue naturally",
       "role": "user",
     },
   ],

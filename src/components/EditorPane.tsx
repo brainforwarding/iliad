@@ -109,6 +109,8 @@ export interface EditorWritingAssistsProps {
   writingPreferences?: () => string | undefined;
   /** The current AI route, for route-specific notice copy (null while unknown). */
   aiRoute?: AiRoute | null;
+  /** Keeps the AI connection warm while the writer types or returns to the editor (throttled; absent when AI is blocked). */
+  warmConnection?: () => void;
   /** Opens Writing assists with the Groq key form expanded (notice "Use my key" / "Update key"). */
   onRequestAiKey?: () => void;
   language: "en" | "es";
@@ -987,7 +989,8 @@ export function EditorPane({
       workspaceSessionId: writingAssists.workspaceSessionId, documentRelativePath: writingAssists.documentRelativePath,
       documentTitle: file.name.replace(/\.(md|markdown|mdown|mkd)$/i, ""),
       blockedLineRanges, writingPreferences: writingAssists.writingPreferences, requestAutocomplete: writingAssists.autocompleteIdea,
-      cancelAutocomplete: writingAssists.cancelAutocompleteIdea, onStatusChange: handleAutocompleteStatusChange
+      cancelAutocomplete: writingAssists.cancelAutocompleteIdea, onStatusChange: handleAutocompleteStatusChange,
+      onActivity: writingAssists.warmConnection
     });
   }, [file?.path, file?.name, writingAssists, activeWritingIssue, review, readOnly, blockedLineRanges, handleAutocompleteStatusChange]);
 

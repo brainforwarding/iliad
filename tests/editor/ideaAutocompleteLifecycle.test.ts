@@ -1,6 +1,6 @@
 import { EditorState, type TransactionSpec } from "@codemirror/state";
 import { history, undo } from "@codemirror/commands";
-import type { EditorView, ViewUpdate } from "@codemirror/view";
+import type { DecorationSet, EditorView, ViewUpdate } from "@codemirror/view";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ideaAutocompleteExtension, resetSharedAutocompleteCooldownForTests, type IdeaAutocompleteExtensionOptions } from "../../src/editor/ideaAutocomplete/extension";
 import { defaultAutocompletePreferences } from "../../src/editor/ideaAutocomplete/options";
@@ -27,6 +27,7 @@ function harness(request = vi.fn<() => Promise<IdeaAutocompleteResult>>().mockRe
   };
   const plugin = (extensions[0] as unknown as { create(view: EditorView): {
     suggestion: { insert: string } | null;
+    decorations: DecorationSet;
     update(update: ViewUpdate): void;
     triggerManual(kind?: "sentence" | "paragraph" | "idea"): boolean;
     lengthKey(kind: "sentence" | "paragraph" | "idea"): boolean;
@@ -335,6 +336,97 @@ describe("autocomplete lifecycle", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(plugin.suggestion?.insert).toBe("quiet room.");
     expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ state: "failed", reason: "free_exhausted" }));
+    plugin.destroy();
+  });
+
+  describe("instant working mark", () => {
+    /** Widgets in the decoration set, by kind: the ghost text or the working mark. */
+    const marks = (decorations: DecorationSet) => {
+      const found: Array<{ at: number; kind: string }> = [];
+      decorations.between(0, 1e9, (from, _to, value) => {
+        found.push({ at: from, kind: (value.spec.widget as object).constructor.name === "PendingMarkWidget" ? "pending" : "ghost" });
+      });
+      return found;
+    };
+    const pending = () => new Promise<IdeaAutocompleteResult>(() => undefined);
+
+    it("shows at the cursor the moment a length key starts a request, before any text", () => {
+      const request = vi.fn<() => Promise<IdeaAutocompleteResult>>().mockImplementation(pending);
+      const { plugin } = harness(request);
+      expect(marks(plugin.decorations)).toEqual([]);
+      plugin.lengthKey("sentence");
+      expect(request).toHaveBeenCalledOnce();
+      expect(marks(plugin.decorations)).toEqual([{ at: 20, kind: "pending" }]);
+      plugin.destroy();
+    });
+
+    it("is replaced by the streamed text as soon as the first delta arrives", () => {
+      let emit!: (event: { requestId: string; insert: string }) => void;
+      const request = vi.fn<() => Promise<IdeaAutocompleteResult>>().mockImplementation(pending);
+      const { plugin } = harness(request, { onPartial: (listener) => { emit = listener; return () => undefined; } });
+      plugin.lengthKey("paragraph");
+      const requestId = (request.mock.calls[0] as unknown as [{ requestId: string }])[0].requestId;
+      emit({ requestId, insert: "quiet" });
+      expect(marks(plugin.decorations)).toEqual([{ at: 20, kind: "ghost" }]);
+      plugin.destroy();
+    });
+
+    it("is removed on a finished answer, a cancel (Escape, typing) and an error", async () => {
+      const done = harness();
+      done.plugin.lengthKey("sentence");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(marks(done.plugin.decorations)).toEqual([{ at: 20, kind: "ghost" }]);
+      done.plugin.destroy();
+
+      const escaped = harness(vi.fn<() => Promise<IdeaAutocompleteResult>>().mockImplementation(pending));
+      escaped.plugin.lengthKey("sentence");
+      escaped.plugin.dismiss();
+      expect(marks(escaped.plugin.decorations)).toEqual([]);
+      expect(escaped.cancel).toHaveBeenCalledOnce();
+      escaped.plugin.destroy();
+
+      const typed = harness(vi.fn<() => Promise<IdeaAutocompleteResult>>().mockImplementation(pending));
+      typed.plugin.lengthKey("sentence");
+      typed.view.dispatch({ changes: { from: 20, insert: "x" }, selection: { anchor: 21 }, userEvent: "input.type" });
+      expect(marks(typed.plugin.decorations)).toEqual([]);
+      typed.plugin.destroy();
+
+      const failed = harness(vi.fn<() => Promise<IdeaAutocompleteResult>>().mockResolvedValue({ ok: false, reason: "provider" }));
+      failed.plugin.lengthKey("sentence");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(marks(failed.plugin.decorations)).toEqual([]);
+      failed.plugin.destroy();
+
+      const thrown = harness(vi.fn<() => Promise<IdeaAutocompleteResult>>().mockRejectedValue(new Error("ipc")));
+      thrown.plugin.lengthKey("sentence");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(marks(thrown.plugin.decorations)).toEqual([]);
+      thrown.plugin.destroy();
+    });
+
+    it("sits after a visible draft being extended, which stays", async () => {
+      const request = vi.fn<() => Promise<IdeaAutocompleteResult>>()
+        .mockResolvedValueOnce({ ok: true, insert: "quiet room." })
+        .mockImplementationOnce(pending);
+      const { plugin } = harness(request);
+      plugin.lengthKey("sentence");
+      await vi.advanceTimersByTimeAsync(0);
+      plugin.lengthKey("paragraph");
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(marks(plugin.decorations)).toEqual([{ at: 20, kind: "ghost" }, { at: 20, kind: "pending" }]);
+      plugin.destroy();
+    });
+  });
+
+  it("reports writer activity (typing, focus) for the connection warm-up, never a request", () => {
+    const onActivity = vi.fn();
+    const { view, plugin, request } = harness(undefined, { onActivity });
+    view.dispatch({ changes: { from: 20, insert: "a" }, selection: { anchor: 21 }, userEvent: "input.type" });
+    plugin.update({ state: view.state, transactions: [], docChanged: false, selectionSet: false, focusChanged: true } as unknown as ViewUpdate);
+    expect(onActivity).toHaveBeenCalledTimes(2);
+    view.dispatch({ selection: { anchor: 0 } });
+    expect(onActivity).toHaveBeenCalledTimes(2);
+    expect(request).not.toHaveBeenCalled();
     plugin.destroy();
   });
 });
