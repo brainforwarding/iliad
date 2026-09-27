@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ChevronLeft, ChevronRight, FolderOpen, PanelLeft } from "lucide-react";
+import { ArrowLeft, ArrowRight, FolderOpen, PanelLeft } from "lucide-react";
 import { Icon } from "./components/Icon";
 import { useCliBridge, type CliOpenSteps } from "./app/useCliBridge";
-import { useDocumentHistory, type DocumentHistoryDirection } from "./app/useDocumentHistory";
+import {
+  DOCUMENT_HISTORY_SHORTCUT_LABELS,
+  documentHistoryShortcut,
+  useDocumentHistory,
+  type DocumentHistoryDirection
+} from "./app/useDocumentHistory";
 import {
   documentCloseRequiresChoice,
   useDocumentPersistence,
@@ -1179,6 +1184,15 @@ export default function App() {
       if (newDocumentShortcut && !event.defaultPrevented && !event.repeat && !event.isComposing) {
         event.preventDefault();
         void createMarkdownFile();
+        return;
+      }
+
+      // ⌘[ / ⌘]: the editor leaves these keys to the app (CodeMirrorHost).
+      const historyDirection = documentHistoryShortcut(event);
+
+      if (historyDirection) {
+        event.preventDefault();
+        void navigateDocumentHistory(historyDirection);
       }
     };
 
@@ -1192,6 +1206,7 @@ export default function App() {
     closeSidebarPeek,
     closeTreeContextMenu,
     createMarkdownFile,
+    navigateDocumentHistory,
     openWorkspace,
     requestCloseDocument,
     settingsOpen,
@@ -1488,12 +1503,8 @@ export default function App() {
         : documentText;
   const breadcrumbParts = editorFile ? documentBreadcrumbParts(workspace?.name ?? "", editorFile.relativePath) : [];
   const sidebarToggleLabel = sidebarOpen ? strings.topbar.hideSidebar : strings.topbar.showSidebar;
-  const backLabel = backTarget
-    ? strings.topbar.backTo(markdownDisplayName(backTarget.node, strings.appName))
-    : strings.topbar.noPreviousDocument;
-  const forwardLabel = forwardTarget
-    ? strings.topbar.forwardTo(markdownDisplayName(forwardTarget.node, strings.appName))
-    : strings.topbar.noNextDocument;
+  const backLabel = backTarget ? strings.topbar.backTo(markdownDisplayName(backTarget.node, strings.appName)) : "";
+  const forwardLabel = forwardTarget ? strings.topbar.forwardTo(markdownDisplayName(forwardTarget.node, strings.appName)) : "";
 
   if (!workspace) {
     return (
@@ -1637,26 +1648,32 @@ export default function App() {
             >
               <Icon icon={PanelLeft} />
             </button>
-            <button
-              type="button"
-              className="icon-button topbar-history-button"
-              data-tooltip={backLabel}
-              aria-label={backLabel}
-              disabled={!canGoBack}
-              onClick={() => void navigateDocumentHistory("back")}
-            >
-              <Icon icon={ChevronLeft} />
-            </button>
-            <button
-              type="button"
-              className="icon-button topbar-history-button"
-              data-tooltip={forwardLabel}
-              aria-label={forwardLabel}
-              disabled={!canGoForward}
-              onClick={() => void navigateDocumentHistory("forward")}
-            >
-              <Icon icon={ChevronRight} />
-            </button>
+            {/* Back/Forward appear only when there is somewhere to go; they sit
+                after the toggle, so the toggle never moves. */}
+            {canGoBack ? (
+              <button
+                type="button"
+                className="icon-button topbar-history-button"
+                data-tooltip={backLabel}
+                data-tooltip-shortcut={DOCUMENT_HISTORY_SHORTCUT_LABELS.back}
+                aria-label={backLabel}
+                onClick={() => void navigateDocumentHistory("back")}
+              >
+                <Icon icon={ArrowLeft} />
+              </button>
+            ) : null}
+            {canGoForward ? (
+              <button
+                type="button"
+                className="icon-button topbar-history-button"
+                data-tooltip={forwardLabel}
+                data-tooltip-shortcut={DOCUMENT_HISTORY_SHORTCUT_LABELS.forward}
+                aria-label={forwardLabel}
+                onClick={() => void navigateDocumentHistory("forward")}
+              >
+                <Icon icon={ArrowRight} />
+              </button>
+            ) : null}
           </div>
         </div>
         <div className="topbar-editor-zone">

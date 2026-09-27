@@ -58,13 +58,14 @@ export function canonicalShortcut(key: string) {
 
 // Keys Iliad already uses: the app menu (electron/main.ts roles on macOS), app
 // shortcuts, and editor keys writers rely on. CodeMirror defaults that the
-// length keys already override (Mod-/ toggle comment, Mod-Enter blank line,
-// Mod-[ indent…) are deliberately not listed.
+// length keys already override (Mod-/ toggle comment, Mod-Enter blank line…)
+// are deliberately not listed. Mod-[ / Mod-] are Back/Forward document history
+// (the editor no longer binds them to indent).
 const takenShortcuts = new Set([
   "Mod-q", "Mod-h", "Mod-Alt-h", "Mod-z", "Mod-Shift-z", "Mod-x", "Mod-c", "Mod-v", "Mod-a",
   "Mod-0", "Mod-=", "Mod-+", "Mod-Shift-=", "Mod--", "Mod-Ctrl-f", "Mod-m",
   "Mod-w", "Mod-o", "Mod-n", "Mod-Ctrl-s", "Mod-Alt-f", "Mod-Shift-m", "Mod-Shift-j", "Alt-ArrowUp", "Alt-ArrowDown",
-  "Mod-f", "Mod-g", "Mod-Shift-g", "Mod-y",
+  "Mod-f", "Mod-g", "Mod-Shift-g", "Mod-y", "Mod-[", "Mod-]",
   ...["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Backspace", "Delete"].flatMap((key) =>
     [`Mod-${key}`, `Alt-${key}`, `Mod-Shift-${key}`, `Alt-Shift-${key}`])
 ].map(canonicalShortcut));

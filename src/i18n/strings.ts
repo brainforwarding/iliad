@@ -13,9 +13,7 @@ export const appStrings = {
       showSidebar: "Show sidebar",
       documentLocation: "Document location",
       backTo: (name: string) => `Back to ${name}`,
-      noPreviousDocument: "No previous document",
       forwardTo: (name: string) => `Forward to ${name}`,
-      noNextDocument: "No next document",
       saveStatus: {
         saved: (time: string) => `Saved ${time}`,
         saving: "Saving...",
@@ -384,9 +382,7 @@ export const appStrings = {
       showSidebar: "Mostrar barra lateral",
       documentLocation: "Ubicación del documento",
       backTo: (name: string) => `Volver a ${name}`,
-      noPreviousDocument: "No hay documento anterior",
       forwardTo: (name: string) => `Avanzar a ${name}`,
-      noNextDocument: "No hay documento siguiente",
       saveStatus: {
         saved: (time: string) => `Guardado ${time}`,
         saving: "Guardando...",

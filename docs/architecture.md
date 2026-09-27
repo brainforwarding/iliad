@@ -321,6 +321,8 @@ The app keeps one active document, not tabs. Back/Forward history is an in-memor
 
 - Normal file-tree Markdown opens, created Markdown files, duplicated Markdown files, and rendered internal Markdown links record the previous active document after the target opens successfully.
 - Back and Forward open valid Markdown targets through the same save-before-open path as normal document navigation.
+- The Back/Forward arrows sit after the sidebar toggle in the top row and appear only when there is a target in that direction (no disabled placeholders), so the toggle never moves. Their tooltips name the target and show the key chip.
+- ⌘[ is Back and ⌘] is Forward, handled by the window keydown with the other app shortcuts (ignored when repeated, composing or already handled, and never while a Writing assists shortcut is recording). The editor leaves these keys to the app: `CodeMirrorHost` installs CodeMirror's default keymap without Mod-[ / Mod-] (indentLess/indentMore; Tab / Shift-Tab still indent), and both keys are in the Writing assists taken-shortcut list.
 - Failed saves or failed reads must not mutate history.
 - Opening a new document normally clears Forward history.
 - Stale history paths are skipped only after a successful Back/Forward navigation to the next valid target.

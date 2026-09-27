@@ -7,6 +7,27 @@ const maxHistoryEntries = 50;
 
 export type DocumentHistoryDirection = "back" | "forward";
 
+/** Tooltip chips for the Back/Forward shortcuts (macOS glyphs, like the sidebar's). */
+export const DOCUMENT_HISTORY_SHORTCUT_LABELS: Record<DocumentHistoryDirection, string> = {
+  back: "\u2318[",
+  forward: "\u2318]"
+};
+
+type HistoryShortcutEvent = Pick<
+  KeyboardEvent,
+  "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey" | "repeat" | "isComposing" | "defaultPrevented"
+>;
+
+/**
+ * ⌘[ is Back and ⌘] is Forward (Ctrl on other platforms). Held, composing or
+ * already-handled keys are ignored, like the other window shortcuts.
+ */
+export function documentHistoryShortcut(event: HistoryShortcutEvent): DocumentHistoryDirection | null {
+  if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return null;
+  if (event.repeat || event.isComposing || event.defaultPrevented) return null;
+  return event.key === "[" ? "back" : event.key === "]" ? "forward" : null;
+}
+
 export interface DocumentHistoryTarget {
   node: FileTreeNode;
   path: string;
