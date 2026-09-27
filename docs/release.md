@@ -15,6 +15,19 @@ Update-aware releases also have a machine-readable updater manifest. Treat
 agents should never rely on memory here: run the verification script in this
 runbook and do not create the GitHub release if it fails.
 
+Since 0.6.0 the ZIP and `latest-mac.yml` drive live updates: every installed
+Iliad downloads the ZIP that `latest-mac.yml` names, checks its SHA512, and
+Squirrel.Mac swaps it in (spec `specs/2026-09-27-in-app-updates.md`). Never
+publish a release whose ZIP isn't the notarized, stapled app: the order is
+staple the `.app`, repackage the ZIP (and DMG) from it with `--prepackaged`,
+then hash that final ZIP into `latest-mac.yml` (`scripts/release-mac.sh`
+`notarize-app` → `repackage` → `metadata`, and `check` validates the app
+inside the ZIP). Squirrel.Mac also requires the new app to keep the bundle id
+`md.iliad.app`, Team ID `K542ZFQH6B` and the same designated requirement, or
+installed copies can't update. A bad release reaches users on its own within
+hours, so a broken one must be followed by a fixed, higher version (updates
+never downgrade).
+
 ## One-command release
 
 `scripts/release-mac.sh` runs this whole runbook on the signing Mac (Apple
@@ -359,8 +372,10 @@ the own tap `brainforwarding/homebrew-tap` (`Casks/iliad-md.rb`), so users run
 `brew install --cask brainforwarding/tap/iliad-md`. It installs the app and
 links `$(brew --prefix)/bin/iliad` to the bundle's CLI wrapper (`binary`
 stanza); brew users do not need `iliad install`. It uses the versioned DMG URL
-(Homebrew needs one checksum per version) and omits `auto_updates` on purpose:
-the app only notifies about updates, so `brew upgrade` must keep upgrading it.
+(Homebrew needs one checksum per version) and declares `auto_updates true`
+(0.6.0+): the app updates itself, so plain `brew upgrade` leaves it alone
+(`brew upgrade --greedy` still upgrades it). Brew users get the same in-app
+update flow; `release:update-homebrew-cask` keeps the stanza.
 
 After the GitHub release is live, from the release worktree:
 

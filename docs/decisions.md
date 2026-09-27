@@ -539,3 +539,37 @@ A file name is cheap to change and fully visible, unlike text edits, which
 stay review-first. Any other model-authored change still needs review.
 
 Spec: [2026-09-27 name untitled documents](../specs/2026-09-27-name-untitled-documents.md).
+
+## ADR-0025: Iliad Updates Itself, Only On A Click Or A Quit, After Saving
+
+Status: accepted (2026-09-27). Replaces the notify-only update check (0.2–0.5).
+
+Iliad checks for updates on its own (~10 s after launch, then at most every 6
+hours), downloads a newer release in the background with electron-updater
+(GitHub provider, the `latest-mac.yml` and ZIP every release already
+publishes; Squirrel.Mac underneath), and shows a small button at the right end
+of the sidebar footer. Clicking it saves every window's work and restarts on
+the new version. If the writer never clicks, the update installs when they
+quit — through the same save preflight.
+
+Constraints that keep it safe:
+
+- Never without the writer: `autoInstallOnAppQuit` is off; installing happens
+  only after a click on Update or a Quit, and both first ask every window to
+  flush saves and pending comment writes. Any failed save, or a window that
+  doesn't answer in 10 s, cancels.
+- A restart ends the session-scoped outside-change review, so with a review
+  pending the click asks "Restart to update?" first (a normal Quit ends reviews
+  anyway and doesn't ask). Pending agent changes stay on disk as they are.
+- Never downgrades, never installs pre-releases. A copy that can't replace
+  itself (disk image, App Translocation, unwritable folder) keeps the old
+  fallback: the button opens the DMG download.
+- No new server, no new dependency beyond `electron-updater`, no telemetry.
+  Homebrew's cask declares `auto_updates true`.
+
+Why: most writers never used "Check for Updates…", and a manual DMG swap is
+the kind of chore Iliad should take away — as long as it never costs a
+keystroke. A one-time "What's new" card (bundled per release, local
+last-seen version) says what changed.
+
+Spec: [2026-09-27 in-app updates](../specs/2026-09-27-in-app-updates.md).

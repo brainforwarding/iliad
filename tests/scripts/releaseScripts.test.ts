@@ -111,6 +111,20 @@ describe("release:update-homebrew-cask", () => {
     );
   });
 
+  it("keeps (or restores) auto_updates true", async () => {
+    await mkdir(path.join(root, "packaging", "homebrew"), { recursive: true });
+    const cask = await readFile(path.join(repoRoot, "packaging", "homebrew", "iliad-md.rb"), "utf8");
+    await writeFile(path.join(root, "packaging", "homebrew", "iliad-md.rb"), cask.replace(/^\s*auto_updates true\n/m, ""));
+    await writeFile(path.join(root, "release", `Iliad-MD-${version}-mac-arm64.dmg`), "dmg-bytes");
+
+    expect((await runScript("updateHomebrewCask.mjs")).code).toBe(0);
+    const updated = await readFile(path.join(root, "packaging", "homebrew", "iliad-md.rb"), "utf8");
+    expect(updated.match(/^  auto_updates true$/gm)).toHaveLength(1);
+    expect(updated.indexOf("auto_updates true")).toBeLessThan(updated.indexOf("depends_on arch"));
+    expect((await runScript("updateHomebrewCask.mjs")).code).toBe(0);
+    expect((await readFile(path.join(root, "packaging", "homebrew", "iliad-md.rb"), "utf8")).match(/auto_updates/g)).toHaveLength(1);
+  });
+
   it("fails without the release DMG", async () => {
     await mkdir(path.join(root, "packaging", "homebrew"), { recursive: true });
     await copyFile(path.join(repoRoot, "packaging", "homebrew", "iliad-md.rb"), path.join(root, "packaging", "homebrew", "iliad-md.rb"));
@@ -125,7 +139,7 @@ describe("packaging/homebrew/iliad-md.rb", () => {
     expect(cask).toContain('app "Iliad MD.app"');
     expect(cask).toContain('binary "#{appdir}/Iliad MD.app/Contents/Resources/bin/iliad"');
     expect(cask).toContain("/releases/download/v#{version}/Iliad-MD-#{version}-mac-arm64.dmg");
-    // The app only notifies about updates; brew upgrade must keep working.
-    expect(cask).not.toMatch(/auto_updates/);
+    // Iliad updates itself (0.6.0+): plain `brew upgrade` leaves it to the app.
+    expect(cask).toMatch(/^  auto_updates true$/m);
   });
 });

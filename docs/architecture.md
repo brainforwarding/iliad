@@ -299,10 +299,13 @@ closing Settings or leaving Writing ends shortcut recording and releases the
 menu-shortcut pause.
 
 - General (`GeneralSettings.tsx`): App language, Version (the package version
-  injected by Vite as `__ILIAD_VERSION__`), Updates (Check now; Checking… / Up
-  to date / failed / "Iliad MD x is ready" with Download and What's new). The
-  app menu's "Check for Updates…" opens Settings on General and runs the check.
-  An available update puts an amber dot on the footer row and the General tab.
+  injected by Vite as `__ILIAD_VERSION__`), Updates in words (`updateRowView`):
+  Check now; Checking… / Up to date / "Couldn't check for updates." /
+  "Downloading x… 42%" / "Iliad x is ready" with Restart to update and What's
+  new / "Iliad x is available" + "This copy can't update itself." with
+  Download. The app menu's "Check for Updates…" opens Settings on General and
+  runs a manual check. There is no amber dot any more: the footer's update
+  button (see "In-app updates") is the only signal.
 - Typography (`TypographySettings.tsx`): Font, Size (A− N px A+, 14–24), Reset.
 - Writing (`WritingAssistsSettings.tsx`): the Writing assists rows below.
   AI notices' "Use my key" opens this tab with the key field focused.
@@ -615,12 +618,57 @@ at a bundle path, not a version, so replacing the app in place keeps them
 valid. The Homebrew cask (`packaging/homebrew/iliad-md.rb`) links the same
 wrapper with its `binary` stanza.
 
-The in-app update check (`electron/updates/updateService.ts`) is notify-only:
-it reads the latest GitHub release and opens its DMG URL. Every release also
-carries an unversioned `Iliad-MD-arm64.dmg` (the stable
-`releases/latest/download/` URL); `selectMacDmgAsset` prefers the versioned
-DMG so asset order never matters, and `latest-mac.yml` never lists the stable
-copy.
+### In-app updates
+
+Iliad updates itself (spec `specs/2026-09-27-in-app-updates.md`, ADR-0025).
+Main owns the state in `electron/updates/`; every window mirrors it.
+
+- `appUpdater.ts` (`AppUpdateController`) wraps electron-updater's
+  `autoUpdater` (MacUpdater over Squirrel.Mac, GitHub provider reading the
+  published `latest-mac.yml` through the packaged `app-update.yml`) with
+  `autoDownload = true`, `autoInstallOnAppQuit = false`, no pre-releases, no
+  downgrades, logger to `console`. The updater is injectable (`UpdaterLike`)
+  and loaded lazily (`electronUpdater.ts`), never in development.
+- States: idle → checking → current | available → downloading(percent) →
+  ready → installing, plus error (only manual checks surface it) and
+  unsupported. A newer release replaces a ready one.
+- Schedule: first check ~10 s after launch, then at most once per 6 hours
+  (a 10-minute tick looks whether one is due). Manual checks (Check now, the
+  app menu) always run. Failed automatic checks and background downloads are
+  silent; the next check retries.
+- `canSelfUpdate.ts`: packaged, macOS, resolved bundle path not under
+  `AppTranslocation`, not on a read-only volume, parent folder writable (the
+  same checks as `bin/lib/install.mjs`). Otherwise the copy is `unsupported`
+  and uses the old notify-only GitHub check (`updateService.ts`,
+  `selectMacDmgAsset`): the button opens the DMG download. Every release also
+  carries an unversioned `Iliad-MD-arm64.dmg` (the stable
+  `releases/latest/download/` URL); `selectMacDmgAsset` prefers the versioned
+  DMG so asset order never matters, and `latest-mac.yml` never lists the
+  stable copy.
+- Restart safety: Update (or a download finishing after Update was clicked,
+  `installWhenReady`) asks every live window over `updates:prepare-restart`
+  (`restartCoordinator.ts`). Each renderer (`src/app/useAppUpdate.ts`) flushes
+  the document save and pending comment writes; a failure answers no and shows
+  the normal save error. With an outside-change review pending (the baseline is
+  session-scoped, so a restart ends it) it shows "Restart to update?" and
+  answers after the click (it tells main it is waiting, which lifts the 10 s
+  timeout). Any no, or silence past 10 s, cancels. All OK →
+  `quitAndInstall(false, true)`.
+- Normal Quit with an update ready: `before-quit` is held once
+  (`AppUpdateController.beforeQuit`), windows run the save step only, then the
+  update installs without relaunching (`autoRunAppAfterInstall = false`). A
+  failed save cancels the quit. Renderers are never asked anything during
+  `before-quit-for-update`; main's quit cleanup runs exactly once.
+- IPC: `updates:get-state`, `updates:check`, `updates:install`, push
+  `updates:state`, `updates:prepare-restart` / `updates:prepare-restart-response`,
+  plus the menu's `updates:check-requested` / `updates:consume-pending-check-request`.
+- Renderer: `UpdateButton.tsx` at the right end of the sidebar footer (the
+  22px accent circle that grows into "↓ Update" on hover/focus; "Downloading
+  42%"; "Restarting…"), the confirmation popover, and `WhatsNewCard.tsx`: a
+  one-time card per version with an entry in `src/whatsNew/`, shown only to
+  someone who used Iliad before (a stored last-seen version older than this
+  one, or — from 0.5.0, which stored none — a workspace preference) and only
+  in the first window. The last-seen version is local app data.
 
 Relevant files:
 

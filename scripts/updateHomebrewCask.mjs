@@ -42,8 +42,25 @@ if (!versionLine.test(cask) || !shaLine.test(cask)) {
   fail("could not find the version and sha256 lines in packaging/homebrew/iliad-md.rb");
 }
 
+// Iliad updates itself (0.6.0+), so the cask says so: plain `brew upgrade`
+// leaves it to the app (`--greedy` still upgrades). Keep the stanza even if a
+// hand edit dropped it.
+function withAutoUpdates(text) {
+  if (/^\s*auto_updates true$/m.test(text)) {
+    return text;
+  }
+
+  const dependsOn = /^(\s*)depends_on /m;
+
+  if (!dependsOn.test(text)) {
+    fail("could not place auto_updates in packaging/homebrew/iliad-md.rb (no depends_on line)");
+  }
+
+  return text.replace(dependsOn, (line, indent) => `${indent}auto_updates true\n${line}`);
+}
+
 fs.writeFileSync(
   caskPath,
-  cask.replace(versionLine, `$1version "${version}"`).replace(shaLine, `$1sha256 "${sha256}"`)
+  withAutoUpdates(cask.replace(versionLine, `$1version "${version}"`).replace(shaLine, `$1sha256 "${sha256}"`))
 );
 console.log(`updated packaging/homebrew/iliad-md.rb to ${version} (sha256 ${sha256})`);
