@@ -97,6 +97,7 @@
 
   /* ---- Overlays & elevation ---- */
   --surface-inverse: rgba(35, 37, 35, 0.94); /* tooltips */
+  --surface-inverse-chip: rgba(255, 253, 246, 0.14); /* key chip inside a tooltip */
   --overlay: rgba(255, 254, 250, 0.98); /* popover / menu background */
   --overlay-veil: rgba(255, 254, 250, 0.82); /* launch panel glass */
   --overlay-faint: rgba(255, 254, 250, 0.12); /* faint glass on chrome */
@@ -114,6 +115,9 @@
   --glow-on: inset 0 0 26px 1px var(--agent-pulse); /* working-glow peak */
   --rail: inset 2px 0 0 var(--accent-rail); /* active-file left rail */
   --review-delete-line: var(--diff-del-line); /* strikethrough on deletions */
+
+  /* ---- Layout — window chrome ---- */
+  --topbar-height: 52px; /* the invisible top row: traffic lights + sidebar controls */
 
   /* ---- Radii — two, plus pill and circle ---- */
   --radius-surface: 8px; /* panels / cards / popovers */

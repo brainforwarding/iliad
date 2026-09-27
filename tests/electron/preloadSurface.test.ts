@@ -60,4 +60,32 @@ describe("preload API surface", () => {
     await (exposed.api?.setGroqApiKey as (key: string | null) => Promise<unknown>)(null);
     expect(invoke.mock.calls.map((call) => call[0])).toEqual(["writing:get-groq-key-state", "writing:set-groq-key"]);
   });
+
+  it("exposes window chrome: full-screen state and menu commands, nothing else", async () => {
+    const windowApi = exposed.api?.window as Record<string, (...args: unknown[]) => unknown>;
+    expect(Object.keys(windowApi).sort()).toEqual(["isFullscreen", "onFullscreenChanged", "onMenuCommand"]);
+
+    const { ipcRenderer } = await import("electron");
+    const invoke = vi.mocked(ipcRenderer.invoke);
+    const on = vi.mocked(ipcRenderer.on);
+    invoke.mockClear();
+    on.mockClear();
+    await windowApi.isFullscreen();
+    expect(invoke.mock.calls.map((call) => call[0])).toEqual(["window:is-fullscreen"]);
+
+    const fullscreen = vi.fn();
+    const commands = vi.fn();
+    windowApi.onFullscreenChanged(fullscreen);
+    windowApi.onMenuCommand(commands);
+    const handlers = Object.fromEntries(on.mock.calls.map(([channel, handler]) => [channel, handler as (...args: unknown[]) => void]));
+    expect(Object.keys(handlers).sort()).toEqual(["window:fullscreen-changed", "window:menu-command"]);
+
+    handlers["window:fullscreen-changed"]({}, true);
+    handlers["window:fullscreen-changed"]({}, "yes");
+    handlers["window:menu-command"]({}, "toggle-sidebar");
+    handlers["window:menu-command"]({}, "open-settings");
+    handlers["window:menu-command"]({}, "quit");
+    expect(fullscreen.mock.calls).toEqual([[true]]);
+    expect(commands.mock.calls).toEqual([["toggle-sidebar"], ["open-settings"]]);
+  });
 });

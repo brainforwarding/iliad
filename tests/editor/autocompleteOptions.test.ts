@@ -121,6 +121,13 @@ describe("recording a shortcut", () => {
     for (const taken of ["Mod-c", "Mod-v", "Mod-z", "Shift-Mod-z", "Mod-q", "Mod-w", "Mod--", "Mod-f", "Mod-Shift-m", "Alt-ArrowUp", "Mod-ArrowLeft", "Ctrl-Tab"]) {
       expect(checkShortcut(taken)).toBe("taken");
     }
+    // ⌘N (new document) and ⌃⌘S (View → Toggle Sidebar), in any modifier order.
+    for (const taken of ["Mod-n", "Mod-Ctrl-s", "Ctrl-Mod-s"]) {
+      expect(checkShortcut(taken)).toBe("taken");
+    }
+    const stored = normalizeAutocompletePreferences({ shortcuts: { continue: "Mod-n", sentence: "Ctrl-Mod-s", paragraph: "Mod-.", idea: "Mod-/" } }).shortcuts;
+    expect(Object.values(stored)).not.toContain("Mod-n");
+    expect(Object.values(stored)).not.toContain("Ctrl-Mod-s");
     // CodeMirror defaults the length keys already override stay available.
     expect(checkShortcut("Mod-/")).toBe("ok");
     expect(checkShortcut("Mod-[")).toBe("ok");

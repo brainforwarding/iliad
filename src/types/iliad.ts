@@ -486,6 +486,16 @@ export interface UpdatesApi {
   onCheckRequested: (listener: () => void) => () => void;
 }
 
+/** Commands the app menu sends to the window it was used in. */
+export type MenuCommand = "toggle-sidebar" | "open-settings";
+
+/** Window chrome state from main (see electron/ipc/window.ts). */
+export interface WindowApi {
+  isFullscreen: () => Promise<boolean>;
+  onFullscreenChanged: (listener: (fullscreen: boolean) => void) => () => void;
+  onMenuCommand: (listener: (command: MenuCommand) => void) => () => void;
+}
+
 export interface CliOpenDocumentRequest {
   id: string;
   /** Absolute, canonical path of a Markdown file inside this window's workspace. */
@@ -532,6 +542,7 @@ export interface IliadApi {
     }) => Promise<void>;
   };
   updates: UpdatesApi;
+  window?: WindowApi;
   cli?: CliApi;
   openExternalFile: (workspaceRoot: string, filePath: string) => Promise<string>;
   revealInFinder: (workspaceRoot: string, filePath: string) => Promise<void>;

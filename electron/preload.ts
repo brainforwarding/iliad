@@ -108,6 +108,36 @@ const api = {
       };
     }
   },
+  // Window chrome: full-screen state and app-menu commands for this window.
+  window: {
+    isFullscreen: () => invoke("window:is-fullscreen"),
+    onFullscreenChanged: (listener: (fullscreen: boolean) => void) => {
+      const handler = (_event: IpcRendererEvent, fullscreen: unknown) => {
+        if (typeof fullscreen === "boolean") {
+          listener(fullscreen);
+        }
+      };
+
+      ipcRenderer.on("window:fullscreen-changed", handler);
+
+      return () => {
+        ipcRenderer.removeListener("window:fullscreen-changed", handler);
+      };
+    },
+    onMenuCommand: (listener: (command: "toggle-sidebar" | "open-settings") => void) => {
+      const handler = (_event: IpcRendererEvent, command: unknown) => {
+        if (command === "toggle-sidebar" || command === "open-settings") {
+          listener(command);
+        }
+      };
+
+      ipcRenderer.on("window:menu-command", handler);
+
+      return () => {
+        ipcRenderer.removeListener("window:menu-command", handler);
+      };
+    }
+  },
   // Bridge for the `iliad` CLI (electron/cli): active document and open requests.
   cli: {
     setActiveDocument: (documentPath: string | null) => invoke("window:set-active-document", documentPath),

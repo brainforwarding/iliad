@@ -19,9 +19,21 @@ export function placeTooltip(anchor: Box, tip: { width: number; height: number }
   return { left, top };
 }
 
+/** The label, then the optional key chip (`data-tooltip-shortcut`) as its own element. */
+export function TooltipContent({ label, shortcut }: { label: string; shortcut?: string }) {
+  return (
+    <>
+      {label}
+      {shortcut ? <kbd className="app-tooltip-shortcut">{shortcut}</kbd> : null}
+    </>
+  );
+}
+
 /**
  * The one renderer for every `data-tooltip` attribute. CSS pseudo-element
  * tooltips cannot see the window edge, so labels near it were cut off.
+ * `data-tooltip-shortcut` adds a key chip; it is visual only, so the
+ * control's accessible name stays the action label.
  */
 export function TooltipLayer() {
   const [target, setTarget] = useState<HTMLElement | null>(null);
@@ -65,7 +77,7 @@ export function TooltipLayer() {
   return (
     <div ref={tipRef} className={position ? "app-tooltip is-visible" : "app-tooltip"} role="tooltip"
       style={position ?? { left: 0, top: 0 }}>
-      {target.dataset.tooltip}
+      <TooltipContent label={target.dataset.tooltip ?? ""} shortcut={target.dataset.tooltipShortcut} />
     </div>
   );
 }

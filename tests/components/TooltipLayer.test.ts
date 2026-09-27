@@ -1,5 +1,7 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { placeTooltip } from "../../src/components/TooltipLayer";
+import { placeTooltip, TooltipContent } from "../../src/components/TooltipLayer";
 
 const viewport = { width: 800, height: 600 };
 const tip = { width: 190, height: 22 };
@@ -20,5 +22,17 @@ describe("placeTooltip", () => {
 
   it("flips above when there is no room below", () => {
     expect(placeTooltip({ left: 400, top: 570, width: 28, height: 28 }, tip, viewport).top).toBe(570 - 6 - 22);
+  });
+});
+
+describe("TooltipContent", () => {
+  it("renders the shortcut as its own key chip after the label", () => {
+    expect(renderToStaticMarkup(createElement(TooltipContent, { label: "Show sidebar", shortcut: "\u2303\u2318S" }))).toBe(
+      'Show sidebar<kbd class="app-tooltip-shortcut">\u2303\u2318S</kbd>'
+    );
+  });
+
+  it("renders only the label without a shortcut", () => {
+    expect(renderToStaticMarkup(createElement(TooltipContent, { label: "Back" }))).toBe("Back");
   });
 });

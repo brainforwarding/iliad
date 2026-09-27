@@ -63,7 +63,7 @@ export function canonicalShortcut(key: string) {
 const takenShortcuts = new Set([
   "Mod-q", "Mod-h", "Mod-Alt-h", "Mod-z", "Mod-Shift-z", "Mod-x", "Mod-c", "Mod-v", "Mod-a",
   "Mod-0", "Mod-=", "Mod-+", "Mod-Shift-=", "Mod--", "Mod-Ctrl-f", "Mod-m",
-  "Mod-w", "Mod-o", "Mod-Alt-f", "Mod-Shift-m", "Mod-Shift-j", "Alt-ArrowUp", "Alt-ArrowDown",
+  "Mod-w", "Mod-o", "Mod-n", "Mod-Ctrl-s", "Mod-Alt-f", "Mod-Shift-m", "Mod-Shift-j", "Alt-ArrowUp", "Alt-ArrowDown",
   "Mod-f", "Mod-g", "Mod-Shift-g", "Mod-y",
   ...["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Backspace", "Delete"].flatMap((key) =>
     [`Mod-${key}`, `Alt-${key}`, `Mod-Shift-${key}`, `Alt-Shift-${key}`])

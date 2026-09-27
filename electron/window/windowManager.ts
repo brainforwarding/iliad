@@ -7,6 +7,7 @@ import { CliOpenRequestQueue } from "../cli/openRequests.js";
 import type { CliWindowStatus } from "../cli/protocol.js";
 import type { WorkspaceInfo } from "../launch/workspace.js";
 import { workspaceKey } from "../launch/workspace.js";
+import { watchWindowFullscreen } from "../ipc/window.js";
 import { createWindow } from "./createWindow.js";
 
 interface CreateIliadWindowOptions {
@@ -64,6 +65,8 @@ export class IliadWindowManager {
     window.on("closed", () => {
       this.unregisterWindow(webContentsId);
     });
+
+    watchWindowFullscreen(window);
 
     return window;
   }

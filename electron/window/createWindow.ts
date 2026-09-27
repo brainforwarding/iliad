@@ -14,10 +14,11 @@ export function createWindow() {
     minHeight: 640,
     title: "Iliad MD",
     icon: process.platform === "darwin" ? undefined : appIconPath,
-    backgroundColor: "#f7f7f4",
+    backgroundColor: "#fdfcf8",
     autoHideMenuBar: true,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    trafficLightPosition: { x: 18, y: 18 },
+    // Centered on the 52px top row (--topbar-height) with the 16px icons beside them.
+    trafficLightPosition: { x: 20, y: 19 },
     webPreferences: {
       preload: path.join(electronOutDirectory, "preload.js"),
       contextIsolation: true,

@@ -198,6 +198,12 @@ interface EditorPaneProps {
   onInsertImageReference: (relativePath: string) => Promise<string | null>;
   onOpenLink: (href: string) => void | Promise<void>;
   onCreateDocument?: () => void;
+  /**
+   * The empty right-side slot of the window's top row (App state from a
+   * callback ref, null until mounted). Stage 5 of the premium pass portals the
+   * review controls into it; unused until then.
+   */
+  topbarSlot?: HTMLElement | null;
   onEditorViewChange?: (view: EditorView) => void;
   contentSearchRevealTarget?: ContentSearchRevealTarget | null;
   onContentSearchRevealHandled?: (requestId: number) => void;

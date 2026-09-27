@@ -4,18 +4,16 @@
     grid-template-columns: minmax(220px, 72vw) minmax(0, 1fr);
   }
 
-  .sidebar-is-collapsed .app-topbar,
-  .is-focus-mode .app-topbar {
-    grid-template-columns: 108px minmax(0, 1fr);
+  .sidebar-is-collapsed .app-topbar {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .sidebar-is-collapsed.sidebar-is-peeking .app-topbar {
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   }
 
   .topbar-editor-zone {
     padding-right: 10px;
-  }
-
-  .document-tab {
-    max-width: 46vw;
-    padding: 0 8px 0 12px;
   }
 
   .editor-surface .cm-content {

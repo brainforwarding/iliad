@@ -9,14 +9,13 @@ export const appStrings = {
       openFolder: "Open Folder"
     },
     topbar: {
-      hideFileTree: "Hide file tree",
-      showFileTree: "Show file tree",
+      hideSidebar: "Hide sidebar",
+      showSidebar: "Show sidebar",
+      documentLocation: "Document location",
       backTo: (name: string) => `Back to ${name}`,
       noPreviousDocument: "No previous document",
       forwardTo: (name: string) => `Forward to ${name}`,
       noNextDocument: "No next document",
-      focusMode: "Focus mode",
-      exitFocusMode: "Exit focus mode",
       saveStatus: {
         saved: (time: string) => `Saved ${time}`,
         saving: "Saving...",
@@ -353,14 +352,13 @@ export const appStrings = {
       openFolder: "Abrir carpeta"
     },
     topbar: {
-      hideFileTree: "Ocultar árbol de archivos",
-      showFileTree: "Mostrar árbol de archivos",
+      hideSidebar: "Ocultar barra lateral",
+      showSidebar: "Mostrar barra lateral",
+      documentLocation: "Ubicación del documento",
       backTo: (name: string) => `Volver a ${name}`,
       noPreviousDocument: "No hay documento anterior",
       forwardTo: (name: string) => `Avanzar a ${name}`,
       noNextDocument: "No hay documento siguiente",
-      focusMode: "Modo de enfoque",
-      exitFocusMode: "Salir del modo de enfoque",
       saveStatus: {
         saved: (time: string) => `Guardado ${time}`,
         saving: "Guardando...",

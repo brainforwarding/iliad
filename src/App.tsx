@@ -1,15 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Focus,
-  FolderOpen,
-  Minimize2,
-  PanelLeftClose,
-  PanelLeftOpen,
-  X
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, FolderOpen, PanelLeft } from "lucide-react";
 import { Icon } from "./components/Icon";
 import { useCliBridge, type CliOpenSteps } from "./app/useCliBridge";
 import { useDocumentHistory, type DocumentHistoryDirection } from "./app/useDocumentHistory";
@@ -20,6 +11,8 @@ import {
 } from "./app/useDocumentPersistence";
 import { externalReviewTargetForActiveFile, useOutsideReview } from "./app/useOutsideReview";
 import { useSelectionComments } from "./app/useSelectionComments";
+import { useSidebarPeek } from "./app/useSidebarPeek";
+import { useWindowChrome } from "./app/useWindowChrome";
 import { useWorkspace } from "./app/useWorkspace";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
 import {
@@ -45,6 +38,7 @@ import { buildReviewQueueSummary, pendingFileTreeChangesFromQueue } from "./revi
 import type { ContentSearchRevealTarget } from "./editor/contentSearchReveal";
 import { useFileActions } from "./files/fileActions";
 import { findNode, findNodeByRelativePath } from "./files/fileTree";
+import { documentBreadcrumbParts } from "./files/pathUtils";
 import { useAppLanguage } from "./i18n/appLanguage";
 import { useEditorPreferences } from "./preferences/editorPreferences";
 import {
@@ -64,6 +58,9 @@ import type {
   WorkspaceInfo,
   WritingAssistStatus
 } from "./types/iliad";
+
+/** The View menu's Toggle Sidebar key (electron/main.ts), shown in the toggle's tooltip. */
+const SIDEBAR_SHORTCUT_LABEL = "\u2303\u2318S";
 
 function statusText(
   saveStatus: SaveStatus,
@@ -188,8 +185,10 @@ export default function App() {
   const { correctorEnabled, autocompleteEnabled, setCorrectorEnabled, setAutocompleteEnabled } =
     useWritingAssistPreferences();
   const autocompleteOptions = useAutocompletePreferences();
+  // Pinned sidebar. The hover peek (useSidebarPeek) is separate, transient state.
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [focusMode, setFocusMode] = useState(false);
+  // Right-side top-row slot; EditorPane portals into it once it exists (stage 5).
+  const [topbarSlot, setTopbarSlot] = useState<HTMLDivElement | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window === "undefined" ? 1200 : window.innerWidth
   );
@@ -214,6 +213,22 @@ export default function App() {
   const latestContentSearchRequestIdRef = useRef(0);
   const contentSearchRevealRequestIdRef = useRef(0);
   const closeTreeContextMenu = useCallback(() => setTreeContextMenu(null), []);
+  const {
+    peekOpen: sidebarPeekOpen,
+    closePeek: closeSidebarPeek,
+    regionHandlers: sidebarPeekRegion
+  } = useSidebarPeek({ enabled: !sidebarOpen, hold: Boolean(treeContextMenu) || renamingPath !== null });
+  const toggleSidebar = useCallback(() => {
+    closeSidebarPeek();
+    setSidebarOpen((open) => !open);
+  }, [closeSidebarPeek]);
+  const { isFullscreen } = useWindowChrome({
+    onMenuCommand: (command) => {
+      if (command === "toggle-sidebar") {
+        toggleSidebar();
+      }
+    }
+  });
   const requestReviewReveal = useCallback((path: string) => {
     logReviewNavigation("file_tree_reveal_requested", { revealPath: path });
     setReviewRevealPath(path);
@@ -1080,7 +1095,12 @@ export default function App() {
           return;
         }
 
-        setFocusMode(false);
+        // Escape with the peek showing hides only the peek.
+        if (sidebarPeekOpen) {
+          closeSidebarPeek();
+          return;
+        }
+
         setLanguageOpen(false);
         setTypographyOpen(false);
         setWritingAssistsOpen(false);
@@ -1115,13 +1135,34 @@ export default function App() {
       if (openShortcut && !event.defaultPrevented && !event.repeat && !event.isComposing) {
         event.preventDefault();
         void openWorkspace();
+        return;
+      }
+
+      const newDocumentShortcut =
+        (event.metaKey || event.ctrlKey) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        (event.key === "n" || event.key === "N");
+
+      if (newDocumentShortcut && !event.defaultPrevented && !event.repeat && !event.isComposing) {
+        event.preventDefault();
+        void createMarkdownFile();
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
 
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeFile, closeDialogOpen, closeTreeContextMenu, openWorkspace, requestCloseDocument]);
+  }, [
+    activeFile,
+    closeDialogOpen,
+    closeSidebarPeek,
+    closeTreeContextMenu,
+    createMarkdownFile,
+    openWorkspace,
+    requestCloseDocument,
+    sidebarPeekOpen
+  ]);
 
   useEffect(() => {
     if (!languageOpen) {
@@ -1286,12 +1327,16 @@ export default function App() {
   const shellClassName = useMemo(() => {
     const classes = ["app-shell"];
 
-    if (!sidebarOpen || focusMode) {
+    if (!sidebarOpen) {
       classes.push("sidebar-is-collapsed");
     }
 
-    if (focusMode) {
-      classes.push("is-focus-mode");
+    if (!sidebarOpen && sidebarPeekOpen) {
+      classes.push("sidebar-is-peeking");
+    }
+
+    if (isFullscreen) {
+      classes.push("is-fullscreen");
     }
 
     if (sidebarResizing) {
@@ -1299,7 +1344,7 @@ export default function App() {
     }
 
     return classes.join(" ");
-  }, [focusMode, sidebarOpen, sidebarResizing]);
+  }, [isFullscreen, sidebarOpen, sidebarPeekOpen, sidebarResizing]);
   const visibleStatus = statusText(saveStatus, lastSavedAt, strings.topbar.saveStatus);
   const shouldShowStatus = saveStatus !== "saved";
   const editorFile = virtualReviewFile ?? activeFile;
@@ -1436,15 +1481,14 @@ export default function App() {
       : activeReview?.file.kind === "delete_file"
         ? activeReview.file.baseContent
         : documentText;
-  const documentTabLabel = markdownDisplayName(activeFile, strings.appName);
-  const sidebarToggleLabel = sidebarOpen ? strings.topbar.hideFileTree : strings.topbar.showFileTree;
+  const breadcrumbParts = editorFile ? documentBreadcrumbParts(workspace?.name ?? "", editorFile.relativePath) : [];
+  const sidebarToggleLabel = sidebarOpen ? strings.topbar.hideSidebar : strings.topbar.showSidebar;
   const backLabel = backTarget
     ? strings.topbar.backTo(markdownDisplayName(backTarget.node, strings.appName))
     : strings.topbar.noPreviousDocument;
   const forwardLabel = forwardTarget
     ? strings.topbar.forwardTo(markdownDisplayName(forwardTarget.node, strings.appName))
     : strings.topbar.noNextDocument;
-  const focusModeLabel = focusMode ? strings.topbar.exitFocusMode : strings.topbar.focusMode;
 
   if (!workspace) {
     return (
@@ -1490,29 +1534,110 @@ export default function App() {
     );
   }
 
+  const fileTree = (
+    <FileTree
+      workspace={workspace}
+      recentWorkspaces={recentWorkspaces}
+      nodes={tree}
+      activePath={editorFile?.path}
+      selectedPath={selectedTreePathForFileTree}
+      pendingChanges={pendingTreeChanges}
+      pendingReviewCount={pendingReviewFileCount}
+      pendingReviewActive={pendingReviewActive}
+      pendingReviewBusy={pendingReviewDiscarding}
+      creatingFile={creatingFile}
+      creatingFolder={creatingFolder}
+      renamingPath={renamingPath}
+      revealPath={reviewRevealPath ?? revealFolderPath}
+      labels={strings.sidebar}
+      updateLabels={strings.updates}
+      updateStatus={updateStatus}
+      updateChecking={updateChecking}
+      onOpenNode={(node) => {
+        logReviewNavigation("file_tree_open_node", {
+          nodeRel: node.relativePath,
+          nodeKind: node.kind,
+          relativePath: node.relativePath,
+          path: node.path,
+          kind: node.kind
+        });
+                    clearReviewForNormalNavigation(node);
+        return openNode(node);
+      }}
+      onOpenPendingChange={(target) => {
+        logReviewNavigation("file_tree_open_pending_change", {
+          targetProposalId: target.proposalId,
+          targetFileId: target.fileId,
+          targetKind: target.kind,
+          targetRel: target.relativePath,
+          activeRel: activeFile?.relativePath ?? null,
+          kind: target.kind,
+          relativePath: target.relativePath
+        });
+        return handleManualReviewTargetChange({ proposalId: target.proposalId, fileId: target.fileId });
+      }}
+      onRevealComplete={(path) => {
+        logReviewNavigation("file_tree_reveal_completed", { revealPath: path });
+        if (reviewRevealPath === path) {
+          setReviewRevealPath(null);
+        }
+    
+        if (revealFolderPath === path) {
+          setRevealFolderPath(null);
+        }
+      }}
+      onRevealFailed={(path, reason) => {
+        logReviewNavigation("file_tree_reveal_failed", {
+          revealPath: path,
+          clearReason: reason
+        });
+      }}
+      onCreateFile={createMarkdownFile}
+      onCreateFolder={createFolder}
+      onOpenFolder={openWorkspace}
+      onOpenRecent={openRecentWorkspace}
+      onRevealWorkspace={() => void window.iliad.revealInFinder(workspace.path, workspace.path)}
+      onCheckForUpdates={checkForUpdates}
+      onDownloadUpdate={downloadUpdate}
+      onViewUpdateRelease={viewUpdateRelease}
+      onSelectNode={(node) => setSelectedTreePath(node.path)}
+      onSelectWorkspaceRoot={() => {
+        setSelectedTreePath(workspace.path);
+      }}
+      onAcceptPendingChanges={acceptPendingTreeChanges}
+      onRejectPendingChanges={rejectPendingTreeChanges}
+      onMoveNode={moveNode}
+      onShowContextMenu={(node, position) => setTreeContextMenu({ node, ...position })}
+      contextMenuOpen={Boolean(treeContextMenu)}
+      onCloseContextMenu={closeTreeContextMenu}
+      onCancelRename={() => setRenamingPath(null)}
+      onCommitRename={renameNode}
+      contentSearchProvider={fileTreeContentSearchProvider}
+      companionCommentCount={activeFile && commentsEnabled ? { documentPath: activeFile.path, count: commentCount } : null}
+    />
+  );
+
   return (
     <div ref={appShellRef} className={shellClassName} style={shellStyle}>
       <TooltipLayer />
       <header className="app-topbar">
-        <div className="topbar-sidebar-zone" />
-        <div className="topbar-editor-zone">
+        <div className="topbar-sidebar-zone" {...sidebarPeekRegion("topbar")}>
           <div className="topbar-navigation">
-            {focusMode ? (
-              <span className="topbar-control-spacer" />
-            ) : (
-              <button
-                type="button"
-                className="icon-button"
-                data-tooltip={sidebarToggleLabel}
-                aria-label={sidebarToggleLabel}
-                onClick={() => setSidebarOpen((open) => !open)}
-              >
-                {sidebarOpen ? <Icon icon={PanelLeftClose} /> : <Icon icon={PanelLeftOpen} />}
-              </button>
-            )}
             <button
               type="button"
               className="icon-button"
+              data-tooltip={sidebarToggleLabel}
+              data-tooltip-shortcut={SIDEBAR_SHORTCUT_LABEL}
+              aria-label={sidebarToggleLabel}
+              aria-expanded={sidebarOpen}
+              onClick={toggleSidebar}
+              {...sidebarPeekRegion("toggle")}
+            >
+              <Icon icon={PanelLeft} />
+            </button>
+            <button
+              type="button"
+              className="icon-button topbar-history-button"
               data-tooltip={backLabel}
               aria-label={backLabel}
               disabled={!canGoBack}
@@ -1522,7 +1647,7 @@ export default function App() {
             </button>
             <button
               type="button"
-              className="icon-button"
+              className="icon-button topbar-history-button"
               data-tooltip={forwardLabel}
               aria-label={forwardLabel}
               disabled={!canGoForward}
@@ -1531,23 +1656,24 @@ export default function App() {
               <Icon icon={ChevronRight} />
             </button>
           </div>
-
-          {activeFile ? (
-            <div className="document-tab">
-              <span>{documentTabLabel}</span>
-              <button
-                type="button"
-                className="document-tab-close"
-                aria-label={strings.documentClose.close}
-                onClick={requestCloseDocument}
-              >
-                <Icon icon={X} />
-              </button>
-            </div>
-          ) : (
-            <div className="topbar-document-slot" aria-hidden="true" />
-          )}
-
+        </div>
+        <div className="topbar-editor-zone">
+          {!sidebarOpen && !sidebarPeekOpen && breadcrumbParts.length > 0 ? (
+            <nav className="topbar-breadcrumb" aria-label={strings.topbar.documentLocation}>
+              <bdi className="topbar-breadcrumb-path">
+                {breadcrumbParts.map((part, index) => (
+                  <span
+                    key={`${index}:${part}`}
+                    className={index === breadcrumbParts.length - 1 ? "topbar-breadcrumb-current" : "topbar-breadcrumb-part"}
+                    aria-current={index === breadcrumbParts.length - 1 ? "page" : undefined}
+                  >
+                    {part}
+                  </span>
+                ))}
+              </bdi>
+            </nav>
+          ) : null}
+          <div ref={setTopbarSlot} className="topbar-slot" />
           <div className="topbar-actions">
             {shouldShowStatus && visibleStatus ? <span className="document-save-state">{visibleStatus}</span> : null}
             <TypographyMenu
@@ -1602,102 +1728,21 @@ export default function App() {
               onToggleOpen={() => setLanguageOpen((open) => !open)}
               open={languageOpen}
             />
-            <button
-              type="button"
-              className="icon-button"
-              data-tooltip={focusModeLabel}
-              aria-label={focusModeLabel}
-              onClick={() => setFocusMode((enabled) => !enabled)}
-            >
-              {focusMode ? <Icon icon={Minimize2} /> : <Icon icon={Focus} />}
-            </button>
           </div>
         </div>
       </header>
 
-      <div className="app-content">
-        {sidebarOpen && !focusMode ? (
-          <div id={sidebarRegionId} className="sidebar-frame">
-            <FileTree
-              workspace={workspace}
-              recentWorkspaces={recentWorkspaces}
-              nodes={tree}
-              activePath={editorFile?.path}
-              selectedPath={selectedTreePathForFileTree}
-              pendingChanges={pendingTreeChanges}
-              pendingReviewCount={pendingReviewFileCount}
-              pendingReviewActive={pendingReviewActive}
-              pendingReviewBusy={pendingReviewDiscarding}
-              creatingFile={creatingFile}
-              creatingFolder={creatingFolder}
-              renamingPath={renamingPath}
-              revealPath={reviewRevealPath ?? revealFolderPath}
-              labels={strings.sidebar}
-              updateLabels={strings.updates}
-              updateStatus={updateStatus}
-              updateChecking={updateChecking}
-              onOpenNode={(node) => {
-                logReviewNavigation("file_tree_open_node", {
-                  nodeRel: node.relativePath,
-                  nodeKind: node.kind,
-                  relativePath: node.relativePath,
-                  path: node.path,
-                  kind: node.kind
-                });
-                            clearReviewForNormalNavigation(node);
-                return openNode(node);
-              }}
-              onOpenPendingChange={(target) => {
-                logReviewNavigation("file_tree_open_pending_change", {
-                  targetProposalId: target.proposalId,
-                  targetFileId: target.fileId,
-                  targetKind: target.kind,
-                  targetRel: target.relativePath,
-                  activeRel: activeFile?.relativePath ?? null,
-                  kind: target.kind,
-                  relativePath: target.relativePath
-                });
-                return handleManualReviewTargetChange({ proposalId: target.proposalId, fileId: target.fileId });
-              }}
-              onRevealComplete={(path) => {
-                logReviewNavigation("file_tree_reveal_completed", { revealPath: path });
-                if (reviewRevealPath === path) {
-                  setReviewRevealPath(null);
-                }
+      {!sidebarOpen ? <div className="sidebar-peek-edge" aria-hidden="true" {...sidebarPeekRegion("edge")} /> : null}
+      {!sidebarOpen && sidebarPeekOpen ? (
+        <div id={sidebarRegionId} className="sidebar-frame sidebar-peek" {...sidebarPeekRegion("sidebar")}>
+          {fileTree}
+        </div>
+      ) : null}
 
-                if (revealFolderPath === path) {
-                  setRevealFolderPath(null);
-                }
-              }}
-              onRevealFailed={(path, reason) => {
-                logReviewNavigation("file_tree_reveal_failed", {
-                  revealPath: path,
-                  clearReason: reason
-                });
-              }}
-              onCreateFile={createMarkdownFile}
-              onCreateFolder={createFolder}
-              onOpenFolder={openWorkspace}
-              onOpenRecent={openRecentWorkspace}
-              onRevealWorkspace={() => void window.iliad.revealInFinder(workspace.path, workspace.path)}
-              onCheckForUpdates={checkForUpdates}
-              onDownloadUpdate={downloadUpdate}
-              onViewUpdateRelease={viewUpdateRelease}
-              onSelectNode={(node) => setSelectedTreePath(node.path)}
-              onSelectWorkspaceRoot={() => {
-                setSelectedTreePath(workspace.path);
-              }}
-              onAcceptPendingChanges={acceptPendingTreeChanges}
-              onRejectPendingChanges={rejectPendingTreeChanges}
-              onMoveNode={moveNode}
-              onShowContextMenu={(node, position) => setTreeContextMenu({ node, ...position })}
-              contextMenuOpen={Boolean(treeContextMenu)}
-              onCloseContextMenu={closeTreeContextMenu}
-              onCancelRename={() => setRenamingPath(null)}
-              onCommitRename={renameNode}
-              contentSearchProvider={fileTreeContentSearchProvider}
-              companionCommentCount={activeFile && commentsEnabled ? { documentPath: activeFile.path, count: commentCount } : null}
-            />
+      <div className="app-content">
+        {sidebarOpen ? (
+          <div id={sidebarRegionId} className="sidebar-frame">
+            {fileTree}
             <div
               ref={sidebarResizeHandleRef}
               className="sidebar-resize-handle"
@@ -1739,6 +1784,7 @@ export default function App() {
             onInsertImageReference={insertImageReference}
             onOpenLink={openDocumentLink}
             onCreateDocument={createMarkdownFile}
+            topbarSlot={topbarSlot}
             onEditorViewChange={handleEditorViewChange}
             contentSearchRevealTarget={contentSearchRevealTarget}
             onContentSearchRevealHandled={(requestId) => {

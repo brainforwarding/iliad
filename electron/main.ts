@@ -13,6 +13,7 @@ import { registerSearchIpc } from "./ipc/search.js";
 import { registerShellIpc } from "./ipc/shell.js";
 import { registerTightenIpc } from "./ipc/tighten.js";
 import { registerUpdatesIpc, updateCheckRequestedChannel } from "./ipc/updates.js";
+import { registerWindowIpc, sendMenuCommand } from "./ipc/window.js";
 import { registerWorkspaceIpc } from "./ipc/workspace.js";
 import { registerWritingCorrectorMemoryIpc } from "./ipc/writingCorrectorMemory.js";
 import { registerWritingSettingsIpc } from "./ipc/writingSettings.js";
@@ -138,6 +139,16 @@ function installApplicationMenu() {
     {
       label: "View",
       submenu: [
+        {
+          // Static label: main does not track each window's sidebar state.
+          label: "Toggle Sidebar",
+          accelerator: "Ctrl+Cmd+S",
+          click: (_item, targetWindow) => {
+            const window = targetWindow instanceof BrowserWindow ? targetWindow : BrowserWindow.getFocusedWindow();
+            sendMenuCommand(window, "toggle-sidebar");
+          }
+        },
+        { type: "separator" },
         { role: "resetZoom" },
         { role: "zoomIn" },
         { role: "zoomOut" },
@@ -329,6 +340,7 @@ app.whenReady().then(async () => {
     baselineService
   });
   registerSearchIpc();
+  registerWindowIpc();
   registerShellIpc();
   registerAssetIpc({
     getWindowWorkspace: (webContentsId) => windowManager.getWindowWorkspace(webContentsId),

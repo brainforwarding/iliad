@@ -1,118 +1,132 @@
 .app-shell {
   --sidebar-width: 276px;
+  position: relative;
   display: grid;
   height: 100%;
-  grid-template-rows: 44px minmax(0, 1fr);
+  grid-template-rows: var(--topbar-height) minmax(0, 1fr);
   background: var(--editor);
   /* clip, not hidden: an outer wrapper must never be a scroll container that
      focus or scrollIntoView can shift. Inner scroll owners stay scrollable. */
   overflow: clip;
 }
 
+/* The top row has no background or line of its own: its left part takes the
+   sidebar color, the rest is the page. Empty parts drag the window. */
 .app-topbar {
   display: grid;
-  min-height: 44px;
+  min-height: var(--topbar-height);
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-  border-bottom: 1px solid var(--hairline);
-  background: var(--editor);
   -webkit-app-region: drag;
   z-index: 20;
 }
 
-.sidebar-is-collapsed .app-topbar,
-.is-focus-mode .app-topbar {
-  grid-template-columns: 132px minmax(0, 1fr);
+.sidebar-is-collapsed .app-topbar {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+/* Over the peek the left part spans the sidebar again, so the pointer stays
+   "on the sidebar" there; no drag, or it would swallow the hover. */
+.sidebar-is-peeking .app-topbar {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
 }
 
 .topbar-sidebar-zone {
+  display: flex;
   min-width: 0;
+  align-items: center;
+  /* Clears the traffic lights (createWindow.ts trafficLightPosition). */
+  padding-left: 88px;
+  border-right: 1px solid var(--hairline);
+  background: var(--sidebar);
+}
+
+.sidebar-is-collapsed .topbar-sidebar-zone {
+  border-right: 0;
+  background: transparent;
+}
+
+.sidebar-is-peeking .topbar-sidebar-zone {
+  -webkit-app-region: no-drag;
+}
+
+/* Full screen has no traffic lights: the controls move to the far left. */
+.is-fullscreen .topbar-sidebar-zone {
+  padding-left: 10px;
 }
 
 .topbar-editor-zone {
-  display: grid;
+  display: flex;
   min-width: 0;
-  grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr);
-  align-items: end;
-  gap: 8px;
-  padding: 6px 14px 0;
-}
-
-.topbar-control-spacer {
-  display: block;
-  width: 30px;
-  height: 30px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px 0 18px;
 }
 
 .topbar-navigation {
-  align-self: center;
   display: inline-flex;
   min-width: 0;
   align-items: center;
   gap: 4px;
 }
 
-.topbar-document-slot {
-  align-self: stretch;
-  min-width: 0;
+.topbar-navigation .icon-button {
+  width: 28px;
+  height: 28px;
 }
 
-.document-tab {
-  align-self: stretch;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  min-width: 0;
-  max-width: min(360px, 42vw);
-  align-items: center;
-  gap: 6px;
-  padding: 0 8px 0 18px;
-  border: 1px solid var(--hairline-strong);
-  border-bottom-color: var(--editor);
-  border-radius: 8px 8px 0 0;
-  background: var(--editor);
-  color: var(--ink-2);
+.topbar-navigation .topbar-history-button {
+  width: 24px;
 }
 
-.document-tab span {
+.topbar-navigation .topbar-history-button + .topbar-history-button {
+  margin-left: -4px;
+}
+
+/* Where you are while the sidebar is hidden: "folder / sub / name",
+   ellipsized from the left so the document name stays visible. */
+.topbar-breadcrumb {
+  min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
-  font-size: var(--text-md);
-  font-weight: 500;
+  color: var(--muted-3);
+  font-size: var(--text-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
+  direction: rtl;
+  text-align: left;
 }
 
-.document-tab-close {
-  appearance: none;
-  display: inline-grid;
-  width: 22px;
-  height: 22px;
-  flex: 0 0 auto;
-  place-items: center;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  background: transparent;
+.topbar-breadcrumb-path {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.topbar-breadcrumb-part::after {
+  padding: 0 6px;
+  content: "/";
+}
+
+.topbar-breadcrumb-current {
   color: var(--muted-2);
-  cursor: pointer;
-  line-height: 0;
-  -webkit-app-region: no-drag;
 }
 
-.document-tab-close svg {
-  display: block;
+/* Stage 5 portals the document's review controls here. */
+.topbar-slot {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-end;
 }
 
-.document-tab-close:hover,
-.document-tab-close:focus-visible {
-  border-color: var(--hairline-strong);
-  background: var(--hover-wash);
-  color: var(--ink-2);
-  outline: none;
+.topbar-slot:empty {
+  align-self: stretch;
 }
 
 .topbar-actions {
-  align-self: center;
   display: inline-flex;
   min-width: 0;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: end;
   gap: 10px;
@@ -185,6 +199,19 @@
   transition: opacity 120ms ease;
 }
 
+.app-tooltip-shortcut {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-inverse-chip);
+  color: inherit;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
 .app-tooltip.is-visible {
   opacity: 1;
 }
@@ -255,7 +282,7 @@
 
 .app-content {
   display: grid;
-  height: calc(100vh - 44px);
+  height: calc(100vh - var(--topbar-height));
   min-height: 0;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   overflow: clip; /* see .app-shell */
@@ -269,6 +296,36 @@
   position: relative;
   min-width: 0;
   min-height: 0;
+}
+
+/* Peek: the same sidebar drawn over the page while the pointer is on the
+   toggle, the left edge or the sidebar. The page does not move. */
+.sidebar-peek {
+  position: absolute;
+  z-index: 15;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--sidebar-width);
+  padding-top: var(--topbar-height);
+  border: 1px solid var(--hairline);
+  border-left: 0;
+  border-radius: 0 10px 10px 0;
+  background: var(--sidebar);
+  overflow: clip;
+}
+
+.sidebar-peek .sidebar {
+  border-right: 0;
+}
+
+.sidebar-peek-edge {
+  position: absolute;
+  z-index: 14;
+  top: var(--topbar-height);
+  bottom: 0;
+  left: 0;
+  width: 6px;
 }
 
 .sidebar-resize-handle {
@@ -320,11 +377,11 @@
 }
 
 @media (max-width: 760px) {
-  .app-shell:not(.sidebar-is-collapsed):not(.is-focus-mode) .app-topbar {
+  .app-shell:not(.sidebar-is-collapsed) .app-topbar {
     grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   }
 
-  .app-shell:not(.sidebar-is-collapsed):not(.is-focus-mode) .app-content {
+  .app-shell:not(.sidebar-is-collapsed) .app-content {
     grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   }
 }

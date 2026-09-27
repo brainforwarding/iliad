@@ -30,3 +30,24 @@ export function relocatePath(oldRoot: string, newRoot: string, candidatePath: st
 
   return `${normalizeComparablePath(newRoot)}/${candidateComparable.slice(oldComparable.length + 1)}`;
 }
+
+/**
+ * The quiet top-row breadcrumb shown while the sidebar is hidden:
+ * workspace name, then each folder, then the document name without its
+ * Markdown extension ("docs / Circles / actividad-escucha").
+ */
+export function documentBreadcrumbParts(workspaceName: string, relativePath: string) {
+  const segments = relativePath
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter((segment) => segment && segment !== ".");
+
+  if (segments.length === 0) {
+    return workspaceName ? [workspaceName] : [];
+  }
+
+  const last = segments.length - 1;
+  segments[last] = segments[last].replace(/\.(md|markdown|mdown|mkd)$/i, "") || segments[last];
+
+  return workspaceName ? [workspaceName, ...segments] : segments;
+}
