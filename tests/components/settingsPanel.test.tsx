@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { GeneralSettings, updateRowView } from "../../src/components/settings/GeneralSettings";
+import { GeneralSettings, SUPPORT_URL, updateRowView } from "../../src/components/settings/GeneralSettings";
 import { SettingsPanel } from "../../src/components/settings/SettingsPanel";
 import { TypographySettings } from "../../src/components/settings/TypographySettings";
 import { WorkspaceMenu } from "../../src/components/WorkspaceMenu";
@@ -31,6 +31,7 @@ function general({ state = null as AppUpdateState | null, language = "en" as "en
       onInstallUpdate={noop}
       onOpenDownload={noop}
       onOpenReleaseNotes={noop}
+      onOpenSupport={noop}
     />
   );
 }
@@ -79,14 +80,22 @@ describe("Settings panel", () => {
 });
 
 describe("General settings", () => {
-  it("shows App language, Version and Updates rows (EN/ES)", () => {
+  it("ends with a quiet Support Iliad row: a Buy me a coffee link with the cup (EN/ES)", () => {
     const html = general();
-    expect(rowLabels(html)).toEqual(["App language", "Version", "Updates"]);
+    expect(html).toMatch(/class="writing-assist-link settings-support-link"[^>]*>Buy me a coffee<svg class="settings-support-cup"/);
+    expect(html.lastIndexOf("writing-assist-row-label")).toBeGreaterThan(html.indexOf("Check now"));
+    expect(general({ language: "es" })).toMatch(/settings-support-link"[^>]*>Invítame un café</);
+    expect(SUPPORT_URL).toBe("https://buymeacoffee.com/sebasonearth");
+  });
+
+  it("shows App language, Version, Updates and Support rows (EN/ES)", () => {
+    const html = general();
+    expect(rowLabels(html)).toEqual(["App language", "Version", "Updates", "Support Iliad"]);
     expect(html).toContain(">Iliad MD 0.6.0<");
     expect(html).toMatch(/aria-pressed="true"[^>]*>English</);
     expect(html).toMatch(/aria-pressed="false"[^>]*>Español</);
     expect(html).toMatch(/class="writing-assist-link"[^>]*>Check now</);
-    expect(rowLabels(general({ language: "es" }))).toEqual(["Idioma de la app", "Versión", "Actualizaciones"]);
+    expect(rowLabels(general({ language: "es" }))).toEqual(["Idioma de la app", "Versión", "Actualizaciones", "Apoyar Iliad"]);
     expect(general({ language: "es" })).toContain(">Buscar ahora<");
   });
 

@@ -21,6 +21,8 @@ type GeneralSettingsLabels = Pick<
   | "checkNow"
   | "download"
   | "whatsNew"
+  | "support"
+  | "buyMeACoffee"
 > & { english: string; spanish: string };
 
 interface GeneralSettingsProps {
@@ -34,6 +36,20 @@ interface GeneralSettingsProps {
   onInstallUpdate: () => void;
   onOpenDownload: () => void;
   onOpenReleaseNotes: () => void;
+  onOpenSupport: () => void;
+}
+
+/** Where "Buy me a coffee" goes (opened in the browser, like the site's links). */
+export const SUPPORT_URL = "https://buymeacoffee.com/sebasonearth";
+
+/** kanban.page's outline cup, the same one iliad.md uses next to "Buy me a coffee". */
+function CupIcon() {
+  return (
+    <svg className="settings-support-cup" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 8h13v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V8z" />
+      <path d="M17 10h1.4a2.6 2.6 0 0 1 0 5.2H17" />
+    </svg>
+  );
 }
 
 export type UpdateRowAction = "check" | "restart" | "download";
@@ -101,8 +117,9 @@ export function updateRowView(state: AppUpdateState | null, labels: GeneralSetti
 }
 
 /**
- * The General tab of Settings (Figma J): App language, Version, and the
- * update check and status that used to live in the workspace menu.
+ * The General tab of Settings (Figma J): App language, Version, the
+ * update check and status that used to live in the workspace menu, and a
+ * quiet last row to support Iliad (Figma "Website: support & updates", 5c).
  */
 export function GeneralSettings({
   labels,
@@ -113,7 +130,8 @@ export function GeneralSettings({
   onCheckForUpdates,
   onInstallUpdate,
   onOpenDownload,
-  onOpenReleaseNotes
+  onOpenReleaseNotes,
+  onOpenSupport
 }: GeneralSettingsProps) {
   const row = updateRowView(update, labels);
 
@@ -165,6 +183,13 @@ export function GeneralSettings({
             {labels.download}
           </button>
         ) : null}
+      </div>
+      <div className="writing-assist-row">
+        <RowCopy label={labels.support} />
+        <button type="button" className="writing-assist-link settings-support-link" onClick={onOpenSupport}>
+          {labels.buyMeACoffee}
+          <CupIcon />
+        </button>
       </div>
     </div>
   );

@@ -214,6 +214,8 @@ export const appStrings = {
       checkNow: "Check now",
       download: "Download",
       whatsNew: "What's new",
+      support: "Support Iliad",
+      buyMeACoffee: "Buy me a coffee",
       font: "Font",
       size: "Size",
       sizeValue: (size: number) => `${size} px`
@@ -603,6 +605,8 @@ export const appStrings = {
       checkNow: "Buscar ahora",
       download: "Descargar",
       whatsNew: "Novedades",
+      support: "Apoyar Iliad",
+      buyMeACoffee: "Invítame un café",
       font: "Letra",
       size: "Tamaño",
       sizeValue: (size: number) => `${size} px`

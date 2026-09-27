@@ -305,7 +305,9 @@ menu-shortcut pause.
   new / "Iliad x is available" + "This copy can't update itself." with
   Download. The app menu's "Check for Updates…" opens Settings on General and
   runs a manual check. There is no amber dot any more: the footer's update
-  button (see "In-app updates") is the only signal.
+  button (see "In-app updates") is the only signal. The last row, Support
+  Iliad, is a plain "Buy me a coffee" link (with the site's cup) that opens
+  https://buymeacoffee.com/sebasonearth in the browser through `openUrl`.
 - Typography (`TypographySettings.tsx`): Font, Size (A− N px A+, 14–24), Reset.
 - Writing (`WritingAssistsSettings.tsx`): the Writing assists rows below.
   AI notices' "Use my key" opens this tab with the key field focused.

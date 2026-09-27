@@ -39,7 +39,7 @@ import {
 import { ClipMark } from "./components/ClipMark";
 import { FileTree } from "./components/FileTree";
 import { TreeContextMenu, type TreeContextMenuState } from "./components/TreeContextMenu";
-import { GeneralSettings } from "./components/settings/GeneralSettings";
+import { GeneralSettings, SUPPORT_URL } from "./components/settings/GeneralSettings";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { TypographySettings } from "./components/settings/TypographySettings";
 import { GROQ_KEY_URL, WritingAssistsSettings } from "./components/settings/WritingAssistsSettings";
@@ -1879,6 +1879,7 @@ export default function App() {
               onInstallUpdate={appUpdate.install}
               onOpenDownload={appUpdate.openDownload}
               onOpenReleaseNotes={appUpdate.openReleaseNotes}
+              onOpenSupport={() => void window.iliad.openUrl(SUPPORT_URL).catch(() => undefined)}
             />
           ) : settingsTab === "typography" ? (
             <TypographySettings
