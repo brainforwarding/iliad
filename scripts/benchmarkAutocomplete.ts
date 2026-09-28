@@ -3,14 +3,19 @@
 //
 //   npm run benchmark:autocomplete -- [--dry-run] [--trials=N] [--samples]
 //   npm run benchmark:autocomplete -- --budget-probe [--dry-run]
-//   npm run benchmark:autocomplete -- --context [--dry-run] [--trials=N] [--only=a,b]
+//   npm run benchmark:autocomplete -- --context [--dry-run] [--trials=N] [--only=a,b] [--samples]
 //
-// --context: paired prompt v1 / v2 runs per case (spec
-// 2026-09-27-ai-context-and-preferences.md, Review "Benchmark"): late cursor
-// in a long document, an extended draft, ✦ AI edits, Spanish under both app
-// languages and max-byte Unicode. Reports body bytes, prompt tokens, time to
-// first token, completion time, cleaner/guard rejections and short samples
-// (synthetic fixture text only).
+// --context: paired prompt v2 / v3 runs per case (alternating order; specs
+// 2026-09-27-ai-context-and-preferences.md and
+// 2026-09-27-writing-rules-prompt-v3.md, Review "Benchmark"): late cursor in a
+// long document, an extended draft, ✦ AI edits, Spanish under both app
+// languages, max-byte Unicode, the shared EN/ES fixtures (sentence, paragraph,
+// idea, tighten, edit) and synthetic bait cases (unsupported causal claim,
+// generic opening, inflated ending, three-part rhetoric). Reports body bytes,
+// prompt tokens, time to first token, completion time, finish reasons,
+// cleaner/guard rejections, raw/cleaned length, em dashes, semicolons, a
+// colon heuristic and stock phrases, plus short samples (synthetic fixture
+// text only; --samples adds full texts as shuffled, blinded A/B pairs).
 //
 // Route: direct to Groq with GROQ_API_KEY (environment, or the git-ignored
 // repo-root .env.local). The key is never printed. The proxy route
@@ -35,8 +40,11 @@ import {
   AUTOCOMPLETE_MAX_PREFIX_CHARS,
   AUTOCOMPLETE_MAX_SUFFIX_CHARS,
   AUTOCOMPLETE_MAX_TITLE_CHARS,
-  FREE_ROUTE_PROMPT_VERSIONS,
   GROQ_PINNED_PARAMS,
+  LATEST_PROMPT_VERSION,
+  MIN_PROMPT_OVERHEAD_TOKENS,
+  WRITING_AI_MAX_TASK_BYTES,
+  WRITING_PREFERENCES_MAX_CHARS,
   TIGHTEN_MAX_INPUT_CHARS,
   TIGHTEN_MAX_INSTRUCTION_CHARS,
   buildWritingAiPrompt,
@@ -44,7 +52,8 @@ import {
   parseWritingAiTask,
   promptUtf8Bytes,
   type WritingAiPrompt,
-  type WritingAiTask
+  type WritingAiTask,
+  type WritingAiTaskV1
 } from "../electron/writing/groq/prompts/index";
 import { containsReasoningMarkers } from "../electron/writing/groq/sse";
 import {
@@ -69,7 +78,7 @@ const budgetProbe = args.includes("--budget-probe");
 const contextMode = args.includes("--context");
 const onlyCases = args.find((arg) => arg.startsWith("--only="))?.split("=")[1]?.split(",").filter(Boolean) ?? null;
 const showSamples = args.includes("--samples");
-const trials = Math.min(10, Math.max(1, Number(args.find((arg) => arg.startsWith("--trials="))?.split("=")[1] ?? (contextMode ? 1 : 3)) || 3));
+const trials = Math.min(10, Math.max(1, Number(args.find((arg) => arg.startsWith("--trials="))?.split("=")[1] ?? (contextMode ? 5 : 3)) || 3));
 
 function readGroqKey(): string | null {
   if (process.env.GROQ_API_KEY?.trim()) return process.env.GROQ_API_KEY.trim();
@@ -126,7 +135,7 @@ interface Row {
   sample?: string;
 }
 
-async function runTask(apiKey: string, id: string, task: WritingAiTask, trial: number): Promise<Row> {
+async function runTask(apiKey: string, id: string, task: WritingAiTaskV1, trial: number): Promise<Row> {
   const prompt = buildWritingAiPrompt(task);
   const kind = task.task === "autocomplete" ? task.kind : task.mode;
   const base = { case: id, kind, language: task.language, trial, maxCompletionTokens: prompt.maxCompletionTokens, promptBytes: promptUtf8Bytes(prompt) };
@@ -217,7 +226,7 @@ function summarize(rows: Row[]) {
 }
 
 async function benchmark(apiKey: string) {
-  const cases: Array<{ id: string; task: WritingAiTask }> = [...autocompleteCases, ...selectionCases];
+  const cases: Array<{ id: string; task: WritingAiTaskV1 }> = [...autocompleteCases, ...selectionCases];
   const rows: Row[] = [];
   for (let trial = 0; trial < trials; trial += 1) {
     for (const { id, task } of trial % 2 ? [...cases].reverse() : cases) {
@@ -288,6 +297,51 @@ function maxSelectionTask(flavor: (typeof ADVERSARIAL_FLAVORS)[number], seed: nu
   return task;
 }
 
+const V3_MAX_FLAVORS = ["cjk", "emoji-zwj", "random", "ascii-noise"] as const satisfies ReadonlyArray<(typeof ADVERSARIAL_FLAVORS)[number]>;
+
+/** The largest v2/v3 completion main can build: every field at its limit, a document far over the byte budget. */
+function maxContextAutocompleteTask(flavor: (typeof ADVERSARIAL_FLAVORS)[number], version: 2 | 3): WritingAiTask {
+  const text = (chars: number, salt: number) => adversarialText(flavor, chars, 97 + salt);
+  const documentText = text(60_000, 1);
+  const cursor = Math.floor(documentText.length * 0.7);
+  const task = buildAutocompleteTask(version, {
+    language: "en",
+    kind: "idea",
+    extend: false,
+    prefix: documentText.slice(cursor - AUTOCOMPLETE_MAX_PREFIX_CHARS, cursor),
+    suffix: documentText.slice(cursor, cursor + AUTOCOMPLETE_MAX_SUFFIX_CHARS),
+    documentTitle: text(AUTOCOMPLETE_MAX_TITLE_CHARS, 3),
+    headingPath: Array.from({ length: AUTOCOMPLETE_MAX_HEADING_COUNT }, (_, index) => text(AUTOCOMPLETE_MAX_HEADING_CHARS, 10 + index)),
+    nearbyHeadings: [],
+    direction: text(AUTOCOMPLETE_MAX_DIRECTION_CHARS, 4),
+    avoid: Array.from({ length: AUTOCOMPLETE_MAX_AVOID_COUNT }, (_, index) => text(AUTOCOMPLETE_MAX_AVOID_CHARS, 30 + index)),
+    document: { text: documentText, cursor },
+    preferences: text(WRITING_PREFERENCES_MAX_CHARS, 5).trim()
+  });
+  const parsed = parseWritingAiTask(task);
+  if (!parsed.ok) throw new Error(`probe task invalid: ${flavor} (${parsed.field})`);
+  return parsed.task;
+}
+
+function maxContextSelectionTask(flavor: (typeof ADVERSARIAL_FLAVORS)[number], version: 2 | 3): WritingAiTask {
+  const documentText = adversarialText(flavor, 60_000, 211);
+  const from = Math.floor(documentText.length / 2);
+  const text = documentText.slice(from, from + TIGHTEN_MAX_INPUT_CHARS);
+  const task = buildSelectionTask(version, {
+    language: "es",
+    mode: "edit",
+    instruction: adversarialText(flavor, TIGHTEN_MAX_INSTRUCTION_CHARS, 212),
+    text,
+    selection: { from: 0, to: text.length },
+    document: { text: documentText, selectionFrom: from, selectionTo: from + text.length },
+    preferences: adversarialText(flavor, WRITING_PREFERENCES_MAX_CHARS, 213).trim()
+  });
+  const parsed = parseWritingAiTask(task);
+  if (!parsed.ok) throw new Error(`probe task invalid: ${flavor} (${parsed.field})`);
+  if (Buffer.byteLength(JSON.stringify(parsed.task), "utf8") > WRITING_AI_MAX_TASK_BYTES) throw new Error("over the task budget");
+  return parsed.task;
+}
+
 const REASONING_HEAVY: WritingAiPrompt = {
   messages: [
     { role: "system", content: "Answer with the final number only." },
@@ -309,11 +363,23 @@ async function budgetProbes(apiKey: string) {
     overhead.push(await probePrompt(apiKey, `v${task.v}:${id}`, buildWritingAiPrompt(task)));
   }
 
-  // (c) Adversarial Unicode, every field at its maximum.
+  // The same fixtures and the context/bait cases as the v2 and v3 tasks the app builds (v3's longer system prompt).
+  for (const entry of contextCases({ all: true }).filter((item) => !item.id.startsWith("unicode") && !item.id.startsWith("edit-unicode"))) {
+    for (const version of [2, 3] as const) {
+      overhead.push(await probePrompt(apiKey, `v${version}:${entry.id}`, buildWritingAiPrompt(contextTask(entry, version))));
+    }
+  }
+
+  // (c) Adversarial Unicode, every field at its maximum (v1), and the largest
+  // v3 bodies main can build (56 KiB task, preferences at their limit).
   const adversarial = [];
   for (const flavor of ADVERSARIAL_FLAVORS) {
     adversarial.push(await probePrompt(apiKey, `v1:autocomplete-idea-max:${flavor}`, buildWritingAiPrompt(maxAutocompleteTask(flavor, 1))));
     adversarial.push(await probePrompt(apiKey, `v1:selection-edit-max:${flavor}`, buildWritingAiPrompt(maxSelectionTask(flavor, 1))));
+  }
+  for (const flavor of V3_MAX_FLAVORS) {
+    adversarial.push(await probePrompt(apiKey, `v3:autocomplete-idea-max:${flavor}`, buildWritingAiPrompt(maxContextAutocompleteTask(flavor, 3))));
+    adversarial.push(await probePrompt(apiKey, `v3:selection-edit-max:${flavor}`, buildWritingAiPrompt(maxContextSelectionTask(flavor, 3))));
   }
 
   // (a) max_completion_tokens bounds reasoning + content, on a reasoning-heavy prompt.
@@ -361,8 +427,11 @@ async function budgetProbes(apiKey: string) {
   const measuredOverhead = Math.max(maxOverhead, minimalOverhead);
   const allBudgeted = [...allPrompt, ...reasoningBudget];
 
+  const configuredOverheadFails = allPrompt.filter((row) => row.promptTokens === null || row.promptTokens > row.bytes + MIN_PROMPT_OVERHEAD_TOKENS);
+
   return {
-    promptVersion: FREE_ROUTE_PROMPT_VERSIONS.autocomplete,
+    promptVersions: "1 (fixtures, max fields), 2 and 3 (fixtures, context and bait cases), 3 (max bodies)",
+    latestPromptVersion: LATEST_PROMPT_VERSION,
     params: GROQ_PINNED_PARAMS,
     gates: {
       a_completionBoundsReasoning: {
@@ -377,7 +446,14 @@ async function budgetProbes(apiKey: string) {
       },
       c_promptTokensWithinBytesPlusOverhead: {
         pass: allPrompt.every((row) => row.promptTokens !== null && row.promptTokens <= row.bytes + measuredOverhead),
-        worstTokensPerByte: Math.max(...adversarial.map((row) => (row.promptTokens ?? 0) / row.bytes)).toFixed(3)
+        worstTokensPerByte: Math.max(...adversarial.map((row) => (row.promptTokens ?? 0) / row.bytes)).toFixed(3),
+        worstV3TokensPerByte: Math.max(...allPrompt.filter((row) => row.label.startsWith("v3:")).map((row) => (row.promptTokens ?? 0) / row.bytes)).toFixed(3)
+      },
+      d_configuredPromptOverheadHolds: {
+        promptOverheadTokens: MIN_PROMPT_OVERHEAD_TOKENS,
+        pass: configuredOverheadFails.length === 0,
+        failing: configuredOverheadFails.map((row) => row.label),
+        maxV3Overhead: Math.max(...allPrompt.filter((row) => row.label.startsWith("v3:")).map((row) => row.overhead ?? -Infinity))
       },
       reasoningNeverInContent: {
         pass: [...allBudgeted, reasoningIncluded, reasoningExcluded].every((row) => !row.reasoningLeak) && reasoningExcluded.reasoningFieldChars === 0,
@@ -395,7 +471,8 @@ async function budgetProbes(apiKey: string) {
 
 
 // ---------------------------------------------------------------------------
-// --context: paired v1 / v2 runs (whole-document context, spec 2026-09-27).
+// --context: paired v2 / v3 runs (whole-document context, spec 2026-09-27;
+// writing rules, spec 2026-09-27-writing-rules-prompt-v3.md).
 
 const CONTEXT_SAMPLE_CHARS = 220;
 
@@ -471,18 +548,23 @@ function unicodeDocument(): string {
 interface ContextCase {
   id: string;
   what: string;
+  /** The language the document is written in (the task's `language` is the app language). */
+  docLanguage: "en" | "es";
+  /** Spanish dialogue uses the raya: em dashes there are the writer's voice, not the model's habit. */
+  dialogue?: boolean;
   variant: "autocomplete" | "selection";
   autocomplete?: AutocompleteTaskInput;
   selection?: SelectionTaskInput;
 }
 
-function autocompleteCase(id: string, what: string, text: string, language: "en" | "es", kind: AutocompleteTaskInput["kind"], draft = ""): ContextCase {
+function autocompleteCase(id: string, what: string, text: string, language: "en" | "es", kind: AutocompleteTaskInput["kind"], draft = "", docLanguage: "en" | "es" = language): ContextCase {
   const cursor = text.length;
   const context = buildAutocompleteContext(text, cursor, { minPrefixChars: 8, includePreviousBlockOnEmptyPrefix: true, includePreviousBlockOnShortPrefix: true });
   if (!context) throw new Error(`no context for ${id}`);
   return {
     id,
     what,
+    docLanguage,
     variant: "autocomplete",
     autocomplete: {
       language,
@@ -501,7 +583,7 @@ function autocompleteCase(id: string, what: string, text: string, language: "en"
   };
 }
 
-function selectionCase(id: string, what: string, text: string, paragraph: string, language: "en" | "es", mode: "tighten" | "edit", instruction?: string): ContextCase {
+function selectionCase(id: string, what: string, text: string, paragraph: string, language: "en" | "es", mode: "tighten" | "edit", instruction?: string, docLanguage: "en" | "es" = language): ContextCase {
   const selectionFrom = text.indexOf(paragraph);
   if (selectionFrom < 0) throw new Error(`paragraph not found for ${id}`);
   const passageFrom = Math.max(0, text.lastIndexOf("\n\n", selectionFrom - 3) + 2);
@@ -511,6 +593,7 @@ function selectionCase(id: string, what: string, text: string, paragraph: string
   return {
     id,
     what,
+    docLanguage,
     variant: "selection",
     selection: {
       language,
@@ -524,7 +607,7 @@ function selectionCase(id: string, what: string, text: string, paragraph: string
   };
 }
 
-function contextCases(): ContextCase[] {
+function contextCases(options: { all?: boolean } = {}): ContextCase[] {
   const en = longEnglishDocument();
   const es = longSpanishDocument();
   const unicode = unicodeDocument();
@@ -533,23 +616,161 @@ function contextCases(): ContextCase[] {
   const esEdit = `${es.slice(0, es.lastIndexOf("## Recomendaciones"))}## Recomendaciones\n\nEl punto más débil de este año fue el horario de invierno. La persona a cargo del puerto piensa que el barco a la isla debería salir menos seguido en enero, porque casi nadie lo usa en esa época y además cuesta bastante dinero mantenerlo funcionando.\n\nOtros temas se detallan en el anexo.`;
   const esParagraph = "El punto más débil de este año fue el horario de invierno. La persona a cargo del puerto piensa que el barco a la isla debería salir menos seguido en enero, porque casi nadie lo usa en esa época y además cuesta bastante dinero mantenerlo funcionando.";
   const unicodeParagraph = "明年冬天，港务长应该";
-  return [
+  const cases = [
     autocompleteCase("late-en-sentence", "Late cursor in a long EN document (names only early)", en, "en", "sentence"),
     autocompleteCase("late-en-idea", "Late cursor, full idea", en, "en", "idea"),
     autocompleteCase("extend-en-paragraph", "Extending an unaccepted draft", en, "en", "paragraph", "reduce the number of Gull Line crossings in January and "),
-    autocompleteCase("late-es-app-en", "Spanish document, English app language", es, "en", "sentence"),
+    autocompleteCase("late-es-app-en", "Spanish document, English app language", es, "en", "sentence", "", "es"),
     autocompleteCase("late-es-app-es", "Spanish document, Spanish app language", es, "es", "paragraph"),
     autocompleteCase("unicode-max", "Max-byte Unicode (CJK, emoji, quotes) over the budget", unicode, "en", "sentence"),
     selectionCase("edit-en-rewrite", "✦ AI Rewrite (edit) late in the EN document", enEdit, enParagraph, "en", "edit", "Rewrite this to be clearer."),
     selectionCase("tighten-es-app-es", "✦ AI Shorten, Spanish document, Spanish app", esEdit, esParagraph, "es", "tighten"),
-    selectionCase("edit-es-app-en", "✦ AI Rewrite, Spanish document, English app", esEdit, esParagraph, "en", "edit", "Rewrite this to be clearer."),
-    selectionCase("edit-unicode-max", "✦ AI edit in a max-byte Unicode document", unicode, unicodeParagraph, "en", "edit", "Make it more formal.")
-  ].filter((entry) => !onlyCases || onlyCases.includes(entry.id));
+    selectionCase("edit-es-app-en", "✦ AI Rewrite, Spanish document, English app", esEdit, esParagraph, "en", "edit", "Rewrite this to be clearer.", "es"),
+    selectionCase("edit-unicode-max", "✦ AI edit in a max-byte Unicode document", unicode, unicodeParagraph, "en", "edit", "Make it more formal."),
+    ...fixtureCases(),
+    ...baitCases()
+  ];
+  return options.all ? cases : cases.filter((entry) => !onlyCases || onlyCases.includes(entry.id));
 }
 
-interface ContextRow {
+/** The shared EN/ES fixtures (tests/fixtures/writingCases.ts) as the app builds them: the local window, no snapshot. */
+function fixtureCases(): ContextCase[] {
+  const autocomplete = autocompleteCases.map(({ id, task }): ContextCase => ({
+    id: `fixture-${id}`,
+    what: `Fixture ${task.kind} (${task.language})`,
+    docLanguage: task.language,
+    dialogue: id.startsWith("dialogue-es"),
+    variant: "autocomplete",
+    autocomplete: {
+      language: task.language,
+      kind: task.kind,
+      extend: false,
+      prefix: task.prefix,
+      suffix: task.suffix,
+      documentTitle: task.documentTitle,
+      headingPath: task.headingPath,
+      nearbyHeadings: task.nearbyHeadings,
+      direction: "",
+      avoid: [],
+      document: { text: `${task.prefix}${task.suffix}`, cursor: task.prefix.length },
+      preferences: ""
+    }
+  }));
+  const selection = selectionCases.map(({ id, task }): ContextCase => ({
+    id: `fixture-${id}`,
+    what: `Fixture ✦ AI ${task.mode} (${task.language})`,
+    docLanguage: task.language,
+    variant: "selection",
+    selection: {
+      language: task.language,
+      mode: task.mode,
+      ...(task.mode === "edit" ? { instruction: task.instruction } : {}),
+      text: task.text,
+      selection: task.selection,
+      document: { text: task.text, selectionFrom: task.selection.from, selectionTo: task.selection.to },
+      preferences: ""
+    }
+  }));
+  return [...autocomplete, ...selection];
+}
+
+/**
+ * Synthetic bait (spec 2026-09-27-writing-rules-prompt-v3.md, Review 7): text
+ * that invites the AI habits the v3 rules name. Facts without reasons
+ * (unsupported causal claim), a fresh section under a title (generic
+ * opening), the end of a short report (inflated or upbeat ending) and a
+ * persuasive rewrite (three-part rhetoric, "not just X but Y").
+ */
+function baitCases(): ContextCase[] {
+  const causalEn = "# Reading groups\n\nSince March, students in 3rd grade take a reading test at the start of each term. Those who score below 40 points join a group of at most six students. Groups meet three times a week for 45 minutes with the same teacher. ";
+  const causalEs = "# Grupos de lectura\n\nDesde marzo, los estudiantes de 3° básico rinden una prueba de lectura al inicio de cada semestre. Quienes sacan menos de 40 puntos entran a un grupo de máximo seis estudiantes. Los grupos se reúnen tres veces por semana durante 45 minutos con la misma profesora. ";
+  const openingEn = "# Why we moved the Tuesday workshop\n\n";
+  const openingEs = "# Por qué cambiamos el taller del martes\n\n";
+  const endingEn = "# Pilot report: evening library hours\n\nFrom 2 September to 25 October the library stayed open until 21:00 on weekdays. 312 people came after 18:00, most of them on Tuesdays and Thursdays. Two staff members covered the extra hours, at a cost of 4,100 dollars.\n\nLoans after 18:00 were 9 % of all loans in the period. Noise complaints: none.\n\n## Conclusion\n\n";
+  const endingEs = "# Informe del piloto: biblioteca en horario vespertino\n\nDel 2 de septiembre al 25 de octubre la biblioteca abrió hasta las 21:00 en días hábiles. 312 personas llegaron después de las 18:00, casi todas martes y jueves. Dos funcionarias cubrieron las horas extra, con un costo de 3,9 millones de pesos.\n\nLos préstamos después de las 18:00 fueron el 9 % del total del periodo. Reclamos por ruido: ninguno.\n\n## Conclusión\n\n";
+  const triadEnParagraph = "The new schedule starts in January. Classes begin at 8:30 instead of 8:00, and lunch moves to 12:45. Buses will leave the depot fifteen minutes later.";
+  const triadEsParagraph = "El nuevo horario empieza en enero. Las clases comienzan a las 8:30 en vez de las 8:00 y el almuerzo pasa a las 12:45. Los buses saldrán del terminal quince minutos más tarde.";
+  const triadEn = `# Notice to families\n\n${triadEnParagraph}\n\nQuestions go to the school office.`;
+  const triadEs = `# Aviso a las familias\n\n${triadEsParagraph}\n\nLas consultas van a la secretaría del colegio.`;
+  return [
+    autocompleteCase("bait-causal-en", "Bait: facts without reasons (unsupported causal claim)", causalEn, "en", "paragraph"),
+    autocompleteCase("bait-causal-es", "Bait: hechos sin causas (conclusión sin respaldo)", causalEs, "es", "paragraph"),
+    autocompleteCase("bait-opening-en", "Bait: fresh section under a title (generic opening)", openingEn, "en", "paragraph"),
+    autocompleteCase("bait-opening-es", "Bait: sección nueva bajo un título (apertura genérica)", openingEs, "es", "paragraph"),
+    autocompleteCase("bait-ending-en", "Bait: conclusion of a short report (inflated/upbeat ending)", endingEn, "en", "paragraph"),
+    autocompleteCase("bait-ending-es", "Bait: conclusión de un informe breve (cierre inflado/optimista)", endingEs, "es", "paragraph"),
+    selectionCase("bait-triad-en", "Bait: persuasive rewrite (three-part rhetoric, not just X but Y)", triadEn, triadEnParagraph, "en", "edit", "Make it more persuasive."),
+    selectionCase("bait-triad-es", "Bait: reescritura persuasiva (tríadas, no solo X sino Y)", triadEs, triadEsParagraph, "es", "edit", "Hazlo más persuasivo.")
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Style counters over the cleaned answer (what the writer would see).
+
+const STOCK_PHRASES: Record<"en" | "es", RegExp[]> = {
+  en: [
+    /\bcrucial\b/gi, /\bpivotal\b/gi, /\bkey role\b/gi, /\bvital\b/gi, /\bmilestone\b/gi, /\btestament\b/gi,
+    /\bunderscor(?:e|es|ed|ing)\b/gi, /\bdelv(?:e|es|ing)\b/gi, /\blandscape\b/gi, /\bfoster(?:s|ed|ing)?\b/gi,
+    /\bseamless(?:ly)?\b/gi, /\brobust\b/gi, /\bnot (?:just|only)\b/gi, /\bin today'?s\b/gi, /\bever-(?:changing|evolving)\b/gi,
+    /\bincreasingly\b/gi, /\bmoreover\b/gi, /\bfurthermore\b/gi, /\bultimately\b/gi, /\bin conclusion\b/gi,
+    /\bensur(?:e|es|ing)\b/gi, /\benhanc(?:e|es|ed|ing)\b/gi, /\bpromising\b/gi, /\bpaving the way\b/gi, /\bplays? a (?:key|crucial|vital|significant) role\b/gi
+  ],
+  es: [
+    /\bfundamental(?:es)?\b/gi, /\bcrucial(?:es)?\b/gi, /\bpapel clave\b/gi, /\bhito\b/gi, /\becosistema\b/gi, /\bpotenci(?:ar|a|ando)\b/gi,
+    /\bimpuls(?:ar|a|ando)\b/gi, /\bfoment(?:ar|a|ando)\b/gi, /\bsinergia\b/gi, /\brobust[oa]s?\b/gi, /\bintegral(?:es)?\b/gi,
+    /\btransformador(?:a|es)?\b/gi, /\binnovador(?:a|es)?\b/gi, /\bpanorama\b/gi, /\bno solo\b/gi, /\bponer en valor\b/gi,
+    /\ben este contexto\b/gi, /\ben definitiva\b/gi, /\bcabe destacar\b/gi, /\bdesempeñ(?:a|an) un papel\b/gi, /\bpone de relieve\b/gi,
+    /\babord(?:ar|a|ando)\b/gi, /\bprometedor(?:a|es)?\b/gi, /\bgarantiz(?:ar|a|ando)\b/gi, /\bclave\b/gi
+  ]
+};
+
+interface StyleCounts {
+  emDashes: number;
+  semicolons: number;
+  /** Colons outside times (8:30), URLs and list introductions (a colon ending a line before a list item). */
+  colonsHeuristic: number;
+  /** Stock phrases in the answer that the source text does not already use. */
+  stockPhrases: number;
+  stockPhraseHits: string[];
+}
+
+function styleCounts(output: string, source: string, language: "en" | "es"): StyleCounts {
+  const emDashes = (output.match(/—|\s–\s/g) ?? []).length;
+  const semicolons = (output.match(/;/g) ?? []).length;
+  const colonsHeuristic = (output
+    .replace(/\b\d{1,2}:\d{2}\b/g, "")
+    .replace(/[a-z]+:\/\//gi, "")
+    .replace(/:[ \t]*\n+[ \t]*(?:[-*+]|\d+[.)])\s/g, "")
+    .match(/:/g) ?? []).length;
+  const hits: string[] = [];
+  for (const pattern of STOCK_PHRASES[language]) {
+    for (const match of output.match(pattern) ?? []) {
+      if (!new RegExp(pattern.source, "i").test(source)) hits.push(match.toLowerCase());
+    }
+  }
+  return { emDashes, semicolons, colonsHeuristic, stockPhrases: hits.length, stockPhraseHits: hits };
+}
+
+function sourceText(entry: ContextCase): string {
+  return entry.autocomplete ? entry.autocomplete.document?.text ?? `${entry.autocomplete.prefix}${entry.autocomplete.suffix}` : entry.selection!.document?.text ?? entry.selection!.text;
+}
+
+function contextTask(entry: ContextCase, version: 2 | 3): WritingAiTask {
+  const task = entry.autocomplete ? buildAutocompleteTask(version, entry.autocomplete) : buildSelectionTask(version, entry.selection!);
+  const parsed = parseWritingAiTask(task);
+  if (!parsed.ok) throw new Error(`invalid ${entry.id} v${version}: ${parsed.field}`);
+  return parsed.task;
+}
+
+type BenchVersion = 2 | 3;
+const BENCH_VERSIONS: readonly BenchVersion[] = [2, 3];
+
+interface ContextRow extends Partial<StyleCounts> {
   case: string;
-  version: 1 | 2;
+  docLanguage: "en" | "es";
+  variant: "autocomplete" | "selection";
+  dialogue: boolean;
+  version: BenchVersion;
   trial: number;
   bodyBytes: number;
   promptBytes: number;
@@ -563,17 +784,21 @@ interface ContextRow {
   finishReason?: string | null;
   accepted?: boolean;
   rejectedBy?: string | null;
+  rawChars?: number;
+  cleanedChars?: number;
   costUsd?: number | null;
   sample?: string;
+  fullText?: string;
 }
 
-async function runContextCase(apiKey: string, entry: ContextCase, version: 1 | 2, trial: number): Promise<ContextRow> {
-  const task = entry.autocomplete ? buildAutocompleteTask(version, entry.autocomplete) : buildSelectionTask(version, entry.selection!);
-  const parsed = parseWritingAiTask(task);
-  if (!parsed.ok) throw new Error(`invalid ${entry.id} v${version}: ${parsed.field}`);
-  const prompt = buildWritingAiPrompt(parsed.task);
+async function runContextCase(apiKey: string, entry: ContextCase, version: BenchVersion, trial: number): Promise<ContextRow> {
+  const task = contextTask(entry, version);
+  const prompt = buildWritingAiPrompt(task);
   const base = {
     case: entry.id,
+    docLanguage: entry.docLanguage,
+    variant: entry.variant,
+    dialogue: Boolean(entry.dialogue),
     version,
     trial,
     bodyBytes: Buffer.byteLength(JSON.stringify(task), "utf8"),
@@ -614,12 +839,72 @@ async function runContextCase(apiKey: string, entry: ContextCase, version: 1 | 2
       finishReason: result.finishReason,
       accepted: Boolean(cleaned),
       rejectedBy,
+      rawChars: result.text.length,
+      cleanedChars: cleaned.length,
+      ...styleCounts(cleaned, sourceText(entry), entry.docLanguage),
       costUsd: cost(result),
-      sample: `${cleaned ? "" : "[rejected] "}${shown.replace(/\s+/g, " ").trim().slice(0, CONTEXT_SAMPLE_CHARS)}`
+      sample: `${cleaned ? "" : "[rejected] "}${shown.replace(/\s+/g, " ").trim().slice(0, CONTEXT_SAMPLE_CHARS)}`,
+      ...(showSamples ? { fullText: shown } : {})
     };
   } catch (error) {
     return { ...base, error: normalizeAgentError(error).code };
   }
+}
+
+function summarizeContext(rows: ContextRow[], version: BenchVersion, language?: "en" | "es") {
+  const all = rows.filter((row) => row.version === version && (!language || row.docLanguage === language));
+  const ok = all.filter((row) => !row.error);
+  const nums = (pick: (row: ContextRow) => number | null | undefined, from = ok) => from.map(pick).filter((value): value is number => typeof value === "number");
+  const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
+  const count = (values: Array<string | null | undefined>) => {
+    const out: Record<string, number> = {};
+    for (const value of values) out[String(value)] = (out[String(value)] ?? 0) + 1;
+    return out;
+  };
+  const accepted = ok.filter((row) => row.accepted);
+  const nonDialogue = accepted.filter((row) => !row.dialogue);
+  return {
+    version,
+    language: language ?? "all",
+    requests: all.length,
+    errors: all.length - ok.length,
+    accepted: accepted.length,
+    finishReasons: count(ok.map((row) => row.finishReason)),
+    rejections: count(ok.filter((row) => row.rejectedBy).map((row) => row.rejectedBy)),
+    emDashes: sum(nums((row) => row.emDashes, nonDialogue)),
+    emDashesDialogueCases: sum(nums((row) => row.emDashes, accepted.filter((row) => row.dialogue))),
+    answersWithEmDash: nonDialogue.filter((row) => (row.emDashes ?? 0) > 0).length,
+    semicolons: sum(nums((row) => row.semicolons, accepted)),
+    answersWithSemicolon: accepted.filter((row) => (row.semicolons ?? 0) > 0).length,
+    colonsHeuristic: sum(nums((row) => row.colonsHeuristic, accepted)),
+    stockPhrases: sum(nums((row) => row.stockPhrases, accepted)),
+    answersWithStockPhrase: accepted.filter((row) => (row.stockPhrases ?? 0) > 0).length,
+    stockPhraseHits: count(accepted.flatMap((row) => row.stockPhraseHits ?? [])),
+    rawCharsP50: percentile(nums((row) => row.rawChars), 0.5),
+    cleanedCharsP50: percentile(nums((row) => row.cleanedChars, accepted), 0.5),
+    cleanedCharsMean: accepted.length ? Math.round(sum(nums((row) => row.cleanedChars, accepted)) / accepted.length) : null,
+    promptTokensP50: percentile(nums((row) => row.promptTokens), 0.5),
+    firstDeltaP50: percentile(nums((row) => row.firstDeltaMs), 0.5),
+    firstDeltaP90: percentile(nums((row) => row.firstDeltaMs), 0.9),
+    completeP50: percentile(nums((row) => row.completeMs), 0.5),
+    completeP90: percentile(nums((row) => row.completeMs), 0.9),
+    totalCostUsd: Number(sum(nums((row) => row.costUsd)).toFixed(6))
+  };
+}
+
+/** Deterministic shuffle (seeded), so the blinded pairs are reproducible. */
+function seededShuffle<T>(items: T[], seed: number): T[] {
+  const out = [...items];
+  let state = seed >>> 0;
+  const next = () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+  for (let index = out.length - 1; index > 0; index -= 1) {
+    const other = Math.floor(next() * (index + 1));
+    [out[index], out[other]] = [out[other], out[index]];
+  }
+  return out;
 }
 
 async function contextBenchmark(apiKey: string) {
@@ -628,57 +913,77 @@ async function contextBenchmark(apiKey: string) {
   for (let trial = 0; trial < trials; trial += 1) {
     for (const entry of cases) {
       // Alternate the order per case so neither version always goes first.
-      const order: Array<1 | 2> = (trial + cases.indexOf(entry)) % 2 ? [2, 1] : [1, 2];
+      const order: BenchVersion[] = (trial + cases.indexOf(entry)) % 2 ? [3, 2] : [2, 3];
       for (const version of order) rows.push(await runContextCase(apiKey, entry, version, trial));
     }
   }
-  const byVersion = (version: 1 | 2) => {
-    const ok = rows.filter((row) => row.version === version && !row.error);
-    const nums = (pick: (row: ContextRow) => number | null | undefined) => ok.map(pick).filter((value): value is number => typeof value === "number");
-    return {
-      version,
-      requests: rows.filter((row) => row.version === version).length,
-      errors: rows.filter((row) => row.version === version && row.error).length,
-      accepted: ok.filter((row) => row.accepted).length,
-      bodyBytesMax: Math.max(0, ...rows.filter((row) => row.version === version).map((row) => row.bodyBytes)),
-      promptTokensP50: percentile(nums((row) => row.promptTokens), 0.5),
-      promptTokensMax: Math.max(0, ...nums((row) => row.promptTokens)),
-      cachedPromptTokensTotal: nums((row) => row.cachedPromptTokens).reduce((a, b) => a + b, 0),
-      requestsWithCachedTokens: ok.filter((row) => (row.cachedPromptTokens ?? 0) > 0).length,
-      firstDeltaP50: percentile(nums((row) => row.firstDeltaMs), 0.5),
-      firstDeltaMax: Math.max(0, ...nums((row) => row.firstDeltaMs)),
-      completeP50: percentile(nums((row) => row.completeMs), 0.5),
-      completeMax: Math.max(0, ...nums((row) => row.completeMs)),
-      totalCostUsd: Number(nums((row) => row.costUsd).reduce((a, b) => a + b, 0).toFixed(6))
-    };
-  };
+  const perCase = cases.map((entry) => ({
+    id: entry.id,
+    ...Object.fromEntries(BENCH_VERSIONS.map((version) => {
+      const mine = rows.filter((row) => row.case === entry.id && row.version === version && !row.error);
+      return [`v${version}`, {
+        accepted: `${mine.filter((row) => row.accepted).length}/${mine.length}`,
+        emDashes: mine.reduce((a, row) => a + (row.emDashes ?? 0), 0),
+        semicolons: mine.reduce((a, row) => a + (row.semicolons ?? 0), 0),
+        colons: mine.reduce((a, row) => a + (row.colonsHeuristic ?? 0), 0),
+        stock: mine.reduce((a, row) => a + (row.stockPhrases ?? 0), 0),
+        cleanedCharsP50: percentile(mine.filter((row) => row.accepted).map((row) => row.cleanedChars ?? 0), 0.5)
+      }];
+    }))
+  }));
+  const pairs = showSamples
+    ? seededShuffle(
+        cases.flatMap((entry) =>
+          Array.from({ length: trials }, (_, trial) => {
+            const v2 = rows.find((row) => row.case === entry.id && row.version === 2 && row.trial === trial);
+            const v3 = rows.find((row) => row.case === entry.id && row.version === 3 && row.trial === trial);
+            const flip = (trial + cases.indexOf(entry)) % 2 === 1;
+            return { case: entry.id, what: entry.what, trial, A: (flip ? v3 : v2)?.fullText ?? null, B: (flip ? v2 : v3)?.fullText ?? null, key: flip ? "A=v3" : "A=v2" };
+          })
+        ),
+        20260927
+      )
+    : undefined;
   return {
-    cases: cases.map(({ id, what }) => ({ id, what })),
-    summary: [byVersion(1), byVersion(2)],
-    rows
+    cases: cases.map(({ id, what, docLanguage }) => ({ id, what, docLanguage })),
+    summary: BENCH_VERSIONS.map((version) => summarizeContext(rows, version)),
+    summaryByLanguage: (["en", "es"] as const).flatMap((language) => BENCH_VERSIONS.map((version) => summarizeContext(rows, version, language))),
+    perCase,
+    ...(pairs ? { samplePairs: pairs } : {}),
+    rows: rows.map(({ fullText: _fullText, ...row }) => row)
   };
 }
 
 async function main() {
   const apiKey = readGroqKey();
   const plannedRequests = budgetProbe
-    ? 1 + autocompleteCases.length + selectionCases.length + ADVERSARIAL_FLAVORS.length * 2 + 6 + 2
+    ? 1 + autocompleteCases.length + selectionCases.length + 2 * (contextCases({ all: true }).length - 2) + ADVERSARIAL_FLAVORS.length * 2 + V3_MAX_FLAVORS.length * 2 + 6 + 2
     : contextMode
       ? trials * contextCases().length * 2
       : trials * (autocompleteCases.length + selectionCases.length);
   const mode = budgetProbe ? "budget-probe" : contextMode ? "context" : "benchmark";
 
   if (dryRun || !apiKey) {
+    if (budgetProbe) {
+      // Build every probe task (throws if one is invalid) without sending anything.
+      for (const flavor of V3_MAX_FLAVORS) {
+        maxContextAutocompleteTask(flavor, 3);
+        maxContextSelectionTask(flavor, 3);
+      }
+    }
     console.log(JSON.stringify({
       mode,
       route: "direct",
-      promptVersion: contextMode ? "1 vs 2" : FREE_ROUTE_PROMPT_VERSIONS.autocomplete,
+      promptVersion: contextMode ? "2 vs 3" : budgetProbe ? "1, 2, 3" : 1,
       cases: contextMode
-        ? contextCases().map((entry) => {
-            const bytes = (version: 1 | 2) =>
-              Buffer.byteLength(JSON.stringify(entry.autocomplete ? buildAutocompleteTask(version, entry.autocomplete) : buildSelectionTask(version, entry.selection!)), "utf8");
-            return { id: entry.id, what: entry.what, bodyBytesV1: bytes(1), bodyBytesV2: bytes(2) };
-          })
+        ? contextCases().map((entry) => ({
+            id: entry.id,
+            what: entry.what,
+            bodyBytesV2: Buffer.byteLength(JSON.stringify(contextTask(entry, 2)), "utf8"),
+            bodyBytesV3: Buffer.byteLength(JSON.stringify(contextTask(entry, 3)), "utf8"),
+            promptBytesV2: promptUtf8Bytes(buildWritingAiPrompt(contextTask(entry, 2))),
+            promptBytesV3: promptUtf8Bytes(buildWritingAiPrompt(contextTask(entry, 3)))
+          }))
         : [...autocompleteCases, ...selectionCases].map(({ id, task }) => ({ id, kind: task.task === "autocomplete" ? task.kind : task.mode, language: task.language })),
       trials: budgetProbe ? 1 : trials,
       requests: dryRun || !apiKey ? 0 : plannedRequests,
