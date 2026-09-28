@@ -242,7 +242,7 @@ describe("whole-document context and preferences per route (spec 2026-09-27)", (
     }, { service, controllers: new Map() });
     const edit = (groq.seen[0].body as { messages: Array<{ content: string }> }).messages[0].content;
     expect(edit).toContain(WRITING_STYLE_RULES.es);
-    expect(edit).toContain("La instrucción de edición prevalece sobre este estilo por defecto");
+    expect(edit).toContain("La instrucción de edición puede cambiar este estilo por defecto");
     expect(edit).toContain(PREFERENCES_RULE_V3.es);
 
     await service.suggestName({ language: "en", text: "We met on Tuesday to plan the spring workshop." }, new AbortController().signal);

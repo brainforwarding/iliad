@@ -43,7 +43,7 @@ export type WritingAiTaskV3 = AutocompleteTaskV3 | SelectionTaskV3 | NameTaskV3;
 /**
  * The default writing rules (warning signs, not bans): voice and Markdown come
  * first. After the task instructions and context rules, before the
- * preferences rule. The text itself uses no em dash or semicolon.
+ * preferences rule. The text uses em dashes and semicolons only to name them.
  */
 export const WRITING_STYLE_RULES: Record<WritingLanguage, string> = {
   en: [
@@ -52,7 +52,8 @@ export const WRITING_STYLE_RULES: Record<WritingLanguage, string> = {
     "Prefer concrete details and direct verbs when the document provides them.",
     "Do not invent facts, numbers, sources, or names, and do not turn facts into unsupported reasons or conclusions.",
     "Avoid generic scene-setting openings, generic summaries or upbeat endings, inflated claims such as \"crucial\", \"a key role\", or \"milestone\", stock contrasts such as \"not just X but Y\", and three-part lists used only for effect.",
-    "Unless the established voice, Markdown, a preference, or an edit instruction requires them, do not introduce em dashes or semicolons, or colons other than for real lists or times."
+    "Do not introduce em dashes (—) or semicolons (;). End the sentence with a period instead, or use a comma. Use colons only for real lists or times.",
+    "Keep them only where the established voice, the Markdown, a preference, or an edit instruction calls for them."
   ].join(" "),
   es: [
     "Escribe con sencillez y conserva la voz del autor y el Markdown.",
@@ -60,14 +61,15 @@ export const WRITING_STYLE_RULES: Record<WritingLanguage, string> = {
     "Prefiere detalles concretos y verbos directos cuando el documento los aporte.",
     "No inventes hechos, cifras, fuentes ni nombres, y no conviertas hechos en causas o conclusiones sin respaldo.",
     "Evita aperturas genéricas de contexto, resúmenes genéricos o cierres optimistas, afirmaciones infladas como «fundamental», «un papel clave» o «un hito», fórmulas como «no solo X, sino Y» y listas de tres creadas solo para dar efecto.",
-    "Salvo que la voz establecida, el Markdown, una preferencia o la instrucción de edición lo requieran, no introduzcas rayas largas, puntos y coma ni dos puntos salvo en listas reales u horas."
+    "No introduzcas rayas (—) ni puntos y coma (;). Termina la oración con un punto, o usa una coma. Usa dos puntos solo en listas reales u horas.",
+    "Consérvalos solo donde la voz establecida, el Markdown, una preferencia o la instrucción de edición los pidan."
   ].join(" ")
 };
 
 /** ✦ AI Edit only: the writer's explicit instruction outranks the default style. */
 export const EDIT_INSTRUCTION_STYLE_RULE: Record<WritingLanguage, string> = {
-  en: "The edit instruction overrides this default style where they conflict.",
-  es: "La instrucción de edición prevalece sobre este estilo por defecto cuando se contradigan."
+  en: "The edit instruction may change this default style, but it never allows invented facts, reasons, or conclusions.",
+  es: "La instrucción de edición puede cambiar este estilo por defecto, pero nunca permite inventar hechos, causas ni conclusiones."
 };
 
 /** v3 preferences rule (system): preferences may change the default style, nothing else. */
@@ -80,8 +82,19 @@ export const PREFERENCES_RULE_V3: Record<WritingLanguage, string> = {
 export const PREFERENCES_LABEL_V3 =
   "Writer's preferences (general style wishes; they may change the default style guidance, but not factual limits, task boundaries, the output format, the edit instruction or the writing direction):";
 
+/**
+ * ✦ AI Tighten only: the benchmark showed "more concise" merging two Spanish
+ * sentences with a semicolon in most answers despite the general rule.
+ */
+export const TIGHTEN_STYLE_RULE: Record<WritingLanguage, string> = {
+  en: "Being concise never means joining two sentences with a semicolon.",
+  es: "Ser conciso nunca significa unir dos oraciones con punto y coma."
+};
+
 function styleRules(language: WritingLanguage, mode?: SelectionMode): string {
-  return mode === "edit" ? `${WRITING_STYLE_RULES[language]} ${EDIT_INSTRUCTION_STYLE_RULE[language]}` : WRITING_STYLE_RULES[language];
+  if (mode === "edit") return `${WRITING_STYLE_RULES[language]} ${EDIT_INSTRUCTION_STYLE_RULE[language]}`;
+  if (mode === "tighten") return `${WRITING_STYLE_RULES[language]} ${TIGHTEN_STYLE_RULE[language]}`;
+  return WRITING_STYLE_RULES[language];
 }
 
 export function buildPromptV3(task: WritingAiTaskV3): WritingAiPrompt {

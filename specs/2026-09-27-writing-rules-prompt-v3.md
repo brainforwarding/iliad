@@ -1,6 +1,6 @@
 # Writing rules for the built-in AI (prompt v3)
 
-Date: 2026-09-27. Status: spec, reviewed by Codex (xhigh) and revised; implementing. Target release: 0.6.1
+Date: 2026-09-27. Status: spec, reviewed by Codex (xhigh) and revised; implemented on `writing-rules` (Worker not deployed, not released). Target release: 0.6.1
 (also the first real self-update through 0.6.0's updater).
 
 Sources: the owner's guide `~/Documents/docs/Circles/ia-inacap/on-good-writing.md`
@@ -157,3 +157,85 @@ facts" (autocomplete) or "more concise and direct" (Tighten).
    (default temperature). Shuffled samples hand-checked against the guide.
 8. No ADR/backlog needed; update `docs/architecture.md` and `docs/release.md`
    (stale per-route wording).
+
+## Implementation and benchmark (2026-09-27)
+
+Implemented as reviewed (items 1–8). What differs from the review text, and why:
+
+- **Punctuation sentence, reworded after the benchmark.** With the reviewed
+  wording ("Unless … requires them, do not introduce em dashes or
+  semicolons, or colons other than …") v3 still produced em dashes in 8 of
+  155 answers (v2: 9) and semicolons in 7 (v2: 9): the ban sat at the end of
+  a long conditional clause. Final wording names the characters, says what
+  to do instead, and moves the exceptions to their own sentence:
+  > Do not introduce em dashes (—) or semicolons (;). End the sentence with a
+  > period instead, or use a comma. Use colons only for real lists or times.
+  > Keep them only where the established voice, the Markdown, a preference,
+  > or an edit instruction calls for them.
+
+  > No introduzcas rayas (—) ni puntos y coma (;). Termina la oración con un
+  > punto, o usa una coma. Usa dos puntos solo en listas reales u horas.
+  > Consérvalos solo donde la voz establecida, el Markdown, una preferencia o
+  > la instrucción de edición los pidan.
+
+  An intermediate wording, "Write two sentences, or use a comma, instead",
+  removed the dashes but was read as a length limit: Full idea completions
+  dropped from ~1,650 to ~300 characters (p50). "End the sentence with a
+  period" does not.
+- **Edit override, bounded.** The first wording ("The edit instruction
+  overrides this default style where they conflict") let "Make it more
+  persuasive" invent reasons ("giving students more energy"). Final: "The
+  edit instruction may change this default style, but it never allows
+  invented facts, reasons, or conclusions." (ES: "…pero nunca permite
+  inventar hechos, causas ni conclusiones.")
+- **Tighten-only line.** ✦ AI Shorten on the Spanish paragraph joined its
+  two sentences with a semicolon in 4–5 of 5 answers on every wording
+  (v2: 5 of 5). One sentence for Tighten mode only fixed it (1 of 5): "Being
+  concise never means joining two sentences with a semicolon." / "Ser
+  conciso nunca significa unir dos oraciones con punto y coma."
+- The rule block uses "—" and ";" only to name them (a test checks that).
+
+Benchmark (direct Groq, `openai/gpt-oss-120b`, the app's pinned params;
+`--context --trials=5`, v2/v3 alternating; 31 cases = 10 context cases,
+13 EN/ES fixtures, 8 bait cases; 155 requests per version; final wording).
+Em dashes exclude cases whose source already uses them (Spanish dialogue);
+colons exclude times, URLs and list introductions; stock phrases are a
+fixed EN/ES list counted only when the source does not already use them.
+
+| | v2 EN | v3 EN | v2 ES | v3 ES |
+| --- | --- | --- | --- | --- |
+| Accepted / finish `stop` | 80/80 | 80/80 | 75/75 | 75/75 |
+| Cleaner/guard rejections | 0 | 0 | 0 | 0 |
+| Em dashes (answers) | 16 (10) | 4 (2) | 0 | 0 |
+| Semicolons (answers) | 1 (1) | 0 | 8 (8) | 2 (2) |
+| Colons, heuristic | 0 | 0 | 2 | 3 |
+| Stock phrases (answers) | 31 (20) | 10 (8) | 19 (19) | 6 (6) |
+| Cleaned chars p50 / mean | 169 / 254 | 137 / 175 | 181 / 192 | 157 / 157 |
+| First token p50 / p90 ms | 538 / 1,142 | 586 / 1,161 | 577 / 1,264 | 568 / 1,049 |
+| Complete p50 / p90 ms | 606 / 1,251 | 672 / 1,164 | 679 / 1,357 | 616 / 1,087 |
+| Prompt tokens p50 | 608 | 725 | 585 | 799 |
+
+All: v2 → v3 em dashes 16 → 4, semicolons 9 → 2, stock phrases 50 → 16,
+complete p50 635 → 647 ms (+2 %), cost +6 % (~180 more prompt tokens).
+Across the four full runs the direction held every time; per-run counts
+vary (em dashes v3 0–4, semicolons v3 2–8 before the Tighten line).
+
+Hand check (shuffled, blinded pairs, against the owner's guide): v3 reads
+better. Fewer "Overall," / "En conclusión," closers and "fostering",
+"garantizando", "ensuring" tails; the persuasive rewrites drop most
+invented benefits and the exclamations; ✦ AI Warmer no longer adds "—" or
+"Looking forward to seeing you!"; fiction and dialogue keep their voice
+(no rejections, no broken quotes or rayas). Full idea completions are
+shorter (p50 ~650–1,300 vs ~1,300–1,900 characters): one or two dense
+paragraphs instead of three or four padded ones. Not fixed by v3 (both
+versions): autocomplete still invents plausible specifics when the
+document has none (times, a "fog-watch flag"), Tighten keeps "crucial" for
+"realmente muy importante", and one v3 conclusion misread "9 % of loans"
+as "an increase of 9 %".
+
+Budget probe (`--budget-probe`, run with the first and the final wording):
+every v2/v3 fixture, context and bait task and the largest v3 bodies (56 KiB
+task, preferences at their limit, four adversarial flavors) bill at most
+0.938 tokens per UTF-8 byte (v1 max-field bodies: 0.956); the fixed
+chat-template overhead is still 71 tokens and every probe stays within
+`bytes + 150`. `PROMPT_OVERHEAD_TOKENS = 150` holds and is unchanged.

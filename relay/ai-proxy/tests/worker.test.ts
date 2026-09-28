@@ -385,7 +385,7 @@ describe("POST /v1/generate", () => {
       const system = (index: number) => (harness.groq.calls[index].body as { messages: Array<{ content: string }> }).messages[0].content;
       expect(system(0)).toContain(WRITING_STYLE_RULES.en);
       expect(system(0)).toContain(PREFERENCES_RULE_V3.en);
-      expect(system(1)).toContain("The edit instruction overrides this default style where they conflict.");
+      expect(system(1)).toContain("The edit instruction may change this default style, but it never allows invented facts, reasons, or conclusions.");
       expect(system(2)).toContain(WRITING_STYLE_RULES.es);
       expect(system(3)).not.toContain(WRITING_STYLE_RULES.en);
       expect((await harness.stats()).stats).toMatchObject({ requests: 4, spentNano: 4 * (500 * 150 + 20 * 600), reservedNano: 0 });

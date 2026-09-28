@@ -531,9 +531,13 @@ buffer without Tab or Accept. Spec: `specs/2026-09-25-groq-ai-free-tier.md`
   preference or an edit instruction needs them. They are a default style:
   the writer's preferences may change them (both the system preferences rule
   and the labelled preferences section say so), but not the factual limits,
-  task boundaries, output format, edit instruction or writing direction;
-  an explicit ✦ AI Edit instruction overrides them; Tighten keeps "do not add
-  or remove information". The `name` prompt is v2's unchanged.
+  task boundaries, output format, edit instruction or writing direction.
+  An explicit ✦ AI Edit instruction may change the style but never allows
+  invented facts, reasons or conclusions; Tighten keeps "do not add or
+  remove information" and adds one line against joining sentences with a
+  semicolon. The `name` prompt is v2's unchanged. The wording was tuned
+  against `npm run benchmark:autocomplete -- --context` (paired v2/v3,
+  bait cases; results in the spec).
 - **Warm connection** (`groq/connection.ts`): AI requests on both routes go
   through one undici keep-alive Agent (2-minute idle sockets; Node's global
   fetch drops idle sockets after 4 s). While autocomplete is on and AI isn't

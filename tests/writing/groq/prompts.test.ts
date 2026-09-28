@@ -434,14 +434,15 @@ describe("v3 prompts", () => {
     }
   });
 
-  it("keeps the rule text free of em dashes and semicolons, and says what the spec says", () => {
+  it("uses em dashes and semicolons in the rule text only to name them, and says what the spec says", () => {
     for (const language of ["en", "es"] as const) {
-      expect(WRITING_STYLE_RULES[language]).not.toMatch(/[—;]/);
+      expect(WRITING_STYLE_RULES[language].replace("(—)", "").replace("(;)", "")).not.toMatch(/[—;]/);
     }
     expect(WRITING_STYLE_RULES.en).toContain("Do not invent facts, numbers, sources, or names");
-    expect(WRITING_STYLE_RULES.en).toContain("do not introduce em dashes or semicolons, or colons other than for real lists or times");
+    expect(WRITING_STYLE_RULES.en).toContain("Do not introduce em dashes (—) or semicolons (;). End the sentence with a period instead, or use a comma. Use colons only for real lists or times.");
     expect(WRITING_STYLE_RULES.es).toContain("«fundamental», «un papel clave» o «un hito»");
-    expect(WRITING_STYLE_RULES.es).toContain("no introduzcas rayas largas, puntos y coma ni dos puntos salvo en listas reales u horas");
+    expect(WRITING_STYLE_RULES.es).toContain("No introduzcas rayas (—) ni puntos y coma (;). Termina la oración con un punto, o usa una coma. Usa dos puntos solo en listas reales u horas.");
+    expect(WRITING_STYLE_RULES.es).toContain("Consérvalos solo donde la voz establecida, el Markdown, una preferencia o la instrucción de edición los pidan.");
   });
 
   it("lets preferences change the default style but not the rest, in the system rule and the user label", () => {
@@ -456,11 +457,15 @@ describe("v3 prompts", () => {
   });
 
   it("lets the ✦ AI Edit instruction override the default style; Tighten keeps 'do not add or remove information'", () => {
-    expect(system(baseSelectionV3)).toContain("The edit instruction overrides this default style where they conflict.");
-    expect(system({ ...baseSelectionV3, language: "es" })).toContain("La instrucción de edición prevalece sobre este estilo por defecto");
-    expect(system(tightenV3)).not.toContain("The edit instruction overrides");
+    expect(system(baseSelectionV3)).toContain("The edit instruction may change this default style, but it never allows invented facts, reasons, or conclusions.");
+    expect(system({ ...baseSelectionV3, language: "es" })).toContain("La instrucción de edición puede cambiar este estilo por defecto, pero nunca permite inventar");
+    expect(system(tightenV3)).not.toContain("The edit instruction may change");
     expect(system(tightenV3)).toContain("Do not add or remove information.");
-    expect(system(baseAutocompleteV3)).not.toContain("The edit instruction overrides");
+    expect(system(tightenV3)).toContain("Being concise never means joining two sentences with a semicolon.");
+    expect(system({ ...tightenV3, language: "es" })).toContain("Ser conciso nunca significa unir dos oraciones con punto y coma.");
+    expect(system(baseSelectionV3)).not.toContain("Being concise never means");
+    expect(system(baseAutocompleteV3)).not.toContain("Being concise never means");
+    expect(system(baseAutocompleteV3)).not.toContain("The edit instruction may change");
   });
 
   it("changes only the system rules and the preferences label: same user sections, budgets and caps as v2", () => {
