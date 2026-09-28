@@ -836,11 +836,17 @@
   box-shadow: var(--focus-ring);
 }
 
-/* The update button (spec 2026-09-27, Figma frames 2–6): a 22px accent
-   circle at the right end of the Settings line. Hover or keyboard focus grows
-   it leftward into "↓ Update" (~180ms ease-out; the label fades in after
-   ~60ms). After a click it stays expanded as "Downloading 42%" (with a light
-   fill) or "Restarting…". */
+/* The update button (spec 2026-09-27, Figma frames 2–6; 0.6.2 board 156:2):
+   a 22px circle at the right end of the Settings line.
+   - Downloading in the background: an outline circle, the ↓ in accent, and a
+     2px progress ring on its edge (from 12 o'clock, clockwise, 240ms ease-out).
+   - Ready: the solid accent circle with a restart glyph.
+   - Can't update itself: the solid circle with ↓ (opens the download).
+   Hover or keyboard focus grows it leftward into a pill (~180ms ease-out; the
+   label fades in after ~60ms): "Downloading 42%" (with the downloaded part
+   lighter), "Restart to update" or "↓ Update". After a click it stays
+   expanded as "Downloading 42%" or "Restarting…". When the open pill would
+   run into the Settings label, the label fades out (the gear stays). */
 .sidebar-update-button {
   position: absolute;
   top: calc(4px + 14px - 11px);
@@ -864,7 +870,9 @@
   white-space: nowrap;
   transition:
     max-width 180ms ease-out,
-    padding 180ms ease-out;
+    padding 180ms ease-out,
+    background-color 180ms ease-out,
+    color 180ms ease-out;
 }
 
 button.sidebar-update-button {
@@ -872,10 +880,21 @@ button.sidebar-update-button {
 }
 
 .sidebar-update-arrow {
+  position: relative;
   flex: none;
 }
 
+/* lucide RotateCw drawn at 10px inside the 12px icon box; the stroke is
+   raised so its weight matches the ↓. */
+.sidebar-update-restart {
+  width: 10px;
+  height: 10px;
+  margin: 1px;
+  stroke-width: 1.8;
+}
+
 .sidebar-update-label {
+  position: relative;
   padding: 0 9px 0 4px;
   opacity: 0;
   transition: opacity 120ms ease-out;
@@ -884,7 +903,7 @@ button.sidebar-update-button {
 button.sidebar-update-button:hover,
 button.sidebar-update-button:focus-visible,
 .sidebar-update-button.is-expanded {
-  max-width: 12em;
+  max-width: 15em;
 }
 
 button.sidebar-update-button:hover .sidebar-update-label,
@@ -903,7 +922,69 @@ button.sidebar-update-button:focus-visible {
   box-shadow: var(--focus-ring);
 }
 
-/* Downloading / Restarting: text only, not clickable, no hover change. */
+/* Downloading in the background: no fill, the ring on the circle's edge. */
+.sidebar-update-button.is-progress {
+  background: transparent;
+  color: var(--accent);
+}
+
+.sidebar-update-ring {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke-width: 2;
+  transition: opacity 120ms ease-out;
+}
+
+.sidebar-update-ring-track {
+  stroke: var(--update-ring-track);
+}
+
+.sidebar-update-ring-arc {
+  stroke: var(--accent);
+  stroke-linecap: butt;
+  transform: rotate(-90deg);
+  transform-origin: 11px 11px;
+  transition: stroke-dashoffset 240ms ease-out;
+}
+
+/* Hovered or focused, it opens as the Downloading pill (no darker hover fill:
+   it reads as status). */
+.sidebar-update-button.is-progress:hover,
+.sidebar-update-button.is-progress:focus-visible {
+  padding: 0 10px;
+  background: var(--accent);
+  color: var(--ink-inverse);
+}
+
+.sidebar-update-button.is-progress:hover .sidebar-update-ring,
+.sidebar-update-button.is-progress:focus-visible .sidebar-update-ring {
+  opacity: 0;
+}
+
+.sidebar-update-button.is-progress:hover .sidebar-update-arrow,
+.sidebar-update-button.is-progress:focus-visible .sidebar-update-arrow {
+  display: none;
+}
+
+.sidebar-update-button.is-progress .sidebar-update-progress {
+  opacity: 0;
+}
+
+.sidebar-update-button.is-progress:hover .sidebar-update-progress,
+.sidebar-update-button.is-progress:focus-visible .sidebar-update-progress {
+  opacity: 1;
+}
+
+.sidebar-update-button.is-progress:hover .sidebar-update-label,
+.sidebar-update-button.is-progress:focus-visible .sidebar-update-label {
+  padding: 0;
+}
+
+/* Downloading / Restarting after a click: text only, not clickable, no hover change. */
 .sidebar-update-button.is-busy {
   padding: 0 10px;
   cursor: default;
@@ -921,10 +1002,27 @@ button.sidebar-update-button:focus-visible {
   position: relative;
 }
 
+.sidebar-settings-row > span {
+  transition: opacity 120ms ease-out;
+}
+
+.sidebar-footer:has(
+    button.sidebar-update-button.is-crowding:hover,
+    button.sidebar-update-button.is-crowding:focus-visible,
+    .sidebar-update-button.is-crowding.is-expanded
+  )
+  .sidebar-settings-row
+  > span {
+  opacity: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sidebar-update-button,
   .sidebar-update-label,
-  .sidebar-update-progress {
+  .sidebar-update-progress,
+  .sidebar-update-ring,
+  .sidebar-update-ring-arc,
+  .sidebar-settings-row > span {
     transition: none;
   }
 

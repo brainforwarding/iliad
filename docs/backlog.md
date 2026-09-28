@@ -136,18 +136,6 @@ a raw error. Detect the length and say so (or fall back to a short path under
 
 From `specs/2026-09-25-agent-installable-iliad.md`.
 
-### Footer update button shows download progress and "ready" (0.6.2)
-
-From the owner's first real update (0.6.0 → 0.6.1, 2026-09-28). The footer
-button and Settings → General read the same state, but the footer looks the
-same while downloading and when ready: Settings showed "Downloading… 42%" and
-then "Iliad 0.6.1 is ready · Restart to update" while the footer still showed
-the plain arrow and "Update", so it read as "still offering the download".
-Fix: while downloading, a thin progress ring around the circle and a hover
-label "Downloading 42%"; once ready, a small ready mark and the hover label
-"Restart to update" (ES "Reiniciar para actualizar"), the same words as
-Settings. Figma first (page "In-app updates (2026-09-27)"), then implement.
-
 ### Skill refresh after updates
 
 `iliad skill install` copies `SKILL.md`; an app update does not refresh the

@@ -88,6 +88,18 @@ Today (0.5.0) updating is manual and mostly invisible:
 - When the sidebar is hidden the button isn't shown; Settings → General still
   has it, and the sidebar peek shows the footer as usual.
 
+0.6.2 (Figma board `156:2`, option 2A): the footer now shows what Settings
+says. `available`/`downloading` (not clicked): no fill, a 2px ring on the
+circle's edge (track `--update-ring-track`, arc `--accent`, from 12 o'clock
+clockwise, 240 ms ease-out) around an accent ↓; hover/focus opens the
+"Downloading 42%" pill, and a click still sets `installWhenReady`. `ready`:
+the solid circle with lucide RotateCw (10 px in the 12 px box); hover/focus
+reads "Restart to update", the Settings string. Tooltips "Downloading Iliad
+0.6.1…" / "Iliad 0.6.1 is ready. Restart to update" (aria-label matches for
+ready). The solid ↓ circle ("↓ Update") remains only for `unsupported`. The
+pill max-width is 15em, and the Settings label fades out (120 ms) while an
+open pill would reach it (the Spanish ready pill at the default width).
+
 ### Restart safety
 
 Before quitting for an update, main asks every window's renderer to prepare:

@@ -105,6 +105,7 @@
   --overlay-border: rgba(92, 91, 82, 0.18); /* translucent overlay edge */
   --scrim: rgba(29, 29, 31, 0.18); /* dims the window behind a one-time card (What's new) */
   --update-progress-fill: rgba(255, 253, 246, 0.14); /* downloaded part of the footer update pill (ink-inverse at 14%) */
+  --update-ring-track: rgba(58, 63, 71, 0.2); /* footer update ring before it fills (accent at 20%) */
   --shadow-popover: 0 18px 44px rgba(43, 43, 37, 0.13);
   --shadow-menu: 0 16px 36px rgba(30, 30, 24, 0.12);
   --shadow-overlay: 0 16px 40px rgba(54, 39, 34, 0.14);

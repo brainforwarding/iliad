@@ -37,6 +37,10 @@ describe("app strings", () => {
     expect(appStrings.es.updates.confirmTitle).toBe("¿Reiniciar para actualizar?");
     expect(appStrings.es.updates.confirmBody).toBe("Los cambios de tu agente sin revisar quedarán tal como están.");
     expect(appStrings.en.settings.cantSelfUpdate).toBe("This copy can't update itself.");
+    expect(appStrings.en.updates.downloadingTooltip("0.6.1")).toBe("Downloading Iliad 0.6.1…");
+    expect(appStrings.es.updates.downloadingTooltip("0.6.1")).toBe("Descargando Iliad 0.6.1…");
+    expect(appStrings.en.updates.readyTooltip("0.6.1")).toBe("Iliad 0.6.1 is ready. Restart to update");
+    expect(appStrings.es.updates.readyTooltip("0.6.1")).toBe("Iliad 0.6.1 está lista. Reiniciar para actualizar");
   });
 
   it("no longer carry the amber-dot or toast copy", () => {

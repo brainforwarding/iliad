@@ -685,6 +685,10 @@ export default function App() {
     onSaveFailed: handleUpdateSaveFailed,
     onMenuCheck: openGeneralSettingsForUpdateCheck
   });
+  const updateButtonLabels = useMemo(
+    () => ({ ...strings.updates, restartToUpdate: strings.settings.restartToUpdate }),
+    [strings]
+  );
   const [whatsNewEntry, setWhatsNewEntry] = useState(() =>
     takeWhatsNew({
       currentVersion: APP_VERSION,
@@ -1707,7 +1711,7 @@ export default function App() {
       footerAccessory={
         <UpdateButton
           state={appUpdate.state}
-          labels={strings.updates}
+          labels={updateButtonLabels}
           confirming={appUpdate.confirmOpen}
           onInstall={appUpdate.install}
           onOpenDownload={appUpdate.openDownload}

@@ -78,14 +78,15 @@ describe("footer update button", () => {
     expect(updateButtonMode(null)).toBe("hidden");
   });
 
-  it("walks circle → Downloading → Restarting…", () => {
-    expect(updateButtonMode(state({ status: "downloading", percent: 42 }))).toBe("update");
+  it("walks ring → ready circle → Restarting…, or Downloading → Restarting… after an early click", () => {
+    expect(updateButtonMode(state({ status: "available" }))).toBe("progress");
+    expect(updateButtonMode(state({ status: "downloading", percent: 42 }))).toBe("progress");
     expect(updateButtonMode(state({ status: "downloading", percent: 42, installWhenReady: true }))).toBe("downloading");
     expect(updateButtonMode(state({ status: "available", installWhenReady: true }))).toBe("downloading");
-    expect(updateButtonMode(state({ status: "ready" }))).toBe("update");
+    expect(updateButtonMode(state({ status: "ready" }))).toBe("ready");
     expect(updateButtonMode(state({ status: "ready", restartPending: true }))).toBe("restarting");
-    // The confirmation keeps "↓ Update" under it (Figma frame 6).
-    expect(updateButtonMode(state({ status: "ready", restartPending: true }), true)).toBe("update");
+    // The confirmation keeps the ready pill under it (Figma frame 6).
+    expect(updateButtonMode(state({ status: "ready", restartPending: true }), true)).toBe("ready");
     expect(updateButtonMode(state({ status: "installing" }))).toBe("restarting");
     expect(updateButtonMode(state({ status: "unsupported" }))).toBe("update");
   });

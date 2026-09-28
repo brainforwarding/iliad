@@ -688,9 +688,15 @@ Main owns the state in `electron/updates/`; every window mirrors it.
 - IPC: `updates:get-state`, `updates:check`, `updates:install`, push
   `updates:state`, `updates:prepare-restart` / `updates:prepare-restart-response`,
   plus the menu's `updates:check-requested` / `updates:consume-pending-check-request`.
-- Renderer: `UpdateButton.tsx` at the right end of the sidebar footer (the
-  22px accent circle that grows into "↓ Update" on hover/focus; "Downloading
-  42%"; "Restarting…"), the confirmation popover, and `WhatsNewCard.tsx`: a
+- Renderer: `UpdateButton.tsx` at the right end of the sidebar footer. It
+  says what Settings → General says (0.6.2): while downloading, an outline
+  circle with ↓ and a 2px progress ring that hovers to "Downloading 42%";
+  once ready, the solid accent circle with a restart glyph that hovers to
+  "Restart to update" (the Settings string, one i18n key); after an early
+  click, "Downloading 42%" then "Restarting…"; copies that can't update
+  themselves keep the solid ↓ circle ("↓ Update", opens the download). When
+  the open pill would reach the Settings label, the label fades out. Then the
+  confirmation popover, and `WhatsNewCard.tsx`: a
   one-time card per version with an entry in `src/whatsNew/`, shown only to
   someone who used Iliad before (a stored last-seen version older than this
   one, or — from 0.5.0, which stored none — a workspace preference) and only
