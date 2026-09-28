@@ -1,6 +1,6 @@
 cask "iliad-md" do
-  version "0.6.0"
-  sha256 "18c082cf6f868d5cb6f7d9f2c1530fc60307c226e2759cec8ba9d0db447b13c2"
+  version "0.6.1"
+  sha256 "8fb1f01c0dd715d31ebf89dc04958e6a1a1d57c2d47dafa06dc0b42fe3136528"
 
   url "https://github.com/brainforwarding/iliad/releases/download/v#{version}/Iliad-MD-#{version}-mac-arm64.dmg",
       verified: "github.com/brainforwarding/iliad/"
