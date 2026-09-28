@@ -132,6 +132,20 @@ default `~/Library/Application Support/Iliad MD/iliad.sock` fits, but a long
 a raw error. Detect the length and say so (or fall back to a short path under
 `$TMPDIR` keyed by the profile).
 
+## Brand
+
+### The chair logo in the app
+
+From the website v4 (iliad-site `28ec22b`, 2026-09-28): the site now uses the
+chair as Iliad's logo (`assets/chair.svg`, `chair-mono.svg`, favicon,
+apple-touch icon, OG images; also in the Figma file). The app still uses the
+45° paperclip (0.6.0): the Dock/app icon (`build/icon.svg` → png/icns/ico),
+the in-app mark (`src/components/ClipMark.tsx`, launch and error screens), the
+app favicon (`public/favicon.svg`), the What's new illustration, and
+`docs/design-guidelines.md`. Switch them all to the chair, drawn in Figma first
+(app icon light/dark, 16/32 px legibility, the in-app mark), then ship in a
+release so the update brings the new icon.
+
 ## Install and distribution
 
 From `specs/2026-09-25-agent-installable-iliad.md`.
@@ -154,10 +168,8 @@ The cask ships from the own tap `brainforwarding/homebrew-tap`. Submit to
 - Review: when a hunk edits a line and adds lines before it, the intraline diff pairs the old line with the first new line, so the whole removed line is marked word by word.
 - Tree: keyboard access to the context menu (review finding, deferred).
 
-- Idea (owner, 2026-09-27): AI-suggested document title, like ChatGPT names chats. Discuss after the premium pass: when it triggers (e.g. an `untitled` doc once it has enough text), what it changes (file name vs first heading — the file on disk is the contract), and that it stays review-first (a suggestion the writer accepts, never a silent rename).
 - Idea (owner, 2026-09-27): versions and cloud for non-advanced writers. The owner uses git in the folder (history, going back, cloud via push) and wonders how to offer that to everyone: have the agent install guide (install.md) set up git, let the bundled skill commit/push behind the scenes, or sell cloud storage/sync as a premium feature (like Obsidian Sync). To discuss: Iliad-native version history (snapshots in the review baseline?) vs git under the hood vs a paid sync service; what "go back" looks like in the UI; privacy and the source-as-contract rule (files stay plain Markdown on disk).
 - Idea (owner, 2026-09-27): Appearance settings like Codex/ChatGPT — System / Light / Dark theme (Iliad has no dark mode today), and possibly a small set of user controls (accent, UI font, content font, contrast). Keep tokens as the single source; a dark theme would be a second token set.
-- Next (owner, 2026-09-27, after the AI context/preferences work): refresh the iliad.md website (~/Documents/iliad-site) to match the premium pass — lighter backgrounds (some screens have heavy backgrounds), updated screenshots/content for the new UI and features. Not a full remake.
 
 ## Ideas from other writing tools (owner approved 2026-09-27; Figma page "Ideas from writing tools (2026-09-27)")
 
