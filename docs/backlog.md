@@ -136,18 +136,6 @@ a raw error. Detect the length and say so (or fall back to a short path under
 
 From `specs/2026-09-25-agent-installable-iliad.md`.
 
-### Verify the first real self-update at 0.6.1
-
-From `specs/2026-09-27-in-app-updates.md`. 0.6.0 is the first version with the
-updater, and people reach it by hand, so no real self-update has happened yet.
-Before calling the feature done, release a small 0.6.1 and confirm on a real
-install of 0.6.0 (in /Applications and in ~/Applications): the footer button
-appears, Update downloads and relaunches on 0.6.1, an edit made just before
-the click is on disk, the review confirmation appears with a pending outside
-change, a Quit with an update ready installs without relaunching, and
-`iliad status` answers after the relaunch. Also confirm a brew install
-(`auto_updates true`) updates in-app and `brew upgrade` leaves it alone.
-
 ### Footer update button shows download progress and "ready" (0.6.2)
 
 From the owner's first real update (0.6.0 → 0.6.1, 2026-09-28). The footer
