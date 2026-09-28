@@ -29,6 +29,7 @@
     "release:refresh-update-metadata": "node scripts/refreshMacUpdateMetadata.mjs",
     "release:verify-update-metadata": "node scripts/verifyUpdateMetadata.mjs",
     "release:update-homebrew-cask": "node scripts/updateHomebrewCask.mjs",
+    "metrics": "node scripts/metrics.mjs",
     "test": "vitest run",
     "typecheck": "tsc -b && tsc -p electron/tsconfig.json --noEmit && npm run proxy:typecheck",
     "lint:css": "stylelint \"src/styles/**/*.css\"",

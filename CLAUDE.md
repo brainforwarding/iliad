@@ -14,6 +14,7 @@ npm run release:refresh-update-metadata # refresh latest-mac.yml hashes after fi
 npm run release:verify-update-metadata # verify latest-mac.yml, app-update.yml and the stable Iliad-MD-arm64.dmg before GitHub release upload
 npm run release:update-homebrew-cask # set version/sha256 in packaging/homebrew/iliad-md.rb from the release DMG
 npm run preview     # vite preview on 127.0.0.1 (renderer only, no Electron)
+npm run metrics     # weekly usage report: site visits, downloads, update checks, AI proxy use (-- --days N)
 ```
 
 Run a single test file or pattern with vitest directly:

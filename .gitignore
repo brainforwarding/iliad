@@ -9,3 +9,4 @@ release
 .claude/worktrees
 .wrangler
 .dev.vars*
+.metrics
