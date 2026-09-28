@@ -134,7 +134,7 @@ describe("cleanDocumentNameOutput", () => {
 });
 
 describe("ai-name:run", () => {
-  it("sends the name, autocomplete and selection tasks as v2 on the free route", async () => {
+  it("sends the name, autocomplete and selection tasks as v3 on the free route", async () => {
     const server = await proxy();
     const { service } = await freeService(server);
 
@@ -149,16 +149,16 @@ describe("ai-name:run", () => {
     });
 
     const generated = server.requests.filter((request) => request.path === "/v1/generate").map((request) => request.body);
-    expect(generated[0]).toEqual({ v: 2, task: "name", language: "en", text: TEXT });
+    expect(generated[0]).toEqual({ v: 3, task: "name", language: "en", text: TEXT });
     expect(generated.slice(1).map((body) => {
       const { v, task } = body as { v: number; task: string };
       return { v, task };
-    })).toEqual([{ v: 2, task: "autocomplete" }, { v: 2, task: "selection" }]);
+    })).toEqual([{ v: 3, task: "autocomplete" }, { v: 3, task: "selection" }]);
   });
 
-  it("answers client_outdated on every free-route task when the Worker does not serve v2", async () => {
+  it("answers client_outdated on every free-route task when the Worker does not serve v3", async () => {
     const server = await proxy();
-    server.state.supportedPromptVersions = [1];
+    server.state.supportedPromptVersions = [1, 2];
     const { service } = await freeService(server);
 
     expect(await suggest(service)).toEqual({ ok: false, reason: "client_outdated" });

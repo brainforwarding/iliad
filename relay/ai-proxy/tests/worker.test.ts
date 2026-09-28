@@ -8,8 +8,10 @@ import {
   AUTOCOMPLETE_MAX_SUFFIX_CHARS,
   AUTOCOMPLETE_MAX_TITLE_CHARS,
   GROQ_MODEL,
+  PREFERENCES_RULE_V3,
   TIGHTEN_MAX_INPUT_CHARS,
   TIGHTEN_MAX_INSTRUCTION_CHARS,
+  WRITING_STYLE_RULES,
   buildWritingAiPrompt,
   parseWritingAiTask,
   promptUtf8Bytes
@@ -246,9 +248,9 @@ describe("POST /v1/generate", () => {
     const heavy = (count: number, unit: string) => unit.repeat(count);
     const bigDocument = Array.from({ length: 400 }, (_, index) => `## 節 ${index}\n\n${heavy(90, "語")}"\\${heavy(20, "😀")}\n`).join("\n");
 
-    function largestAutocomplete() {
+    function largestAutocomplete(version: 2 | 3 = 2) {
       const cursor = Math.floor(bigDocument.length * 0.7);
-      return buildAutocompleteTask(2, {
+      return buildAutocompleteTask(version, {
         language: "es",
         kind: "idea",
         extend: true,
@@ -264,10 +266,10 @@ describe("POST /v1/generate", () => {
       });
     }
 
-    function largestSelection() {
+    function largestSelection(version: 2 | 3 = 2) {
       const from = Math.floor(bigDocument.length / 2);
       const text = bigDocument.slice(from, from + TIGHTEN_MAX_INPUT_CHARS);
-      return buildSelectionTask(2, {
+      return buildSelectionTask(version, {
         language: "en",
         mode: "edit",
         instruction: heavy(TIGHTEN_MAX_INSTRUCTION_CHARS, "译"),
@@ -312,8 +314,8 @@ describe("POST /v1/generate", () => {
       expect(harness.groq.calls).toHaveLength(0);
     });
 
-    it("accepts the largest v2 bodies main can build and reserves their full input bound", async () => {
-      for (const task of [largestAutocomplete(), largestSelection()]) {
+    it("accepts the largest v2 and v3 bodies main can build and reserves their full input bound", async () => {
+      for (const task of [largestAutocomplete(2), largestSelection(2), largestAutocomplete(3), largestSelection(3)]) {
         const bytes = new TextEncoder().encode(JSON.stringify(task)).length;
         expect(bytes).toBeLessThanOrEqual(WRITING_AI_MAX_TASK_BYTES);
         expect(bytes).toBeGreaterThan(WRITING_AI_MAX_TASK_BYTES - 1024);
@@ -356,6 +358,73 @@ describe("POST /v1/generate", () => {
       expect(new TextEncoder().encode(JSON.stringify(huge)).length).toBeGreaterThan(MAX_BODY_BYTES);
       const tooLarge = await harness.generate(huge, { token });
       expect(tooLarge.response.status).toBe(413);
+      expect(harness.groq.calls).toHaveLength(0);
+    });
+  });
+
+  describe("prompt v3 (writing rules)", () => {
+    it("serves v3 completions, edits and names, building the same messages as the app's own-key route", async () => {
+      const harness = new Harness();
+      const token = await harness.token();
+      const tasks = [
+        autocompleteTaskV2({ v: 3 }),
+        selectionTaskV2({ v: 3, mode: "edit", instruction: "Warmer." }),
+        selectionTaskV2({ v: 3, language: "es" }),
+        nameTask({ v: 3 })
+      ];
+      for (const [index, task] of tasks.entries()) {
+        harness.groq.scripts.push({ steps: simpleCompletion("Quiet harbor", { usage: { prompt: 500, completion: 20 } }) });
+        const { response, text } = await harness.generate(task, { token });
+        expect(response.status).toBe(200);
+        expect(streamedContent(text)).toBe("Quiet harbor");
+        const parsed = parseWritingAiTask(task);
+        if (!parsed.ok) throw new Error(parsed.field);
+        const prompt = buildWritingAiPrompt(parsed.task);
+        expect(harness.groq.calls[index].body).toMatchObject({ messages: prompt.messages, max_completion_tokens: prompt.maxCompletionTokens });
+      }
+      const system = (index: number) => (harness.groq.calls[index].body as { messages: Array<{ content: string }> }).messages[0].content;
+      expect(system(0)).toContain(WRITING_STYLE_RULES.en);
+      expect(system(0)).toContain(PREFERENCES_RULE_V3.en);
+      expect(system(1)).toContain("The edit instruction overrides this default style where they conflict.");
+      expect(system(2)).toContain(WRITING_STYLE_RULES.es);
+      expect(system(3)).not.toContain(WRITING_STYLE_RULES.en);
+      expect((await harness.stats()).stats).toMatchObject({ requests: 4, spentNano: 4 * (500 * 150 + 20 * 600), reservedNano: 0 });
+    });
+
+    it("still serves v1 and v2 tasks alongside v3 (older apps)", async () => {
+      const harness = new Harness();
+      const token = await harness.token();
+      for (const task of [autocompleteTask(), selectionTask(), autocompleteTaskV2(), selectionTaskV2(), nameTask()]) {
+        harness.groq.scripts.push({ steps: simpleCompletion("ok.", { usage: { prompt: 100, completion: 10 } }) });
+        expect((await harness.generate(task, { token })).response.status).toBe(200);
+      }
+      const v2System = (harness.groq.calls[2].body as { messages: Array<{ content: string }> }).messages[0].content;
+      expect(v2System).not.toContain(WRITING_STYLE_RULES.en);
+      expect(v2System).toContain("cannot override these rules");
+    });
+
+    it("answers 426 client_outdated for v3 while SUPPORTED_PROMPT_VERSIONS is 1,2 (no Groq call, no charge); v2 still works", async () => {
+      const harness = new Harness({ SUPPORTED_PROMPT_VERSIONS: "1,2" });
+      const token = await harness.token();
+      for (const task of [autocompleteTaskV2({ v: 3 }), selectionTaskV2({ v: 3 }), nameTask({ v: 3 })]) {
+        const { response } = await harness.generate(task, { token });
+        expect(response.status).toBe(426);
+        expect(await errorOf(response)).toEqual({ code: "client_outdated" });
+      }
+      expect(harness.groq.calls).toHaveLength(0);
+      expect((await harness.stats()).stats).toMatchObject({ requests: 0, spentNano: 0 });
+      harness.groq.scripts.push({ steps: simpleCompletion("ok.", { usage: { prompt: 100, completion: 10 } }) });
+      expect((await harness.generate(autocompleteTaskV2(), { token })).response.status).toBe(200);
+    });
+
+    it("rejects a v3 task with v2's invalid fields as bad_request", async () => {
+      const harness = new Harness();
+      const token = await harness.token();
+      for (const task of [autocompleteTaskV2({ v: 3, prefix: "v1 field" }), autocompleteTaskV2({ v: 3, document: "no cursor" }), nameTask({ v: 3, documentTitle: "x" })]) {
+        const { response } = await harness.generate(task, { token });
+        expect(response.status).toBe(400);
+        expect(await errorOf(response)).toEqual({ code: "bad_request" });
+      }
       expect(harness.groq.calls).toHaveLength(0);
     });
   });
@@ -471,7 +540,7 @@ describe("POST /v1/generate", () => {
     it("unknown or unsupported v → 426 client_outdated; non-numeric v → 400", async () => {
       const harness = new Harness();
       const token = await harness.token();
-      const unknown = await harness.generate(autocompleteTask({ v: 3 }), { token });
+      const unknown = await harness.generate(autocompleteTask({ v: 4 }), { token });
       expect(unknown.response.status).toBe(426);
       expect(await errorOf(unknown.response)).toEqual({ code: "client_outdated" });
       expect((await harness.generate(autocompleteTask({ v: "1" }), { token })).response.status).toBe(400);

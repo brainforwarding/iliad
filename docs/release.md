@@ -133,21 +133,21 @@ npm audit --omit=dev --audit-level=high
 `npm audit --audit-level=high` may report dev/build-tool advisories. The
 production release gate is `npm audit --omit=dev --audit-level=high`.
 
-- [ ] **AI proxy Worker first.** If this release sends a prompt version the
-  deployed Iliad AI proxy does not serve yet (prompt v2: naming untitled
-  documents, `FREE_ROUTE_PROMPT_VERSIONS.name = 2`), deploy the Worker
-  (`relay/ai-proxy`, `SUPPORTED_PROMPT_VERSIONS = "1,2"`) before shipping the
-  app. Until then the free route answers `client_outdated` for v2 and naming
-  silently does nothing (autocomplete and selection stay on v1).
-- [ ] **Then switch the free route to v2.** After deploying the Worker with
-  v2 (whole-document context and writing preferences,
-  `specs/2026-09-27-ai-context-and-preferences.md`), switch the free route to
-  v2 for every task and remove `promptVersionFor`'s split
-  (`FREE_ROUTE_PROMPT_VERSIONS` in `electron/writing/groq/prompts/index.ts`;
-  the own-key route already sends v2). Verify one free completion and one ✦
-  AI edit against the deployed Worker, and that the privacy wording (app
-  link target, website EN/ES, README) says the current document and the
-  writer's preferences are sent.
+- [ ] **AI proxy Worker first.** Both routes send `LATEST_PROMPT_VERSION`
+  (`electron/writing/groq/prompts/index.ts`) for every task; there is no
+  per-route split any more. If this release raises it (0.6.1: prompt v3,
+  writing rules, `specs/2026-09-27-writing-rules-prompt-v3.md`), deploy the
+  Worker (`relay/ai-proxy`) with the new prompt source and
+  `SUPPORTED_PROMPT_VERSIONS` listing it (`"1,2,3"`, older versions kept so
+  older apps keep working; `MIN_CLIENT_VERSION` unchanged) together, before
+  shipping the app. Until then the free route answers `client_outdated` for
+  every task of the new app. Deployment proof is a real generate request with
+  the new version (one free completion and one ✦ AI edit against the deployed
+  Worker), not `/healthz`. When the prompt text changes, re-run
+  `npm run benchmark:autocomplete -- --budget-probe` and keep
+  `PROMPT_OVERHEAD_TOKENS` at or above what it recommends.
+- [ ] **Privacy wording.** The app link target, website EN/ES and README say
+  the current document and the writer's preferences are sent.
 
 ## macOS Signing And Notarization
 

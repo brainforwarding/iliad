@@ -64,6 +64,19 @@ describe("buildAutocompleteTask", () => {
     expect(parseWritingAiTask(task)).toEqual({ ok: true, task });
   });
 
+  it("v3: exactly v2's task with v: 3 (same document, outline, preferences and trimming)", () => {
+    for (const overrides of [
+      { document: { text: DOC, cursor: DOC.length }, preferences: "Short sentences." },
+      { suffix: " and sat." },
+      { kind: "idea" as const, extend: true, prefix: "She walked into the harbor and ", document: { text: DOC, cursor: DOC.length } }
+    ]) {
+      const v2 = buildAutocompleteTask(2, input(overrides));
+      const v3 = buildAutocompleteTask(3, input(overrides));
+      expect(v3).toEqual({ ...v2, v: 3 });
+      expect(parseWritingAiTask(v3)).toEqual({ ok: true, task: v3 });
+    }
+  });
+
   it("v2 without a snapshot: the local window alone", () => {
     const task = buildAutocompleteTask(2, input({ suffix: " and sat." }));
     expect(task).toMatchObject({ document: `She walked into the ${CONTEXT_CURSOR_MARKER} and sat.`, outline: "", preferences: "" });
@@ -199,6 +212,19 @@ describe("buildSelectionTask", () => {
       preferences: "Plain."
     });
     expect(parseWritingAiTask(task)).toEqual({ ok: true, task });
+  });
+
+  it("v3: exactly v2's task with v: 3", () => {
+    for (const request of [
+      { ...base, document: { text, selectionFrom: passageFrom, selectionTo: passageFrom + passage.length }, preferences: "Plain." },
+      base,
+      { ...base, mode: "tighten" as const, instruction: undefined }
+    ]) {
+      const v2 = buildSelectionTask(2, request);
+      const v3 = buildSelectionTask(3, request);
+      expect(v3).toEqual({ ...v2, v: 3 });
+      expect(parseWritingAiTask(v3)).toEqual({ ok: true, task: v3 });
+    }
   });
 
   it("v2: passage only when the snapshot is missing or does not contain the passage", () => {

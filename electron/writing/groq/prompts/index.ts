@@ -1,16 +1,15 @@
 // Pure entry point of the versioned prompt module (no Node, Electron or DOM
-// imports). The app sends each task with the version `promptVersionFor`
-// picks for its route (not always the newest: on the free route autocomplete
-// and selection stay on v1 until a Worker serving v2 is deployed); the Iliad
-// AI proxy Worker serves every version it still lists in
-// SUPPORTED_PROMPT_VERSIONS.
+// imports). The app sends every task, on both routes, as the newest version
+// (LATEST_PROMPT_VERSION); the Iliad AI proxy Worker serves every version it
+// still lists in SUPPORTED_PROMPT_VERSIONS, so older apps keep working.
 // Spec: specs/2026-09-25-groq-ai-free-tier.md §2, §4;
 // specs/2026-09-27-name-untitled-documents.md (prompt v2, versions per task);
-// specs/2026-09-27-ai-context-and-preferences.md (versions per route).
+// specs/2026-09-27-writing-rules-prompt-v3.md (prompt v3, one version for all).
 
 import { GROQ_PINNED_PARAMS } from "./limits.js";
 import { buildPromptV1, parseWritingAiTaskV1, type TaskValidation, type WritingAiPrompt, type WritingAiTaskV1 } from "./v1.js";
 import { buildPromptV2, parseWritingAiTaskV2, type WritingAiTaskV2 } from "./v2.js";
+import { buildPromptV3, parseWritingAiTaskV3, type WritingAiTaskV3 } from "./v3.js";
 
 export * from "./limits.js";
 export {
@@ -58,62 +57,47 @@ export {
   type SelectionTaskV2,
   type WritingAiTaskV2
 } from "./v2.js";
+export {
+  EDIT_INSTRUCTION_STYLE_RULE,
+  PREFERENCES_LABEL_V3,
+  PREFERENCES_RULE_V3,
+  WRITING_STYLE_RULES,
+  buildPromptV3,
+  parseWritingAiTaskV3,
+  type AutocompleteTaskV3,
+  type NameTaskV3,
+  type SelectionTaskV3,
+  type WritingAiTaskV3
+} from "./v3.js";
 
 /** Every task shape of every version still served. */
-export type WritingAiTask = WritingAiTaskV1 | WritingAiTaskV2;
+export type WritingAiTask = WritingAiTaskV1 | WritingAiTaskV2 | WritingAiTaskV3;
 export type PromptVersion = WritingAiTask["v"];
 
-export const LATEST_PROMPT_VERSION = 2 as const satisfies PromptVersion;
+/** Every version still served, oldest first (the Worker's SUPPORTED_PROMPT_VERSIONS must be a subset). */
+export const PROMPT_VERSIONS: readonly PromptVersion[] = Object.freeze([1, 2, 3] as const);
+
+/** The version both routes send for every task. */
+export const LATEST_PROMPT_VERSION = 3 as const satisfies PromptVersion;
 
 export type WritingAiTaskKind = WritingAiTask["task"];
-export type WritingAiRouteKind = "free" | "own-key";
-
-/**
- * TEMPORARY — removed at release, once the Worker serving v2 is deployed
- * (docs/release.md): then every route sends v2 and `promptVersionFor` goes.
- *
- * The version the free route sends per task. Only `name` (new in v2) is sent
- * as v2 there, so the deployed Worker (v1 prompts for autocomplete/selection)
- * keeps working and a Worker without v2 disables only document naming
- * (specs 2026-09-27 name-untitled-documents and ai-context-and-preferences).
- */
-export const FREE_ROUTE_PROMPT_VERSIONS = Object.freeze({
-  // 0.5.0: the Worker serving v2 is deployed first, so the free route sends v2
-  // for every task. This map and `promptVersionFor` can go in a later cleanup.
-  autocomplete: 2,
-  selection: 2,
-  name: 2
-} as const satisfies Record<WritingAiTaskKind, PromptVersion>);
-
-/**
- * The prompt version for a task, resolved after the route (spec 2026-09-27
- * Review "Versions"): the own-key route builds prompts locally, so it always
- * sends the newest; the free route follows FREE_ROUTE_PROMPT_VERSIONS.
- * TEMPORARY: removed at release when everything is v2.
- */
-export function promptVersionFor(route: WritingAiRouteKind, task: WritingAiTaskKind): PromptVersion {
-  return route === "own-key" ? LATEST_PROMPT_VERSION : FREE_ROUTE_PROMPT_VERSIONS[task];
-}
-
-const BUILDERS: { [V in PromptVersion]: (task: Extract<WritingAiTask, { v: V }>) => WritingAiPrompt } = {
-  1: buildPromptV1,
-  2: buildPromptV2
-};
-
-const PARSERS: { [V in PromptVersion]: (input: unknown) => TaskValidation<Extract<WritingAiTask, { v: V }>> } = {
-  1: parseWritingAiTaskV1,
-  2: parseWritingAiTaskV2
-};
-
-export const PROMPT_VERSIONS: readonly PromptVersion[] = Object.freeze(Object.keys(BUILDERS).map(Number) as PromptVersion[]);
 
 export function isPromptVersion(value: unknown): value is PromptVersion {
-  return typeof value === "number" && Object.prototype.hasOwnProperty.call(BUILDERS, value);
+  return typeof value === "number" && (PROMPT_VERSIONS as readonly number[]).includes(value);
 }
 
 /** Messages, completion budget and output cap for a task, by its own `v`. */
 export function buildWritingAiPrompt(task: WritingAiTask): WritingAiPrompt {
-  return task.v === 2 ? BUILDERS[2](task) : BUILDERS[1](task);
+  switch (task.v) {
+    case 1:
+      return buildPromptV1(task);
+    case 2:
+      return buildPromptV2(task);
+    case 3:
+      return buildPromptV3(task);
+    default:
+      return unknownVersion(task);
+  }
 }
 
 /**
@@ -124,7 +108,21 @@ export function buildWritingAiPrompt(task: WritingAiTask): WritingAiPrompt {
 export function parseWritingAiTask(input: unknown): TaskValidation<WritingAiTask> {
   const v = typeof input === "object" && input !== null ? (input as { v?: unknown }).v : undefined;
   if (!isPromptVersion(v)) return { ok: false, field: "v" };
-  return v === 2 ? PARSERS[2](input) : PARSERS[1](input);
+  switch (v) {
+    case 1:
+      return parseWritingAiTaskV1(input);
+    case 2:
+      return parseWritingAiTaskV2(input);
+    case 3:
+      return parseWritingAiTaskV3(input);
+    default:
+      return unknownVersion(v);
+  }
+}
+
+/** Exhaustiveness: adding a version without a builder and a parser fails to compile. */
+function unknownVersion(value: never): never {
+  throw new Error(`unknown prompt version: ${JSON.stringify(value)}`);
 }
 
 /**

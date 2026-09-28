@@ -8,7 +8,7 @@ import { handleAutocompleteIpc } from "../../electron/ipc/autocomplete";
 import { handleTightenCancelIpc, handleTightenIpc } from "../../electron/ipc/tighten";
 import { handleSetGroqKeyIpc, handleSetRecordingShortcutIpc, handleWarmWritingAiIpc, handleWritingAssistStatusIpc } from "../../electron/ipc/writingSettings";
 import { GroqKeyStore, type SafeStorageLike } from "../../electron/writing/groq/keyStore";
-import { GROQ_MODEL } from "../../electron/writing/groq/prompts/index";
+import { GROQ_MODEL, PREFERENCES_LABEL_V3, PREFERENCES_RULE_V3, WRITING_STYLE_RULES } from "../../electron/writing/groq/prompts/index";
 import { WritingAiService } from "../../electron/writing/writingAiService";
 import { startFakeAiProxy } from "../fixtures/fakeAiProxy";
 
@@ -222,16 +222,36 @@ describe("whole-document context and preferences per route (spec 2026-09-27)", (
   };
   const deps = (service: WritingAiService) => ({ service, controllers: new Map(), resolveWorkspaceRootForSession: () => "/ws" });
 
-  it("own key: prompt v2 with the document, the outline and the preferences", async () => {
+  it("own key: prompt v3 (writing rules) with the document, the outline and the preferences", async () => {
     const { service, groq } = await ownKeyService((_request, _body, response) => groqStream(response, "quiet room."));
     expect(await handleAutocompleteIpc(event, contextRequest, deps(service))).toEqual({ ok: true, insert: "quiet room." });
-    const user = (groq.seen[0].body as { messages: Array<{ content: string }> }).messages[1].content;
+    const [system, user] = (groq.seen[0].body as { messages: Array<{ content: string }> }).messages.map((message) => message.content);
+    expect(system).toContain(WRITING_STYLE_RULES.en);
+    expect(system).toContain(PREFERENCES_RULE_V3.en);
     expect(user).toContain(`<<<DOCUMENT>>>\n${DOC}<<<CURSOR>>>\n<<<END_DOCUMENT>>>`);
     expect(user).toContain("## Morning  ← cursor");
-    expect(user).toContain("<<<PREFERENCES>>>\nShort sentences.\n<<<END_PREFERENCES>>>");
+    expect(user).toContain(`${PREFERENCES_LABEL_V3}\n<<<PREFERENCES>>>\nShort sentences.\n<<<END_PREFERENCES>>>`);
   });
 
-  it("free route: autocomplete and selection send v2 tasks with the document, the outline and the preferences", async () => {
+  it("own key: ✦ AI edit sends the v3 rules plus the edit override; the name prompt has no style rules", async () => {
+    const { service, groq } = await ownKeyService((_request, _body, response) => groqStream(response, "Harbor notes"));
+    const selectionFrom = DOC.indexOf("Mara");
+    await handleTightenIpc(event, {
+      requestId: "t", text: "Mara Quint ran the Kestrel ferry.", selection: { from: 0, to: 33 }, language: "es", mode: "edit", instruction: "Expand.",
+      document: { text: DOC, selectionFrom, selectionTo: selectionFrom + 33 }, preferences: "Frases cortas."
+    }, { service, controllers: new Map() });
+    const edit = (groq.seen[0].body as { messages: Array<{ content: string }> }).messages[0].content;
+    expect(edit).toContain(WRITING_STYLE_RULES.es);
+    expect(edit).toContain("La instrucción de edición prevalece sobre este estilo por defecto");
+    expect(edit).toContain(PREFERENCES_RULE_V3.es);
+
+    await service.suggestName({ language: "en", text: "We met on Tuesday to plan the spring workshop." }, new AbortController().signal);
+    const name = (groq.seen[1].body as { messages: Array<{ content: string }> }).messages[0].content;
+    expect(name).toMatch(/^Give a short title/);
+    expect(name).not.toContain(WRITING_STYLE_RULES.en);
+  });
+
+  it("free route: autocomplete, selection and name send v3 tasks with the document, the outline and the preferences", async () => {
     const proxy = await startFakeAiProxy();
     cleanups.push(() => proxy.close());
     const service = new WritingAiService(await userDataDir(), {
@@ -248,12 +268,16 @@ describe("whole-document context and preferences per route (spec 2026-09-27)", (
     }, { service, controllers: new Map() });
     const generated = proxy.requests.filter((request) => request.path === "/v1/generate").map((request) => request.body);
     expect(generated[0]).toEqual({
-      v: 2, task: "autocomplete", language: "en", kind: "sentence", extend: false, document: `${DOC}<<<CURSOR>>>`,
+      v: 3, task: "autocomplete", language: "en", kind: "sentence", extend: false, document: `${DOC}<<<CURSOR>>>`,
       outline: "# Harbor\n## Morning  ← cursor", preferences: "Short sentences.",
       documentTitle: "a", headingPath: ["Harbor", "Morning"], direction: "", avoid: []
     });
+    await service.suggestName({ language: "es", text: "Nos reunimos el martes." }, new AbortController().signal);
+    expect(proxy.requests.filter((request) => request.path === "/v1/generate").at(-1)?.body).toEqual({
+      v: 3, task: "name", language: "es", text: "Nos reunimos el martes."
+    });
     expect(generated[1]).toEqual({
-      v: 2, task: "selection", language: "en", mode: "edit", instruction: "Expand.", text: "Mara Quint ran the Kestrel ferry.",
+      v: 3, task: "selection", language: "en", mode: "edit", instruction: "Expand.", text: "Mara Quint ran the Kestrel ferry.",
       selection: { from: 0, to: 33 }, document: "# Harbor\n\n<<<PASSAGE>>>\n\n## Morning\n\nShe walked into the ", preferences: "Short sentences."
     });
   });

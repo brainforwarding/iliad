@@ -121,7 +121,7 @@ export function baseEnv(namespace: FakeNamespace, overrides: Partial<AiProxyEnv>
     IP_DAILY_NEW_INSTALLS: "5",
     IP48_DAILY_NEW_INSTALLS: "20",
     DENY_SUBJECTS: "",
-    SUPPORTED_PROMPT_VERSIONS: "1,2",
+    SUPPORTED_PROMPT_VERSIONS: "1,2,3",
     GLOBAL_DAILY_NANO_USD: "5000000000",
     INPUT_NANO_USD_PER_TOKEN: "150",
     OUTPUT_NANO_USD_PER_TOKEN: "600",

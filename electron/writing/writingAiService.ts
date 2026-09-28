@@ -10,11 +10,10 @@ import { GroqKeyStore, type GroqKeyStateName, type SafeStorageLike } from "./gro
 import { createAutocompletePartialEmitter } from "./groq/partials.js";
 import {
   GROQ_MODEL,
+  LATEST_PROMPT_VERSION,
   parseWritingAiTask,
-  promptVersionFor,
   type PromptVersion,
-  type WritingAiTask,
-  type WritingAiTaskKind
+  type WritingAiTask
 } from "./groq/prompts/index.js";
 import { buildAutocompleteTask, buildSelectionTask, type SelectionDocumentSnapshot } from "./aiTasks.js";
 import { IliadAiProxyClient } from "./groq/proxyClient.js";
@@ -170,7 +169,7 @@ export class WritingAiService {
         preferences: request.preferences
       });
     const emitPartial = request.onPartial ? createAutocompletePartialEmitter(request.onPartial) : null;
-    const result = await this.run("autocomplete", request.signal, "autocomplete", build, emitPartial ? (_delta, text) => emitPartial(text) : undefined, {
+    const result = await this.run("autocomplete", request.signal, build, emitPartial ? (_delta, text) => emitPartial(text) : undefined, {
       suggestionKind: request.suggestionKind
     });
 
@@ -192,7 +191,7 @@ export class WritingAiService {
         document: request.document,
         preferences: request.preferences
       });
-    const result = await this.run("selection_ai", request.signal, "selection", build, undefined, { mode });
+    const result = await this.run("selection_ai", request.signal, build, undefined, { mode });
 
     switch (result.finishReason) {
       case "stop":
@@ -218,18 +217,26 @@ export class WritingAiService {
   }
 
   /**
-   * A short title for an untitled document from its opening text (prompt v2
-   * `name`), on the same route as every other request. Returns the raw
+   * A short title for an untitled document from its opening text (the `name`
+   * task, v2 on), on the same route as every other request. Returns the raw
    * answer; the caller cleans it. Only a clean stop without reasoning
    * markers is returned; anything else throws.
    */
   async suggestName(request: { language: DocumentNameLanguage; text: string }, signal: AbortSignal): Promise<string> {
     const build = (version: PromptVersion): WritingAiTask => {
-      // `name` exists only from v2 on.
-      if (version < 2) throw new Error("name task needs prompt v2");
-      return { v: 2, task: "name", language: request.language, text: request.text };
+      switch (version) {
+        case 1:
+          // `name` exists only from v2 on.
+          throw new Error("name task needs prompt v2 or later");
+        case 2:
+          return { v: 2, task: "name", language: request.language, text: request.text };
+        case 3:
+          return { v: 3, task: "name", language: request.language, text: request.text };
+        default:
+          return unknownVersion(version);
+      }
     };
-    const result = await this.run("document_name", signal, "name", build, undefined, {});
+    const result = await this.run("document_name", signal, build, undefined, {});
 
     if (result.finishReason === "stop" && !containsReasoningMarkers(result.text)) return result.text;
     if (result.finishReason === "content_filter") {
@@ -275,7 +282,6 @@ export class WritingAiService {
   private async run(
     area: "autocomplete" | "selection_ai" | "document_name",
     signal: AbortSignal,
-    taskKind: WritingAiTaskKind,
     buildTask: (version: PromptVersion) => WritingAiTask,
     onDelta: ((delta: string, text: string) => void) | undefined,
     details: Record<string, string>
@@ -286,9 +292,9 @@ export class WritingAiService {
     try {
       // An unreadable own key blocks AI: never sent through the free proxy.
       if (!route.route) throw keyUnreadableError();
-      // The version is resolved after the route (own key → v2; free → per task
-      // until the Worker with v2 is deployed). `promptVersionFor` is temporary.
-      const promptVersion = promptVersionFor(route.route.kind, taskKind);
+      // Both routes send the newest version for every task (the Worker serving
+      // it is deployed before the app that sends it; docs/release.md).
+      const promptVersion = LATEST_PROMPT_VERSION;
       details = { ...details, promptVersion: String(promptVersion) };
       const task = checkedTask(buildTask(promptVersion));
       const result = await streamGroqText({ route: route.route, task, signal, onDelta, fetchImpl: this.warmer.fetch });
@@ -340,6 +346,10 @@ function checkedTask(task: WritingAiTask): WritingAiTask {
     });
   }
   return parsed.task;
+}
+
+function unknownVersion(version: never): never {
+  throw new Error(`unknown prompt version: ${String(version)}`);
 }
 
 function malformed(detail: string) {

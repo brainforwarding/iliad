@@ -1,8 +1,9 @@
 // Builds the structured writing-AI task for a prompt version from a
 // normalized IPC request (spec 2026-09-27-ai-context-and-preferences.md). v1
-// tasks are built from the existing fields exactly as before; v2 tasks add the
-// whole current document (trimmed to the shared byte budget and the kind's
-// context budget, WRITING_AI_CONTEXT_BUDGETS), its outline and the writer's
+// tasks are built from the existing fields exactly as before; v2 and v3 tasks
+// (same fields, spec 2026-09-27-writing-rules-prompt-v3.md) add the whole
+// current document (trimmed to the shared byte budget and the kind's context
+// budget, WRITING_AI_CONTEXT_BUDGETS), its outline and the writer's
 // preferences. Pure (imports only the prompt module).
 
 import {
@@ -14,9 +15,13 @@ import {
   trimDocumentForContext,
   utf8ByteLength,
   type AutocompleteKind,
+  type AutocompleteTaskV2,
+  type AutocompleteTaskV3,
   type PromptVersion,
   type SelectionMode,
   type SelectionRange,
+  type SelectionTaskV2,
+  type SelectionTaskV3,
   type WritingAiTask,
   type WritingLanguage
 } from "./groq/prompts/index.js";
@@ -74,25 +79,39 @@ export interface SelectionTaskInput {
 const taskBytes = (task: WritingAiTask) => utf8ByteLength(JSON.stringify(task));
 
 export function buildAutocompleteTask(version: PromptVersion, input: AutocompleteTaskInput): WritingAiTask {
-  if (version === 1) {
-    return {
-      v: 1,
-      task: "autocomplete",
-      language: input.language,
-      kind: input.kind,
-      extend: input.extend,
-      prefix: input.prefix,
-      suffix: input.suffix,
-      documentTitle: input.documentTitle,
-      headingPath: input.headingPath,
-      nearbyHeadings: input.nearbyHeadings,
-      direction: input.direction,
-      avoid: input.avoid
-    };
+  switch (version) {
+    case 1:
+      return autocompleteTaskV1(input);
+    case 2:
+      return contextAutocompleteTask(2, input);
+    case 3:
+      return contextAutocompleteTask(3, input);
+    default:
+      return unknownVersion(version);
   }
+}
 
-  const base: WritingAiTask = {
-    v: 2,
+function autocompleteTaskV1(input: AutocompleteTaskInput): WritingAiTask {
+  return {
+    v: 1,
+    task: "autocomplete",
+    language: input.language,
+    kind: input.kind,
+    extend: input.extend,
+    prefix: input.prefix,
+    suffix: input.suffix,
+    documentTitle: input.documentTitle,
+    headingPath: input.headingPath,
+    nearbyHeadings: input.nearbyHeadings,
+    direction: input.direction,
+    avoid: input.avoid
+  };
+}
+
+/** v2 and v3 share every field; only `v` differs. */
+function contextAutocompleteTask(v: 2 | 3, input: AutocompleteTaskInput): WritingAiTask {
+  const base: AutocompleteTaskV2 | AutocompleteTaskV3 = {
+    v,
     task: "autocomplete",
     language: input.language,
     kind: input.kind,
@@ -155,19 +174,34 @@ export function autocompleteDocumentView(input: Pick<AutocompleteTaskInput, "pre
 }
 
 export function buildSelectionTask(version: PromptVersion, input: SelectionTaskInput): WritingAiTask {
-  const passage = {
+  switch (version) {
+    case 1:
+      return { v: 1, task: "selection", ...selectionPassage(input) };
+    case 2:
+      return contextSelectionTask(2, input);
+    case 3:
+      return contextSelectionTask(3, input);
+    default:
+      return unknownVersion(version);
+  }
+}
+
+function selectionPassage(input: SelectionTaskInput) {
+  return {
     language: input.language,
     mode: input.mode,
     ...(input.mode === "edit" ? { instruction: input.instruction ?? "" } : {}),
     text: input.text,
     selection: { from: input.selection.from, to: input.selection.to }
   };
-  if (version === 1) return { v: 1, task: "selection", ...passage };
+}
 
-  const base: WritingAiTask = {
-    v: 2,
+/** v2 and v3 share every field; only `v` differs. */
+function contextSelectionTask(v: 2 | 3, input: SelectionTaskInput): WritingAiTask {
+  const base: SelectionTaskV2 | SelectionTaskV3 = {
+    v,
     task: "selection",
-    ...passage,
+    ...selectionPassage(input),
     document: "",
     preferences: neutralizePromptDelimiters(input.preferences ?? "").trim()
   };
@@ -203,6 +237,10 @@ export function passageRangeInDocument(input: Pick<SelectionTaskInput, "text" | 
     return null;
   }
   return { from, to };
+}
+
+function unknownVersion(version: never): never {
+  throw new Error(`unknown prompt version: ${String(version)}`);
 }
 
 // ---------------------------------------------------------------------------

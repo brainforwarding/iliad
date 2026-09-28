@@ -133,7 +133,7 @@ export async function startFakeAiProxy(options: FakeAiProxyOptions = {}, port = 
       globalCapReached: false,
       freeTierEnabled: true,
       minClientVersion: null,
-      supportedPromptVersions: [1, 2],
+      supportedPromptVersions: [1, 2, 3],
       nextGenerateError: null,
       alwaysUnauthorized: null,
       reply: options.reply ?? defaultFakeReply

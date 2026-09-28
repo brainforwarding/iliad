@@ -22,7 +22,7 @@ describe("config", () => {
       ip48NewInstalls: 20
     });
     expect(parsed.config.promptOverheadTokens).toBeGreaterThanOrEqual(2 * MEASURED_PROMPT_OVERHEAD_TOKENS);
-    expect([...parsed.config.supportedPromptVersions]).toEqual([1, 2]);
+    expect([...parsed.config.supportedPromptVersions]).toEqual([1, 2, 3]);
     const v1Only = parseConfig(env({ SUPPORTED_PROMPT_VERSIONS: "1" }));
     expect(v1Only.ok && [...v1Only.config.supportedPromptVersions]).toEqual([1]);
   });
@@ -37,7 +37,7 @@ describe("config", () => {
     ["OUTPUT_NANO_USD_PER_TOKEN", ""],
     ["PROMPT_OVERHEAD_TOKENS", "100"],
     ["TOKEN_TTL_DAYS", "0"],
-    ["SUPPORTED_PROMPT_VERSIONS", "1,3"],
+    ["SUPPORTED_PROMPT_VERSIONS", "1,4"],
     ["SUPPORTED_PROMPT_VERSIONS", ""],
     ["MIN_CLIENT_VERSION", "latest"],
     ["DENY_SUBJECTS", "not-a-subject"],
@@ -82,7 +82,7 @@ describe("config", () => {
       TOKEN_TTL_DAYS: "30",
       TOKEN_REFRESH_DAYS: "60",
       MIN_CLIENT_VERSION: "0.4.0",
-      SUPPORTED_PROMPT_VERSIONS: "1,2"
+      SUPPORTED_PROMPT_VERSIONS: "1,2,3"
     });
     for (const secret of ["GROQ_API_KEY", "TOKEN_SIGNING_KEYS", "IP_HASH_KEY", "ADMIN_TOKEN"]) {
       expect(toml).not.toMatch(new RegExp(`^${secret}\\s*=`, "m"));

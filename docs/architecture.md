@@ -496,7 +496,8 @@ buffer without Tab or Accept. Spec: `specs/2026-09-25-groq-ai-free-tier.md`
   the editable passage in its own section. `<<<NAME>>>` delimiters inside
   content are neutralized. Iliad's rules stay in the system message (they say
   preferences cannot override the rules, output boundaries, the edit
-  instruction or the Steer direction); preferences, outline and document are
+  instruction or the Steer direction; from v3 preferences may change the
+  default writing style, see "Writing rules" below); preferences, outline and document are
   delimited user sections, ordered for Groq's automatic prompt caching (prefix
   match): stable parts first (system rules, preferences, title, outline, the
   document), what changes most last (the text after the cursor, then heading
@@ -505,15 +506,34 @@ buffer without Tab or Accept. Spec: `specs/2026-09-25-groq-ai-free-tier.md`
   an answer copying ≥ 60 contiguous characters (or copied windows over half of
   it) from outside the selection is rejected; the existing echo guards and the
   exact-text-before-accept check stay. Comments companions are never sent.
-- **Prompt versions per route** (temporary, `promptVersionFor(route, task)` in
-  `prompts/index.ts`, resolved in `WritingAiService.run` after the route):
-  own key → v2 for every task (built locally); free → v1 for autocomplete and
-  selection (built exactly as before, no document or preferences) and v2 for
-  `name`, until the Worker serving v2 is deployed; then the free route moves
-  to v2 and the split is removed (`docs/release.md`). The Worker parses every
-  version with the shared strict parser and reserves `UTF-8 prompt bytes +
-  PROMPT_OVERHEAD_TOKENS` input tokens, so the largest v2 body (~57 KB) reserves
-  about $0.011 at list prices before settling at actual usage.
+- **Prompt versions** (`prompts/index.ts`): both routes send
+  `LATEST_PROMPT_VERSION` for every task (v3 since 0.6.1; the temporary
+  per-route split of 0.5.0 is gone). Each version is a frozen file (`v1.ts`,
+  `v2.ts`, `v3.ts`, golden snapshots in `tests/writing/groq/`), and
+  `buildWritingAiPrompt` / `parseWritingAiTask` dispatch on `v` with
+  exhaustive switches. The Worker keeps serving every version in
+  `SUPPORTED_PROMPT_VERSIONS` (0.4 sends v1, 0.5/0.6.0 v2), so it is deployed
+  with a new version before the app that sends it (`docs/release.md`). The
+  Worker parses every version with the shared strict parser and reserves
+  `UTF-8 prompt bytes + PROMPT_OVERHEAD_TOKENS` input tokens, so the largest
+  body (~57 KB) reserves about $0.011 at list prices before settling at
+  actual usage.
+- **Writing rules** (prompt v3, `specs/2026-09-27-writing-rules-prompt-v3.md`):
+  v3 has v2's task shapes, fields, budgets and caps; the system prompt of
+  completions and ✦ AI edits adds one short block of default writing rules
+  (`WRITING_STYLE_RULES`, EN/ES, after the task and context rules): write
+  plainly while preserving voice and Markdown; no filler or empty
+  restatement; concrete details when the document has them; no invented
+  facts, numbers, sources or names, and no unsupported reasons or
+  conclusions; no generic openings, upbeat endings, inflated claims, stock
+  contrasts or three-part lists for effect; no em dashes, semicolons, or
+  colons outside real lists and times unless the voice, the Markdown, a
+  preference or an edit instruction needs them. They are a default style:
+  the writer's preferences may change them (both the system preferences rule
+  and the labelled preferences section say so), but not the factual limits,
+  task boundaries, output format, edit instruction or writing direction;
+  an explicit ✦ AI Edit instruction overrides them; Tighten keeps "do not add
+  or remove information". The `name` prompt is v2's unchanged.
 - **Warm connection** (`groq/connection.ts`): AI requests on both routes go
   through one undici keep-alive Agent (2-minute idle sockets; Node's global
   fetch drops idle sockets after 4 s). While autocomplete is on and AI isn't
