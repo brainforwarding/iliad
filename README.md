@@ -209,3 +209,7 @@ Keep `docs/` current when important product, UX, architecture, or implementation
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
+
+## Development secrets
+
+See [development secrets setup](docs/development-secrets.md) for Git + 1Password provisioning, offline status, refresh, and fresh Linux setup.

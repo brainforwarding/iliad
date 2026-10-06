@@ -1,0 +1,6 @@
+
+# Development secrets working copies
+/.env.local
+/.dev-secrets.lock/
+/.dev-secrets-tmp-*/
+.dev-secrets-tmp-adopt-*
