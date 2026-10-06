@@ -57,4 +57,16 @@ class Provisioning(unittest.TestCase):
   self.assertEqual(self.runscript('refresh').returncode,1)
   self.assertEqual((self.root/'.env').read_bytes(),before);self.assertEqual((self.root/'.env.second').read_bytes(),second)
 
+
+ def test_unsafe_generated_candidate_preserves_working_file(self):
+  self.provision();before=(self.root/'.env').read_bytes()
+  loader=importlib.machinery.SourceFileLoader('candidate_validation',str(self.root/'scripts/dev-secrets'));spec=importlib.util.spec_from_loader(loader.name,loader);module=importlib.util.module_from_spec(spec);loader.exec_module(module)
+  from unittest.mock import patch
+  profile=self.schema['profiles']['development'];previous=os.umask(0o077)
+  try:
+   with patch.object(module,'resolve',return_value='synthetic-private-fixture'),patch.object(module,'validate_loader',side_effect=lambda directory,definition,expected:(directory/'.env').chmod(0o644)):
+    with self.assertRaises(module.SafeError):module.provision('refresh',profile)
+  finally:os.umask(previous)
+  self.assertEqual((self.root/'.env').read_bytes(),before)
+
 if __name__=='__main__': unittest.main()
