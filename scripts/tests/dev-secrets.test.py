@@ -47,4 +47,14 @@ class Provisioning(unittest.TestCase):
  def test_lock_and_unsafe_schema_rejected(self):
   (self.root/'.dev-secrets.lock').mkdir();self.assertEqual(self.runscript('provision').returncode,1);(self.root/'.dev-secrets.lock').rmdir()
   self.schema['profiles']['development']['files'][0]['target']='../outside';self.save();self.assertEqual(self.runscript('provision').returncode,1)
+
+ def test_multiple_candidates_validate_before_any_replacement(self):
+  first=self.schema['profiles']['development']['files'][0]
+  self.schema['profiles']['development']['files'].append({'target':'.env.second','loader':'simple','variables':first['variables'].copy()})
+  self.save();(self.root/'.gitignore').write_text('.env*\n.dev-secrets.lock/\n.dev-secrets-tmp-*/\n')
+  self.provision();before=(self.root/'.env').read_bytes();second=(self.root/'.env.second').read_bytes()
+  self.schema['profiles']['development']['files'][1]['variables']['API_KEY']={'kind':'secret','reference':'op://test/item/ABSENT_FIELD'};self.save()
+  self.assertEqual(self.runscript('refresh').returncode,1)
+  self.assertEqual((self.root/'.env').read_bytes(),before);self.assertEqual((self.root/'.env.second').read_bytes(),second)
+
 if __name__=='__main__': unittest.main()
