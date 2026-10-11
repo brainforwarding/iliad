@@ -1,5 +1,7 @@
 # Iliad
 
+<img src="docs/assets/iliad-card.jpg" alt="Iliad: write with AI, keep your voice. A Markdown editor for Mac, shown reviewing an outside agent's edits to a story." width="100%">
+
 A calm, local-first Markdown writing app for macOS, built with Electron. Iliad
 is the place to write one document with small AI help, and the place to review
 what an outside AI agent (Claude Code, Codex, or any tool) did to your writing.
