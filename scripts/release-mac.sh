@@ -46,7 +46,8 @@ PUBLIC_REPO="brainforwarding/iliad"
 TAP_REPO="brainforwarding/homebrew-tap"
 SIGNING_TEAM="K542ZFQH6B"
 SIGNING_IDENTITY="Developer ID Application: ED4.ONE SpA (${SIGNING_TEAM})"
-NOTARY_PROFILE="iliad-notary"
+# Any notarytool profile for team K542ZFQH6B works; ILIAD_NOTARY_PROFILE picks another one.
+NOTARY_PROFILE="${ILIAD_NOTARY_PROFILE:-iliad-notary}"
 APP_NAME="Iliad MD"
 STABLE_DMG="Iliad-MD-arm64.dmg"
 

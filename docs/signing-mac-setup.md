@@ -60,3 +60,17 @@ What a release needs on the new Mac:
    `xcrun notarytool history --keychain-profile iliad-notary` answers;
    `scripts/release-mac.sh --dry-run <version>` passes its checks.
 5. Delete `~/Downloads/iliad-developer-id.p12` and empty the Trash.
+
+## Reusing another notary profile
+
+Any `notarytool` keychain profile for the same Apple developer account (team
+`K542ZFQH6B`) can notarize Iliad. On a Mac that already has one (for example
+`meetrec-notary`, made from the 1Password item "Transcribe — Apple
+notarization"), run the release with
+`ILIAD_NOTARY_PROFILE=meetrec-notary scripts/release-mac.sh …` instead of
+creating `iliad-notary`.
+
+Releases need Node 24 (Homebrew `node@24`): under Node 26 `npm ci` writes a
+broken esbuild binary and Electron's installer stalls while unzipping. Put
+`/opt/homebrew/opt/node@24/bin` first on `PATH` for the release.
+
