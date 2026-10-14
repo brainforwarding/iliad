@@ -22,7 +22,13 @@ export type SelectionCommentMapping =
 
 export interface SelectionCommentsExtensionOptions {
   documentPath: string;
+  /** Ranges that get a wash (the writer's pending and fading comments). */
   ranges: SelectionCommentWashRange[];
+  /**
+   * Every anchored comment whose position follows edits, washed or not (AI
+   * comments have no wash but still move with the text). Defaults to `ranges`.
+   */
+  trackedRanges?: Array<Pick<SelectionCommentWashRange, "id" | "from" | "to">>;
   provisionalRange: { from: number; to: number } | null;
   /** Distinct graphite wash on the range being adjusted; decoration-only. */
   provisionalTightenRange?: { from: number; to: number } | null;
@@ -223,7 +229,7 @@ export function selectionCommentsExtension(options: SelectionCommentsExtensionOp
   // Closure cache of live positions: between React rebuilds, consecutive
   // transactions must map cumulatively. The cache reseeds from authoritative
   // props whenever the extension instance is rebuilt.
-  let tracked = options.ranges.map((range) => ({ id: range.id, from: range.from, to: range.to }));
+  let tracked = (options.trackedRanges ?? options.ranges).map((range) => ({ id: range.id, from: range.from, to: range.to }));
 
   const listener = EditorView.updateListener.of((update) => {
     options.onEditorUpdate?.(update);

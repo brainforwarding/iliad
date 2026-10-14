@@ -17,6 +17,8 @@ import {
 } from "./app/useDocumentPersistence";
 import { externalReviewTargetWithRevision, useOutsideReview } from "./app/useOutsideReview";
 import { useSelectionComments } from "./app/useSelectionComments";
+import { useCommentMarginPreference } from "./preferences/commentMarginPreferences";
+import { CommentsToggle, isCommentsMarginShortcut } from "./components/CommentsToggle";
 import { useSettingsPanel } from "./app/useSettingsPanel";
 import { useSidebarPeek } from "./app/useSidebarPeek";
 import { useWindowChrome } from "./app/useWindowChrome";
@@ -195,6 +197,10 @@ export default function App() {
     },
     messages: strings.documentMessages
   });
+  // Comments in the right margin (spec 2026-10-14): a remembered display preference.
+  const commentMargin = useCommentMarginPreference();
+  const [commentMarginFits, setCommentMarginFits] = useState(true);
+  const toggleCommentMargin = commentMargin.toggle;
   // Every save flush also writes pending comment changes (companion file), so
   // file operations and navigation wait for both and stop if either fails.
   const flushSave = useCallback(async () => {
@@ -1254,6 +1260,12 @@ export default function App() {
         return;
       }
 
+      if (isCommentsMarginShortcut(event) && !event.defaultPrevented && !event.repeat && !event.isComposing) {
+        event.preventDefault();
+        toggleCommentMargin();
+        return;
+      }
+
       // ⌘[ / ⌘]: the editor leaves these keys to the app (CodeMirrorHost).
       const historyDirection = documentHistoryShortcut(event);
 
@@ -1277,7 +1289,8 @@ export default function App() {
     openWorkspace,
     requestCloseDocument,
     settingsOpen,
-    sidebarPeekOpen
+    sidebarPeekOpen,
+    toggleCommentMargin
   ]);
 
   useEffect(() => {
@@ -1473,6 +1486,10 @@ export default function App() {
         ? { comments: detachedComments, onDelete: deleteSelectionComment }
         : undefined,
     [activeFileHasPendingReview, deleteSelectionComment, detachedComments, editorSelectionComments]
+  );
+  const editorCommentMargin = useMemo(
+    () => (editorSelectionComments ? { shown: commentMargin.visible, onFitChange: setCommentMarginFits } : undefined),
+    [commentMargin.visible, editorSelectionComments]
   );
   const editorTighten = useMemo<EditorTightenProps | undefined>(() => {
     // No ✦ AI edits inside a comments companion (spec 2026-09-27).
@@ -1795,6 +1812,15 @@ export default function App() {
           <div ref={setTopbarSlot} className="topbar-slot" />
           <div className="topbar-actions">
             {shouldShowStatus && visibleStatus ? <span className="document-save-state">{visibleStatus}</span> : null}
+            {editorSelectionComments && commentCount ? (
+              <CommentsToggle
+                count={commentCount}
+                shown={commentMargin.visible}
+                fits={commentMarginFits}
+                labels={strings.topbar.comments}
+                onToggle={toggleCommentMargin}
+              />
+            ) : null}
           </div>
         </div>
       </header>
@@ -1844,6 +1870,7 @@ export default function App() {
             labels={strings.editor}
             review={editorReview}
             selectionComments={editorSelectionComments}
+            commentMargin={editorCommentMargin}
             tighten={editorTighten}
             writingAssists={editorWritingAssists}
             onChange={handleEditorChange}

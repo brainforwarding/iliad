@@ -41,6 +41,8 @@ export interface SelectionCommentsOverlayApi {
   /** The ✦ AI menu key: opens the menu over a selection, does nothing without one. Always consumes the key. */
   handleAiMenuShortcut: (view: EditorView) => boolean;
   handleEscape: (view: EditorView) => boolean;
+  /** Opens the edit composer for one of `comments` at its passage (the margin's Edit). */
+  editComment: (id: string) => void;
 }
 
 export const selectionAiPresets = ["rewrite", "expand", "shorten", "summarize", "list"] as const;
@@ -114,6 +116,8 @@ interface SelectionCommentsOverlayProps {
   onDeleteComment: (id: string) => void;
   onProvisionalRangeChange: (range: { from: number; to: number } | null) => void;
   tighten?: TightenOverlayApi;
+  /** False while the comment margin shows every comment: no hover cards. */
+  hoverCards?: boolean;
 }
 
 interface ComposerState {
@@ -196,7 +200,8 @@ export function SelectionCommentsOverlay({
   onUpdateComment,
   onDeleteComment,
   onProvisionalRangeChange,
-  tighten
+  tighten,
+  hoverCards = true
 }: SelectionCommentsOverlayProps) {
   const [floatingPos, setFloatingPos] = useState<number | null>(null);
   const [composer, setComposer] = useState<ComposerState | null>(null);
@@ -233,6 +238,8 @@ export function SelectionCommentsOverlay({
   hoverRef.current = hover;
   const commentsRef = useRef(comments);
   commentsRef.current = comments;
+  const hoverCardsRef = useRef(hoverCards);
+  hoverCardsRef.current = hoverCards;
 
   const clearTimer = (timer: MutableRefObject<number | null>) => {
     if (timer.current !== null) {
@@ -485,6 +492,14 @@ export function SelectionCommentsOverlay({
   const handleMouseMove = useCallback(
     (event: MouseEvent, moveView: EditorView) => {
       if (composerRef.current || editComposerRef.current) {
+        return;
+      }
+
+      if (!hoverCardsRef.current) {
+        if (hoverRef.current || hoverShowTimer.current !== null) {
+          hideHover();
+        }
+
         return;
       }
 
@@ -793,7 +808,15 @@ export function SelectionCommentsOverlay({
     handleCommentShortcut,
     handleTightenShortcut,
     handleAiMenuShortcut,
-    handleEscape
+    handleEscape,
+    editComment: (id: string) => {
+      const comment = commentsRef.current.find((item) => item.id === id);
+
+      if (comment && isAnchoredSelectionComment(comment)) {
+        hideHover();
+        openComposer(comment.from, comment.to, comment.from, comment.id, comment.comment);
+      }
+    }
   };
 
   useEffect(() => {

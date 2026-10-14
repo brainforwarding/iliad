@@ -85,6 +85,28 @@ describe("selection comment decorations", () => {
     expect(washes[0]).toMatchObject({ from: from + 2, to: from + 7 });
   });
 
+  it("tracks comments without a wash (hidden AI comments) but never washes them", () => {
+    const doc = "hello brave world";
+    const from = doc.indexOf("brave");
+    const state = EditorState.create({
+      doc,
+      extensions: [
+        selectionCommentsExtension({
+          documentPath: "/ws/doc.md",
+          ranges: [],
+          trackedRanges: [{ id: "ai-1", from, to: from + 5 }],
+          provisionalRange: null
+        })
+      ]
+    });
+
+    expect(collectWashes(state)).toEqual([]);
+    expect(selectionCommentMappingForChanges(state.update({ changes: { from: 0, insert: "XX" } }).changes, doc.length, [{ id: "ai-1", from, to: from + 5 }])).toEqual({
+      type: "mapped",
+      updates: [{ id: "ai-1", from: from + 2, to: from + 7 }]
+    });
+  });
+
   it("keeps a wash spanning a bold span coherent whether syntax is hidden or revealed", () => {
     const doc = "first line\nsome **bold** text";
     const from = doc.indexOf("**bold**");

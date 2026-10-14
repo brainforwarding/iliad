@@ -14,6 +14,12 @@ export const appStrings = {
       documentLocation: "Document location",
       backTo: (name: string) => `Back to ${name}`,
       forwardTo: (name: string) => `Forward to ${name}`,
+      comments: {
+        label: "Comments",
+        show: "Show comments in the margin",
+        hide: "Hide comments in the margin",
+        tooNarrow: "Make the window wider to see comments in the margin"
+      },
       saveStatus: {
         saved: (time: string) => `Saved ${time}`,
         saving: "Saving...",
@@ -245,6 +251,13 @@ export const appStrings = {
         detached: (count: number) => (count === 1 ? "1 detached comment" : `${count} detached comments`),
         detachedHint: "Their passage changed or is no longer unique in the document."
       },
+      commentMargin: {
+        region: "Comments",
+        writerComment: (text: string) => `Comment: ${text}`,
+        aiComment: (text: string) => `AI comment: ${text}`,
+        deleteComment: "Delete comment",
+        more: (count: number) => `+${count} more`
+      },
       tighten: {
         action: "Shorten",
         working: "Shortening…",
@@ -406,6 +419,12 @@ export const appStrings = {
       documentLocation: "Ubicación del documento",
       backTo: (name: string) => `Volver a ${name}`,
       forwardTo: (name: string) => `Avanzar a ${name}`,
+      comments: {
+        label: "Comentarios",
+        show: "Mostrar comentarios en el margen",
+        hide: "Ocultar comentarios en el margen",
+        tooNarrow: "Agranda la ventana para ver los comentarios en el margen"
+      },
       saveStatus: {
         saved: (time: string) => `Guardado ${time}`,
         saving: "Guardando...",
@@ -637,6 +656,13 @@ export const appStrings = {
         delete: "Eliminar",
         detached: (count: number) => (count === 1 ? "1 comentario sin pasaje" : `${count} comentarios sin pasaje`),
         detachedHint: "Su pasaje cambió o ya no es único en el documento."
+      },
+      commentMargin: {
+        region: "Comentarios",
+        writerComment: (text: string) => `Comentario: ${text}`,
+        aiComment: (text: string) => `Comentario de la IA: ${text}`,
+        deleteComment: "Eliminar comentario",
+        more: (count: number) => `+${count} más`
       },
       tighten: {
         action: "Acortar",

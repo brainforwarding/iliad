@@ -258,3 +258,126 @@ describe("review fixes", () => {
     expect(planRestoredReadd({ textAtNotice: "x", expiresAt: 1 }, removed, [], "Alpha passage", 2)).toEqual({ action: "drop" });
   });
 });
+
+describe("comment authors", () => {
+  it("keeps by=ai through a read, a local change and the write", async () => {
+    const original = serializeCommentsFile([
+      { id: "w", quote: "Alpha", comment: "mine" },
+      { id: "ai-1", quote: "Beta", comment: "feedback", author: "ai" }
+    ]);
+    const { state, io } = fakeDisk(original);
+    const current = session();
+    absorbCommentsDisk(current, await readCommentsDisk(io));
+
+    expect(current.comments.map((item) => item.author ?? "writer")).toEqual(["writer", "ai"]);
+
+    current.comments = [...current.comments, comment("n", "Gamma", "new here", doc)];
+    current.dirty = true;
+    await writeCommentsSession(current, io);
+
+    expect(parseCommentsFile(state.text ?? "").map((entry) => [entry.id, entry.author ?? "writer"])).toEqual([
+      ["w", "writer"],
+      ["ai-1", "ai"],
+      ["n", "writer"]
+    ]);
+  });
+
+  it("keeps an AI comment's author when an agent appends while Iliad writes", async () => {
+    const { state, io } = fakeDisk(serializeCommentsFile([{ id: "w", quote: "Alpha", comment: "mine" }]));
+    const current = session();
+    absorbCommentsDisk(current, await readCommentsDisk(io));
+
+    current.comments = current.comments.map((item) => ({ ...item, comment: "mine, edited" }));
+    current.dirty = true;
+    state.text = `${state.text}\n---\n\n<!-- iliad:comment id=ai-9 by=ai -->\n> Gamma\n\nAgent note.\n`;
+
+    await writeCommentsSession(current, io);
+
+    expect(parseCommentsFile(state.text ?? "").map((entry) => [entry.id, entry.comment, entry.author ?? "writer"])).toEqual([
+      ["w", "mine, edited", "writer"],
+      ["ai-9", "Agent note.", "ai"]
+    ]);
+    expect(current.comments.find((item) => item.id === "ai-9")?.author).toBe("ai");
+  });
+
+  it("takes the author from the file when an outside tool changes it", () => {
+    const base = [{ id: "x", quote: "Alpha", comment: "one" }];
+    const local = [comment("x", "Alpha", "one", doc)];
+    const fresh = [{ id: "x", quote: "Alpha", comment: "one", author: "ai" as const }];
+    const result = mergeCommentEntries(base, local, fresh);
+
+    expect(result.entries[0]).toMatchObject({ entry: { id: "x", author: "ai" }, local: null });
+  });
+
+  it("writes a local AI comment's author when it is new to the file", () => {
+    const local = [{ ...comment("ai-2", "Beta", "fresh", doc), author: "ai" as const }];
+    const result = mergeCommentEntries([], local, []);
+
+    expect(result.entries[0].entry).toMatchObject({ id: "ai-2", author: "ai" });
+    expect(commentToEntry(local[0], doc)).toMatchObject({ author: "ai" });
+  });
+
+  it("keeps by=ai on an AI comment re-added by a restore, and writes it back", async () => {
+    const before = "Alpha passage here. Beta passage there.";
+    const { state, io } = fakeDisk(
+      serializeCommentsFile([
+        { id: "ai-a", quote: "Alpha passage", comment: "too long", author: "ai" },
+        { id: "b", quote: "Beta passage", comment: "keep" }
+      ])
+    );
+    const current = session({ documentText: before });
+    absorbCommentsDisk(current, await readCommentsDisk(io));
+
+    state.text = serializeCommentsFile([{ id: "b", quote: "Beta passage", comment: "keep" }]);
+    current.documentText = "Rewritten opening. Beta passage there.";
+    const { removedOutside } = absorbCommentsDisk(current, await readCommentsDisk(io));
+    const restored = readdRestoredComments(removedOutside, current.comments, before);
+
+    current.documentText = before;
+    current.comments = [...current.comments, ...restored.readded];
+    current.dirty = true;
+    await writeCommentsSession(current, io);
+
+    expect(parseCommentsFile(state.text ?? "").map((entry) => [entry.id, entry.author ?? "writer"])).toEqual([
+      ["b", "writer"],
+      ["ai-a", "ai"]
+    ]);
+  });
+
+  it("keeps a detached AI comment and its author on the next write", async () => {
+    const { state, io } = fakeDisk(
+      serializeCommentsFile([
+        { id: "w", quote: "Alpha", comment: "mine" },
+        { id: "ai-x", quote: "a passage that is gone", comment: "feedback", author: "ai" }
+      ])
+    );
+    const current = session();
+    absorbCommentsDisk(current, await readCommentsDisk(io));
+
+    expect(current.comments.find((item) => item.id === "ai-x")).toMatchObject({ from: 0, to: 0, author: "ai" });
+
+    current.comments = current.comments.map((item) => (item.id === "w" ? { ...item, comment: "mine, edited" } : item));
+    current.dirty = true;
+    await writeCommentsSession(current, io);
+
+    expect(parseCommentsFile(state.text ?? "").find((entry) => entry.id === "ai-x")).toMatchObject({
+      quote: "a passage that is gone",
+      author: "ai"
+    });
+  });
+
+  it("keeps an agent's AI comment when the writer deletes their last comment at the same time", async () => {
+    const { state, io } = fakeDisk(serializeCommentsFile([{ id: "w", quote: "Alpha", comment: "mine" }]));
+    const current = session();
+    absorbCommentsDisk(current, await readCommentsDisk(io));
+
+    current.comments = [];
+    current.dirty = true;
+    state.text = `${state.text}\n---\n\n<!-- iliad:comment id=ai-1 by=ai -->\n> Beta\n\nAgent note.\n`;
+
+    await writeCommentsSession(current, io);
+
+    expect(parseCommentsFile(state.text ?? "")).toEqual([{ id: "ai-1", quote: "Beta", comment: "Agent note.", author: "ai" }]);
+  });
+});
+

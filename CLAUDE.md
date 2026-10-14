@@ -65,7 +65,7 @@ Do not put new feature logic back into the old hotspot files. Use the owner modu
 - File tree traversal/path relocation helpers: `src/files/fileTree.ts` and `src/files/pathUtils.ts`.
 - Outside-change review state and actions: `src/app/useOutsideReview.ts` and `src/review/`; inline review rendering: `src/editor/aiReview/`; baseline and guarded writes: `electron/review/`; review IPC: `electron/ipc/review.ts`.
 - Built-in writing AI (Groq routes, autocomplete, ✦ AI/tighten, key storage): `electron/writing/` (provider pieces in `electron/writing/groq/`, prompts shared with the Worker) with IPC in `electron/ipc/autocomplete.ts`, `tighten.ts`, `writingSettings.ts`.
-- Comments (companion file): `src/app/useSelectionComments.ts`, `src/comments/`; shared companion path and comments-file rules: `electron/shared/`.
+- Comments (companion file): `src/app/useSelectionComments.ts`, `src/comments/`; shared companion path and comments-file rules: `electron/shared/`. Hover cards and the composer: `src/editor/selectionComments/`; comments in the right margin: `src/editor/commentMargin/` (pure layout in `layout.ts`).
 - CLI and agent skill: `bin/` (CLI script and packaged wrapper), `electron/cli/` (socket server, open requests, command install), `src/app/useCliBridge.ts`, `resources/skill/iliad/SKILL.md`.
 - Document navigation (Back/Forward) history: `src/app/useDocumentHistory.ts`.
 - App-language strings and persistence: `src/i18n/`.

@@ -5,6 +5,7 @@ removed internal agent and are kept as history; ADR-0021 supersedes them.
 ADR-0022 removes writing notes and automatic suggestions. ADR-0023 moves
 built-in AI from Gemini to Groq (free through Iliad's proxy, or your own key).
 ADR-0024 lets the AI name untitled documents without review (the one exception).
+ADR-0026 gives comments an author so agents can leave AI comments.
 
 ## ADR-0001: Context Is Built Per Turn
 
@@ -573,3 +574,30 @@ keystroke. A one-time "What's new" card (bundled per release, local
 last-seen version) says what changed.
 
 Spec: [2026-09-27 in-app updates](../specs/2026-09-27-in-app-updates.md).
+
+## ADR-0026: Comments Have An Author; Agents Leave AI Comments In The Comments File
+
+Status: accepted (2026-10-14). Amends ADR-0021 (the skill no longer forbids
+creating the comments file).
+
+A comment in `name.comments.md` is either the writer's or an AI's. An AI
+comment carries `by=ai` on its metadata line; no `by` means the writer's, so
+every existing file stays valid and Iliad never writes `by=writer`. The author
+round-trips through the three-way merge and is never changed in Iliad.
+
+Outside agents leave AI comments by appending entries with `by=ai` (creating
+the comments file when it does not exist), through the bundled skill. They are
+feedback for the writer, not instructions: an agent asked to "address the
+comments" handles the writer's entries only. AI comments never edit the text.
+
+The writer sees them in the right margin (⌃⌘M or the Comments toggle in the
+top bar), written out in full beside their passages together with the
+writer's own comments. With the margin hidden, AI comments leave no mark in the
+text and get no hover card; the writer's comments behave as before. Every
+comment can be deleted from the margin.
+
+Why: the writer wanted feedback from an agent without having it edit the text,
+and reading a pass of feedback one hover card at a time does not work. Using
+the comments file keeps one source of truth on disk and needs no new IPC.
+
+Spec: [2026-10-14 comments in the margin](../specs/2026-10-14-comments-in-the-margin.md).

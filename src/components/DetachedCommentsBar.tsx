@@ -15,7 +15,8 @@ function quotePreview(quote: string) {
 
 /**
  * "N detached comments" (spec V18): comments whose passage is no longer found
- * in the document, listed with their quote and text. Delete only.
+ * in the document, listed with their quote and text (✦ for an AI comment).
+ * Delete only.
  */
 export function DetachedCommentsBar({ comments, labels, onDelete }: DetachedCommentsBarProps) {
   const [open, setOpen] = useState(false);
@@ -38,7 +39,10 @@ export function DetachedCommentsBar({ comments, labels, onDelete }: DetachedComm
             <li key={comment.id}>
               <div className="editor-detached-comments__text">
                 {comment.quote ? <q>{quotePreview(comment.quote)}</q> : null}
-                <span>{comment.comment}</span>
+                <span>
+                  {comment.author === "ai" ? <span className="editor-detached-comments__ai" aria-hidden="true">✦ </span> : null}
+                  {comment.comment}
+                </span>
               </div>
               <button type="button" onClick={() => onDelete(comment.id)}>
                 {labels.delete}

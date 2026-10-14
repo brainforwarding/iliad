@@ -94,4 +94,56 @@ describe("comments file format", () => {
     expect(serializeCommentsFile([])).toBe("");
     expect(parseCommentsFile("")).toEqual([]);
   });
+
+  it("round-trips AI comments with by=ai and writes no author for the writer's", () => {
+    const text = roundTrip([
+      { id: "c1", quote: "Mine", comment: "Writer comment." },
+      { id: "ai-1", quote: "Theirs", comment: "AI feedback.", author: "ai" }
+    ]);
+
+    expect(text).toContain("<!-- iliad:comment id=c1 -->\n");
+    expect(text).toContain("<!-- iliad:comment id=ai-1 by=ai -->\n");
+  });
+
+  it("keeps by=ai together with occurrence and prefix", () => {
+    roundTrip([{ id: "ai-2", quote: "twice", comment: "x", occurrence: 2, prefix: "said ", author: "ai" }]);
+  });
+
+  it("reads by=ai in any attribute order and ignores other by values and by=ai inside a prefix", () => {
+    const entries = parseCommentsFile(
+      [
+        '<!-- iliad:comment by=ai id=a1 -->',
+        "> one",
+        "",
+        "first",
+        "",
+        "---",
+        "",
+        "<!-- iliad:comment id=a2 by=writer -->",
+        "> two",
+        "",
+        "second",
+        "",
+        "---",
+        "",
+        '<!-- iliad:comment id=a3 occurrence=2 prefix="see by=ai here" -->',
+        "> three",
+        "",
+        "third",
+        "",
+        "---",
+        "",
+        "> four",
+        "",
+        "hand-written, no metadata"
+      ].join("\n")
+    );
+
+    expect(entries.map((entry) => [entry.id, entry.author ?? "writer"])).toEqual([
+      ["a1", "ai"],
+      ["a2", "writer"],
+      ["a3", "writer"],
+      [entries[3].id, "writer"]
+    ]);
+  });
 });

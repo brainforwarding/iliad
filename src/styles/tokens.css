@@ -74,6 +74,7 @@
   --comment: rgba(91, 141, 210, 0.2);
   --comment-ink: #2f4d80;
   --comment-wash: var(--comment);
+  --comment-active: rgba(91, 141, 210, 0.16); /* extra tier over the wash while a margin comment is hovered or open */
   --highlight: rgba(255, 205, 90, 0.5);
   --selection-wash: rgba(60, 66, 74, 0.14); /* editor text selection */
   --tighten-wash: rgba(60, 66, 74, 0.1); /* range being adjusted */

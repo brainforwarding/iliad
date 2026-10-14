@@ -239,9 +239,10 @@ longer reads them.
   menu of Open, Reveal in Finder, Move to Trash. Orphans are ordinary rows.
 - Comments file format (`electron/shared/commentsFile.ts`, re-exported as
   `src/comments/commentsFile.ts`): entries separated by a blank line, `---`,
-  and a blank line; each entry is `<!-- iliad:comment id=… -->` (plus
-  `occurrence=N prefix="…"` only when the quote is not unique in the
-  document), the quoted passage as a blockquote, then the comment text.
+  and a blank line; each entry is `<!-- iliad:comment id=… -->` (plus `by=ai`
+  for an AI comment, ADR-0026, and `occurrence=N prefix="…"` only when the
+  quote is not unique in the document), the quoted passage as a blockquote,
+  then the comment text.
   Comment lines that would read as a separator, quote, or metadata are
   escaped with `\`; text the parser does not recognise is kept as comment text.
 - `useSelectionComments` reads the file when the document opens and when the
@@ -256,6 +257,18 @@ longer reads them.
   an outside tool removed come back if the writer restores that document's
   outside edit and the quote is found again (applied the next time the
   document is opened if it was not open).
+- Comments in the margin (spec 2026-10-14, `src/editor/commentMargin/`): the
+  top-bar Comments toggle (`src/components/CommentsToggle.tsx`) or ⌃⌘M shows
+  every anchored comment, the writer's and the AI's, written out beside its
+  passage. `layout.ts` is the pure crowding rule (full text, cut with "…",
+  fold into "+N more"); `CommentMargin.tsx` measures anchors in
+  `.editor-surface` coordinates (`coordsAtPos`, or `documentTop` +
+  `lineBlockAt` off screen) and note heights (a hidden full-length copy);
+  `extension.ts` holds the active-passage mark (a `StateEffect`, so hover never
+  rebuilds the editor's extensions) and the column-shift class. The writer's
+  comments keep their washes and hover cards (off while the margin shows); AI
+  comments get neither but are tracked through edits like every comment
+  (`trackedRanges`). The margin needs an editor at least 780 px wide.
 - Migrations: comments from the old `userData/assistant/selection-comments.json`
   move into companion files per workspace when a window attaches (merged by id;
   entries whose document is gone stay in the store, which is deleted when
@@ -268,6 +281,8 @@ Relevant files:
 - `electron/fs/fileOps.ts`, `electron/ipc/files.ts`
 - `electron/comments/legacyCommentsMigration.ts`
 - `src/app/useSelectionComments.ts`, `src/comments/`
+- `src/editor/commentMargin/`, `src/components/CommentsToggle.tsx`,
+  `src/preferences/commentMarginPreferences.ts`, `src/styles/comment-margin.css`
 - `src/review/pendingFileTree.ts`, `src/components/FileTree.tsx`
 - `src/components/DetachedCommentsBar.tsx`
 

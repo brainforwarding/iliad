@@ -41,8 +41,8 @@ export async function readCommentsDisk(io: CommentsFileIo): Promise<CommentsDisk
     : emptyCommentsDisk;
 }
 
-function entryIdentity(entries: Array<Pick<CommentsFileEntry, "id" | "quote" | "comment">>) {
-  return JSON.stringify(entries.map((entry) => [entry.id, entry.quote, entry.comment]));
+function entryIdentity(entries: Array<Pick<CommentsFileEntry, "id" | "quote" | "comment" | "author">>) {
+  return JSON.stringify(entries.map((entry) => [entry.id, entry.quote, entry.comment, entry.author ?? null]));
 }
 
 /**

@@ -15,11 +15,19 @@
  * > A passage that appears more than once
  *
  * Another comment.
+ *
+ * ---
+ *
+ * <!-- iliad:comment id=ai-3f2a by=ai -->
+ * > A passage an outside agent commented on
+ *
+ * Feedback for the writer.
  * ```
  *
  * Entries are separated by a blank line, `---`, and a blank line. The
- * metadata line carries the id, plus `occurrence` and `prefix` only when the
- * quote is not unique in the document. Comment lines that equal `---`, start
+ * metadata line carries the id, `by=ai` for a comment an AI left (no `by`
+ * means the writer's), plus `occurrence` and `prefix` only when the quote is
+ * not unique in the document. Comment lines that equal `---`, start
  * with `>`, or start with `<!-- iliad:` are escaped with a backslash. Text the
  * parser does not recognise (hand-written notes, an entry without a quote) is
  * kept as the comment text of an entry with an empty quote, so nothing a
@@ -35,6 +43,8 @@ export interface CommentsFileEntry {
   occurrence?: number;
   /** Text right before the quote, written only when the quote is not unique. */
   prefix?: string;
+  /** `"ai"` for a comment an AI left (`by=ai`); absent for the writer's. */
+  author?: "ai";
 }
 
 const metadataPattern = /^<!--\s*iliad:comment\b(.*?)-->\s*$/;
@@ -105,11 +115,15 @@ function parseMetadata(attributes: string) {
   }
 
   const occurrence = occurrenceMatch ? Number(occurrenceMatch[1]) : undefined;
+  // Only `by=ai` means anything; any other value is the writer's comment. The
+  // prefix is quoted text, so it is left out of the search.
+  const byAi = /(?:^|\s)by=ai(?=\s|$)/.test(prefixMatch ? attributes.replace(prefixMatch[0], "") : attributes);
 
   return {
     id: id ? sanitizeId(id) : undefined,
     occurrence: occurrence && occurrence > 0 ? occurrence : undefined,
-    prefix
+    prefix,
+    author: byAi ? ("ai" as const) : undefined
   };
 }
 
@@ -154,6 +168,10 @@ function parseEntryLines(lines: string[]): CommentsFileEntry | null {
 
   if (metadata?.prefix !== undefined) {
     entry.prefix = metadata.prefix;
+  }
+
+  if (metadata?.author) {
+    entry.author = metadata.author;
   }
 
   return entry;
@@ -210,7 +228,8 @@ function serializeEntry(entry: CommentsFileEntry) {
     entry.occurrence !== undefined && entry.occurrence > 0
       ? ` occurrence=${Math.floor(entry.occurrence)} prefix=${encodePrefix(entry.prefix ?? "")}`
       : "";
-  const lines = [`<!-- iliad:comment id=${id}${anchor} -->`];
+  const author = entry.author === "ai" ? " by=ai" : "";
+  const lines = [`<!-- iliad:comment id=${id}${author}${anchor} -->`];
 
   if (entry.quote) {
     for (const line of entry.quote.replace(/\r\n?/g, "\n").split("\n")) {

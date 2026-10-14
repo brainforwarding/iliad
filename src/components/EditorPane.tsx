@@ -60,6 +60,9 @@ import { AiNoticeBar } from "./AiNoticeBar";
 import { EditorEmptyState } from "./EditorEmptyState";
 import type { RecentDocumentItem } from "../preferences/recentDocuments";
 import { DetachedCommentsBar } from "./DetachedCommentsBar";
+import { CommentMargin, type CommentMarginApi, type CommentMarginLabels } from "../editor/commentMargin/CommentMargin";
+import { commentMarginExtension } from "../editor/commentMargin/extension";
+import { useCommentMarginFit } from "../editor/commentMargin/useMarginFit";
 import { ReviewControls } from "./ReviewControls";
 
 export interface EditorSelectionCommentsProps {
@@ -157,6 +160,13 @@ export interface EditorConflictState {
   onKeep: () => void;
 }
 
+export interface EditorCommentMarginProps {
+  /** The writer asked for comments in the margin (the toggle / ⌃⌘M). */
+  shown: boolean;
+  /** Reports whether the editor is wide enough for the margin. */
+  onFitChange?: (fits: boolean) => void;
+}
+
 export interface EditorDetachedCommentsProps {
   /** Comments whose quote is no longer found (or no longer unique) in the document. */
   comments: SelectionComment[];
@@ -186,6 +196,7 @@ interface EditorPaneProps {
       markTaskComplete: string;
     };
     selectionComments: SelectionCommentsEditorLabels;
+    commentMargin: Omit<CommentMarginLabels, "edit" | "delete">;
     conflictBanner: {
       title: string;
       orphanTitle: string;
@@ -212,6 +223,8 @@ interface EditorPaneProps {
   };
   review: EditorReviewState | null;
   selectionComments?: EditorSelectionCommentsProps;
+  /** Comments in the right margin (spec 2026-10-14); needs `selectionComments`. */
+  commentMargin?: EditorCommentMarginProps;
   tighten?: EditorTightenProps;
   writingAssists?: EditorWritingAssistsProps;
   onChange: (value: string) => void;
@@ -322,6 +335,7 @@ export function EditorPane({
   labels,
   review,
   selectionComments,
+  commentMargin,
   tighten,
   writingAssists,
   onChange,
@@ -389,13 +403,40 @@ export function EditorPane({
   const editorSurfaceRef = useRef<HTMLDivElement | null>(null);
   const writingIssuePopoverRef = useRef<HTMLDivElement | null>(null);
   const overlayApiRef = useRef<SelectionCommentsOverlayApi | null>(null);
+  const marginApiRef = useRef<CommentMarginApi | null>(null);
+  const marginFits = useCommentMarginFit(editorSurfaceRef, Boolean(commentMargin && file));
+  const onMarginFitChange = commentMargin?.onFitChange;
+
+  useEffect(() => {
+    onMarginFitChange?.(marginFits);
+  }, [marginFits, onMarginFitChange]);
+
+  const marginActive = Boolean(commentMargin?.shown && marginFits && selectionComments && file && !review);
+  // The writer's comments get washes and hover cards; AI comments only show in
+  // the margin, but every anchored comment's position follows edits.
+  const writerComments = useMemo(
+    () => (selectionComments ? selectionComments.comments.filter((comment) => comment.author !== "ai") : []),
+    [selectionComments]
+  );
+  const trackedCommentRanges = useMemo(
+    () =>
+      (selectionComments?.comments ?? [])
+        .filter((comment) => (comment.status === "pending" || comment.status === "sent") && comment.to > comment.from)
+        .map((comment) => ({ id: comment.id, from: comment.from, to: comment.to })),
+    [selectionComments]
+  );
+  const marginComments = useMemo(
+    () =>
+      (selectionComments?.comments ?? []).filter((comment) => comment.status === "pending" && comment.to > comment.from),
+    [selectionComments]
+  );
   const handledContentRevealRequestIdRef = useRef<number | null>(null);
   const selectionCommentRanges = useMemo<SelectionCommentWashRange[]>(() => {
     if (!selectionComments) {
       return [];
     }
 
-    return selectionComments.comments
+    return writerComments
       .filter((comment) => (comment.status === "pending" || comment.status === "sent") && comment.to > comment.from)
       .map((comment) => ({
         id: comment.id,
@@ -403,7 +444,7 @@ export function EditorPane({
         to: comment.to,
         fading: comment.status === "sent"
       }));
-  }, [selectionComments]);
+  }, [selectionComments, writerComments]);
   const handleOverlayMouseUp = useCallback((view: EditorView) => {
     overlayApiRef.current?.handleMouseUp(view);
   }, []);
@@ -412,6 +453,10 @@ export function EditorPane({
   }, []);
   const handleOverlayEditorUpdate = useCallback((update: ViewUpdate) => {
     overlayApiRef.current?.handleEditorUpdate(update);
+    marginApiRef.current?.handleEditorUpdate(update);
+  }, []);
+  const handleMarginEdit = useCallback((id: string) => {
+    overlayApiRef.current?.editComment(id);
   }, []);
   const handleOverlayShortcut = useCallback(
     (view: EditorView) => overlayApiRef.current?.handleCommentShortcut(view) ?? false,
@@ -1040,6 +1085,7 @@ export function EditorPane({
           selectionCommentsExtension({
             documentPath: file.path,
             ranges: selectionCommentRanges,
+            trackedRanges: trackedCommentRanges,
             provisionalRange: provisionalCommentRange,
             provisionalTightenRange,
             onPositionsChanged: selectionComments.onPositionsChanged,
@@ -1053,7 +1099,8 @@ export function EditorPane({
             onAiMenuShortcut: handleOverlayAiMenuShortcut,
             onAcceptReviewShortcut: handleAcceptReviewShortcut,
             onEscape: handleOverlayEscape
-          })
+          }),
+          ...commentMarginExtension(marginActive)
         );
       }
 
@@ -1168,6 +1215,8 @@ export function EditorPane({
       review,
       selectionCommentRanges,
       selectionComments,
+      trackedCommentRanges,
+      marginActive,
       tightenReviewHunk,
       writingAssists,
       writingIssues,
@@ -1259,7 +1308,8 @@ export function EditorPane({
         {selectionComments && !review ? (
           <SelectionCommentsOverlay
             view={editorView}
-            comments={selectionComments.comments.filter((comment) => comment.status === "pending")}
+            comments={writerComments.filter((comment) => comment.status === "pending")}
+            hoverCards={!marginActive}
             labels={labels.selectionComments}
             apiRef={overlayApiRef}
             onCreateComment={selectionComments.onCreateComment}
@@ -1288,6 +1338,16 @@ export function EditorPane({
                   }
                 : undefined
             }
+          />
+        ) : null}
+        {marginActive && selectionComments ? (
+          <CommentMargin
+            view={editorView}
+            comments={marginComments}
+            labels={{ ...labels.commentMargin, edit: labels.selectionComments.edit, delete: labels.selectionComments.delete }}
+            apiRef={marginApiRef}
+            onDelete={selectionComments.onDeleteComment}
+            onEdit={handleMarginEdit}
           />
         ) : null}
         {activeWritingIssue && writingAssists ? (

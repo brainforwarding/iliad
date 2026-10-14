@@ -400,6 +400,8 @@ export interface SelectionComment {
   comment: string;
   createdAt: string;
   status: SelectionCommentStatus;
+  /** `"ai"` for a comment an AI left (`by=ai` in the file); absent for the writer's. */
+  author?: "ai";
 }
 
 export type CompanionReadResult = { status: "present"; content: string; hash: string } | { status: "absent" };

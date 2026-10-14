@@ -2,13 +2,18 @@ import { captureSelectionAnchor, findQuoteAnchor, isAnchoredSelectionComment } f
 import type { SelectionComment } from "../types/iliad";
 import { countQuoteOccurrences, type CommentsFileEntry } from "./commentsFile";
 
+/** Adds `author` only for AI comments, so the writer's entries stay exactly as before. */
+function withAuthor<T extends object>(value: T, author: "ai" | undefined): T & { author?: "ai" } {
+  return author === "ai" ? { ...value, author } : value;
+}
+
 /**
  * The file entry for one in-memory comment. Occurrence and prefix are
  * written only when the quote is not unique in the document (spec V14); for
  * an anchored comment they are recomputed from its live position.
  */
 export function commentToEntry(comment: SelectionComment, documentText: string): CommentsFileEntry {
-  const entry: CommentsFileEntry = { id: comment.id, quote: comment.quote, comment: comment.comment };
+  const entry: CommentsFileEntry = withAuthor({ id: comment.id, quote: comment.quote, comment: comment.comment }, comment.author);
 
   if (!comment.quote || countQuoteOccurrences(documentText, comment.quote) <= 1) {
     return entry;
@@ -30,19 +35,22 @@ export function entryToComment(
 ): SelectionComment {
   const range = entry.quote ? findQuoteAnchor(documentText, entry) : null;
 
-  return {
-    id: entry.id,
-    workspacePath: context.workspacePath,
-    documentRelativePath: context.documentRelativePath,
-    from: range?.from ?? 0,
-    to: range?.to ?? 0,
-    quote: entry.quote,
-    occurrence: entry.occurrence ?? 1,
-    prefix: entry.prefix ?? "",
-    comment: entry.comment,
-    createdAt: "",
-    status: "pending"
-  };
+  return withAuthor<SelectionComment>(
+    {
+      id: entry.id,
+      workspacePath: context.workspacePath,
+      documentRelativePath: context.documentRelativePath,
+      from: range?.from ?? 0,
+      to: range?.to ?? 0,
+      quote: entry.quote,
+      occurrence: entry.occurrence ?? 1,
+      prefix: entry.prefix ?? "",
+      comment: entry.comment,
+      createdAt: "",
+      status: "pending"
+    },
+    entry.author
+  );
 }
 
 export interface CommentsMergeResult {
@@ -84,13 +92,15 @@ export function mergeCommentEntries(
     }
 
     const editedLocally = !baseEntry || localComment.comment !== baseEntry.comment;
-    // An outside edit of the anchor (quote, occurrence, or prefix) re-anchors
-    // from the fresh entry instead of keeping the in-memory position.
+    // An outside edit of the anchor (quote, occurrence, or prefix) or of the
+    // author rebuilds the comment from the fresh entry instead of keeping the
+    // in-memory one (the author is never changed in Iliad).
     const anchorChangedOutside = Boolean(
       baseEntry &&
         (freshEntry.quote !== baseEntry.quote ||
           freshEntry.occurrence !== baseEntry.occurrence ||
-          (freshEntry.prefix ?? "") !== (baseEntry.prefix ?? ""))
+          (freshEntry.prefix ?? "") !== (baseEntry.prefix ?? "") ||
+          freshEntry.author !== baseEntry.author)
     );
     const entry = editedLocally ? { ...freshEntry, comment: localComment.comment } : freshEntry;
 
@@ -107,7 +117,7 @@ export function mergeCommentEntries(
     if (!baseEntry || localComment.comment !== baseEntry.comment) {
       // Created here, or edited here while an outside tool deleted it.
       entries.push({
-        entry: { id: localComment.id, quote: localComment.quote, comment: localComment.comment },
+        entry: withAuthor({ id: localComment.id, quote: localComment.quote, comment: localComment.comment }, localComment.author),
         local: localComment
       });
     } else {

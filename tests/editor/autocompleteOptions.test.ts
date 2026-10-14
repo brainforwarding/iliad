@@ -121,6 +121,10 @@ describe("recording a shortcut", () => {
     for (const taken of ["Mod-c", "Mod-v", "Mod-z", "Shift-Mod-z", "Mod-q", "Mod-w", "Mod--", "Mod-f", "Mod-Shift-m", "Alt-ArrowUp", "Mod-ArrowLeft", "Ctrl-Tab"]) {
       expect(checkShortcut(taken)).toBe("taken");
     }
+    // ⌃⌘S is the sidebar and ⌃⌘M shows comments in the margin, in either spelling.
+    for (const taken of ["Mod-Ctrl-s", "Mod-Ctrl-m", "Ctrl-Mod-m"]) {
+      expect(checkShortcut(taken)).toBe("taken");
+    }
     // ⌘[ / ⌘] are Back/Forward document history.
     for (const taken of ["Mod-[", "Mod-]"]) {
       expect(checkShortcut(taken)).toBe("taken");
