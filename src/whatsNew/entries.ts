@@ -26,5 +26,16 @@ export const whatsNewEntries: readonly WhatsNewEntry[] = [
       es: "Cuando haya una versión nueva, haz clic en Actualizar abajo en la barra lateral. Iliad guarda tu trabajo y se vuelve a abrir."
     },
     illustration: "update-pill"
+  },
+  {
+    version: "0.7.0",
+    title: {
+      en: "Comments in the margin",
+      es: "Comentarios en el margen"
+    },
+    body: {
+      en: "Press ⌃⌘M, or Comments at the top right, to read every comment beside its passage. Ask Claude Code or Codex for feedback and it leaves comments marked ✦, without touching your text.",
+      es: "Pulsa ⌃⌘M, o Comentarios arriba a la derecha, para leer cada comentario junto a su pasaje. Pídele comentarios a Claude Code o Codex y los deja marcados con ✦, sin tocar tu texto."
+    }
   }
 ];
