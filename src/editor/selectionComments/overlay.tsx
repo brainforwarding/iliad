@@ -221,6 +221,8 @@ export function SelectionCommentsOverlay({
   const settleTimer = useRef<number | null>(null);
   const hoverShowTimer = useRef<number | null>(null);
   const hoverHideTimer = useRef<number | null>(null);
+  /** Comment ids the pending hoverShowTimer will show, joined with "|". */
+  const pendingHoverKey = useRef<string | null>(null);
   const composerRef = useRef<ComposerState | null>(null);
   composerRef.current = composer;
   const editComposerRef = useRef<EditComposerState | null>(null);
@@ -514,23 +516,27 @@ export function SelectionCommentsOverlay({
       clearTimer(hoverHideTimer);
       const ids = hovered.map((comment) => comment.id);
       const anchorPos = Math.min(...hovered.map((comment) => comment.from));
-      const current = hoverRef.current;
+      const key = ids.join("|");
 
-      if (current && current.ids.join("|") === ids.join("|")) {
+      if (hoverRef.current?.ids.join("|") === key) {
+        // Back on the open card's own passage: drop any pending switch.
+        clearTimer(hoverShowTimer);
         return;
       }
 
-      if (current) {
+      // Opening a card and switching to another one share the same dwell, so
+      // crossing a neighbouring comment on the way to the open card does not
+      // replace it; entering the card cancels the pending switch.
+      if (hoverShowTimer.current !== null && pendingHoverKey.current === key) {
+        return;
+      }
+
+      clearTimer(hoverShowTimer);
+      pendingHoverKey.current = key;
+      hoverShowTimer.current = window.setTimeout(() => {
+        hoverShowTimer.current = null;
         setHover({ ids, anchorPos });
-        return;
-      }
-
-      if (hoverShowTimer.current === null) {
-        hoverShowTimer.current = window.setTimeout(() => {
-          hoverShowTimer.current = null;
-          setHover({ ids, anchorPos });
-        }, HOVER_SHOW_DELAY_MS);
-      }
+      }, HOVER_SHOW_DELAY_MS);
     },
     []
   );
@@ -1160,7 +1166,10 @@ export function SelectionCommentsOverlay({
         <div
           className="editor-comment-popover"
           style={{ top: hoverPosition.top, left: hoverPosition.left }}
-          onMouseEnter={() => clearTimer(hoverHideTimer)}
+          onMouseEnter={() => {
+            clearTimer(hoverHideTimer);
+            clearTimer(hoverShowTimer);
+          }}
           onMouseLeave={() => {
             clearTimer(hoverHideTimer);
             hoverHideTimer.current = window.setTimeout(() => {
