@@ -90,3 +90,11 @@ now retain their original source position throughout that initial gesture.
   double click, drag selection, ⌘B, ⌘I, and ⌘Z.
 - Typecheck and production build pass.
 - Interactive fixture: `tests/manual/inline-formatting.html` through Vite.
+
+## Release
+
+Shipped in signed/notarized Iliad MD 0.8.0 on 2026-11-04 alongside document
+tabs. The final combined release passed 1,241 tests, typecheck, CSS lint,
+build, and the production audit gate. Cmd+B/Cmd+I, ordinary Markdown saves,
+and independent undo passed in the downloaded public app. See
+[the release record](../docs/release-0.8.0-verification.md).

@@ -278,9 +278,10 @@ Stages:
 3. Independent implementation review completed with GPT-6.1 Sol, High reasoning.
    Native app QA passed against the isolated release source. Final validation
    includes the full tests, typecheck, CSS lint, build, and production audit.
-4. Pending: publish only this session's authorized work from an isolated release checkout,
-   follow `docs/release.md`, and verify the signed/notarized downloaded app and
-   primary production workflow. Preserve unrelated comments work in this checkout.
+4. Released 0.8.0 from the isolated public-safe checkout using `docs/release.md`.
+   Signed/notarized artifacts, public metadata/checksums, and the downloaded app
+   workflow passed verification. Unrelated comments work remains preserved in
+   the original checkout.
 
 Observed QA on 2026-11-04:
 
@@ -307,11 +308,13 @@ regression test verifies a second write before navigation settles. The release
 audit required a compatible Undici update from 7.30.0 to 7.30.1. No other
 dependencies changed.
 
-The signed/notarized release and downloaded production app have not yet been
-validated for this change.
+Release verification completed on 2026-11-04. All 1,241 tests across 123 files,
+full typecheck, CSS lint, build, and the production dependency audit gate passed.
+The downloaded public 0.8.0 ZIP matched its updater size/SHA512 and passed
+codesign, Gatekeeper, and stapler checks. Its app passed the breadcrumb,
+formatting shortcuts, tabs, independent undo/save, and close-to-one workflows.
+See [the release record](../docs/release-0.8.0-verification.md).
 
-Preflight: GitHub access and signing identity are available. The default
-`iliad-notary` profile is absent; the prior Iliad 0.7.0 release log identifies
-`meetrec-notary` as its working profile. Verify that existing profile before
-release; do not replace or create credentials. Release version will be selected
-against the actual latest published release.
+Release preflight verified GitHub access, the signing identity, and the existing
+`meetrec-notary` profile used by Iliad 0.7.0. No credentials were changed. The
+release is [Iliad MD 0.8.0](https://github.com/brainforwarding/iliad/releases/tag/v0.8.0).
