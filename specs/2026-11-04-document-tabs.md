@@ -295,6 +295,11 @@ Observed QA on 2026-11-04:
   the maximum sidebar, EN/ES review actions, comments, and error status fit in the
   same row. Component tests, CSS lint, and TypeScript passed in the source checkout.
 
+A final folder-switch review removed a duplicate initial tree read. The
+workspace hook now owns that read, so the transition finishes before restored
+tabs become ready. Native delayed-read and A → B → A checks pass with separate
+open sets and last-active restoration.
+
 Final review also covered the isolated public-comments adaptation. A session
 version guard now preserves comment edits made during a companion write; its
 regression test verifies a second write before navigation settles. The release

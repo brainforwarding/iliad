@@ -1244,7 +1244,8 @@ export default function App() {
       setWorkspace(nextWorkspace);
       stateRef.current = { ...stateRef.current, workspace: nextWorkspace };
       setTree([]);
-      await refreshTree(nextWorkspace.path);
+      // The workspace hook loads the tree after this transition commits.
+      // A second read here can keep the queue busy while restoration is ready.
     } finally {
       switchInFlightRef.current = false;
     }
@@ -1254,7 +1255,6 @@ export default function App() {
     flushSave,
     isInitializing,
     language,
-    refreshTree,
     resetForWorkspaceSwitch,
     setTree,
     setWorkspace
