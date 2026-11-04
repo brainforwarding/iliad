@@ -19,6 +19,7 @@ interface UseFileActionsOptions {
   clearDocument: () => void;
   closeTreeContextMenu: () => void;
   flushSave: () => Promise<void>;
+  runDocumentTransition: <T>(operation: () => Promise<T>) => Promise<T>;
   loadDocument: (text: string) => void;
   messages: FileActionMessages;
   onMarkdownNavigation: (previousPath: string, nextPath: string) => void;
@@ -128,6 +129,7 @@ export function useFileActions({
   clearDocument,
   closeTreeContextMenu,
   flushSave,
+  runDocumentTransition,
   loadDocument,
   messages,
   onMarkdownNavigation,
@@ -170,8 +172,8 @@ export function useFileActions({
   );
 
   const openNode = useCallback(
-    async (node: FileTreeNode, options: OpenNodeOptions = {}): Promise<OpenNodeResult> => {
-      if (!workspace) {
+    (node: FileTreeNode, options: OpenNodeOptions = {}): Promise<OpenNodeResult> => runDocumentTransition(async () => {
+      if (!workspace || stateRef.current.workspace?.path !== workspace.path) {
         return { kind: "none" };
       }
 
@@ -194,22 +196,28 @@ export function useFileActions({
         return { kind: "none" };
       }
 
-      const previousPath = stateRef.current.activeFile?.path ?? null;
+      let previousPath = stateRef.current.activeFile?.path ?? null;
 
       if (previousPath === node.path) {
         setSelectedTreePath(node.path);
+        onDocumentOpened?.(workspace.path, node);
         setError(null);
         return { kind: "markdown", path: node.path };
       }
 
       try {
         await flushSave();
+        previousPath = stateRef.current.activeFile?.path ?? null;
       } catch {
         return { kind: "error" };
       }
 
       try {
         const text = await window.iliad.readMarkdown(workspace.path, node.path);
+        // Typing or comment edits during the read still belong to the source.
+        await flushSave();
+        if (stateRef.current.workspace?.path !== workspace.path ||
+          (stateRef.current.activeFile?.path ?? null) !== previousPath) return { kind: "error" };
         setActiveFile(node);
         setSelectedTreePath(node.path);
         loadDocument(text);
@@ -223,9 +231,10 @@ export function useFileActions({
         setError(readError instanceof Error ? readError.message : messages.openFileFallback);
         return { kind: "error" };
       }
-    },
+    }),
     [
       flushSave,
+      runDocumentTransition,
       loadDocument,
       messages,
       onDocumentOpened,

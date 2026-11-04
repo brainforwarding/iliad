@@ -3,7 +3,8 @@
 <img src="docs/assets/iliad-card.jpg" alt="Iliad: write with AI, keep your voice. A Markdown editor for Mac, shown reviewing an outside agent's edits to a story." width="100%">
 
 A calm, local-first Markdown writing app for macOS, built with Electron. Iliad
-is the place to write one document with small AI help, and the place to review
+keeps a small set of documents open, with one active for writing and small AI
+help, and is the place to review
 what an outside AI agent (Claude Code, Codex, or any tool) did to your writing.
 It has no chat panel and no agent of its own. See
 [`docs/product-vision.md`](docs/product-vision.md).
@@ -13,10 +14,13 @@ It has no chat panel and no agent of its own. See
 - Open a local folder as a workspace and browse it in a left sidebar.
 - Create, rename, duplicate, and move Markdown files and folders to Trash.
 - Edit with CodeMirror 6 and autosave to real `.md` files.
-- Navigate backward and forward through recently opened documents (no tabs).
+- Keep documents from one workspace open in tabs, with independent undo,
+  selection, and scroll. Ctrl+Tab cycles them; Cmd/Ctrl+W closes the active one.
+- Navigate backward and forward through recently opened documents.
 - Render common Markdown visually while inactive lines hide syntax, including
   links, images, YouTube embeds from image syntax, math, quotes, and pipe tables.
 - Toggle Markdown task checkboxes inline.
+- Toggle bold with Cmd/Ctrl+B and italics with Cmd/Ctrl+I, including combined styles.
 - Open Markdown links inside Iliad, web links in the browser, and other local
   files with the system default app.
 - Drag or paste images into a document; they are saved to

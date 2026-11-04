@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, Dispatch, SetStateAction, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ArrowLeft, ArrowRight, FolderOpen, PanelLeft } from "lucide-react";
 import { Icon } from "./components/Icon";
+import { DocumentTabs } from "./components/DocumentTabs";
+import { useOpenDocuments, openDocumentLabels, tabCycleDirection, cycleOpenDocument } from "./app/useOpenDocuments";
+import { createDocumentTransitions, settleDocument } from "./app/documentTransitions";
+import { createDocumentStateCache } from "./editor/documentStateCache";
 import { useCliBridge, type CliOpenSteps } from "./app/useCliBridge";
 import {
   DOCUMENT_HISTORY_SHORTCUT_LABELS,
@@ -144,6 +148,7 @@ export default function App() {
     workspace,
     setWorkspace,
     tree,
+    treeReady,
     setTree,
     lastWorkspaceChange,
     refreshTree,
@@ -155,7 +160,13 @@ export default function App() {
       onError: setError
     });
   const switchInFlightRef = useRef(false);
-  const [activeFile, setActiveFile] = useState<FileTreeNode | null>(null);
+  const [activeFile, setActiveFileState] = useState<FileTreeNode | null>(null);
+  const transitions = useRef(createDocumentTransitions()).current;
+  const runDocumentTransition = useCallback(<T,>(operation: () => Promise<T>) => transitions.run(operation), [transitions]);
+  const documentCache = useRef(createDocumentStateCache()).current;
+  const [activationId, setActivationId] = useState(0);
+  const revisions = useRef(new Map<string, number>());
+  const [, refreshRevision] = useState(0);
   const {
     documentText,
     saveStatus,
@@ -165,11 +176,34 @@ export default function App() {
     flushSave: flushDocumentSave,
     handleEditorChange,
     isDocumentSettled,
-    loadDocument,
+    loadDocument: loadDocumentText,
+    cancelPendingSave,
+    discardPendingSave,
     noteActiveFileRelocated,
     resumeAfterConflict,
     runWithAutosavePaused
   } = useDocumentPersistence({ activeFile, messages: strings.documentMessages, onError: setError, workspace });
+  const openDocuments = useOpenDocuments({ workspacePath: workspace?.path ?? null, tree, treeReady, activeFile });
+  const { recordOpen, getDocuments, remove: removeOpenDocument, relocate: relocateOpenDocuments,
+    finishRestore, closeNeighbor, restoreTarget } = openDocuments;
+  const setActiveFile = useCallback<Dispatch<SetStateAction<FileTreeNode | null>>>((update) => {
+    const previous = stateRef.current.activeFile;
+    const next = typeof update === "function" ? update(previous) : update;
+    stateRef.current = { ...stateRef.current, activeFile: next };
+    if (next && stateRef.current.workspace) recordOpen(stateRef.current.workspace.path, next);
+    if (previous?.path !== next?.path) setActivationId((id) => id + 1);
+    setActiveFileState(next);
+  }, [recordOpen, stateRef]);
+  // Outside Keep/reload establishes a new baseline, never writer undo history.
+  const loadDocument = useCallback((text: string) => {
+    const document = getDocuments().find((entry) => entry.path === stateRef.current.activeFile?.path);
+    if (document) {
+      documentCache.invalidate(document.id);
+      revisions.current.set(document.id, (revisions.current.get(document.id) ?? 0) + 1);
+      refreshRevision((revision) => revision + 1);
+    }
+    loadDocumentText(text);
+  }, [documentCache, getDocuments, loadDocumentText, stateRef]);
   const activeFileInConflict = saveStatus === "conflict";
   const {
     comments: pendingSelectionComments,
@@ -182,6 +216,7 @@ export default function App() {
     applyPositionUpdates: applySelectionCommentPositions,
     applyFullReplacement: applySelectionCommentFullReplacement,
     flushPersist: flushSelectionComments,
+    isPersistSettled: areCommentsSettled,
     noteOutsideEditRestored
   } = useSelectionComments({
     activeFile,
@@ -204,9 +239,9 @@ export default function App() {
   // Every save flush also writes pending comment changes (companion file), so
   // file operations and navigation wait for both and stop if either fails.
   const flushSave = useCallback(async () => {
-    await flushDocumentSave();
-    await flushSelectionComments();
-  }, [flushDocumentSave, flushSelectionComments]);
+    await settleDocument(flushDocumentSave, flushSelectionComments,
+      () => isDocumentSettled() && areCommentsSettled());
+  }, [areCommentsSettled, flushDocumentSave, flushSelectionComments, isDocumentSettled]);
   const {
     editorFontPreset,
     editorFontSize,
@@ -243,6 +278,8 @@ export default function App() {
   const appShellRef = useRef<HTMLDivElement | null>(null);
   const sidebarResizeHandleRef = useRef<HTMLDivElement | null>(null);
   const closeDocumentInFlightRef = useRef(false);
+  const closingDocumentIdRef = useRef<string | null>(null);
+  const successfulNavigationRef = useRef<(node: FileTreeNode) => void>(() => undefined);
   const latestContentSearchRequestIdRef = useRef(0);
   const contentSearchRevealRequestIdRef = useRef(0);
   const closeTreeContextMenu = useCallback(() => setTreeContextMenu(null), []);
@@ -292,7 +329,10 @@ export default function App() {
   } = useDocumentHistory(tree);
   const { recentEntries, recordRecent, relocateRecent } = useRecentDocuments(workspace?.path ?? null);
   const handleDocumentOpened = useCallback(
-    (workspaceRoot: string, node: FileTreeNode) => recordRecent(workspaceRoot, node.relativePath),
+    (workspaceRoot: string, node: FileTreeNode) => {
+      recordRecent(workspaceRoot, node.relativePath);
+      successfulNavigationRef.current(node);
+    },
     [recordRecent]
   );
   const {
@@ -309,8 +349,11 @@ export default function App() {
   // recents, Back/Forward history and naming candidates all follow.
   const handlePathRelocated = useCallback(
     (relocation: PathRelocation) =>
-      applyPathRelocation(relocation, { relocateRecent, relocateHistoryPaths, relocateNamingCandidates }),
-    [relocateHistoryPaths, relocateNamingCandidates, relocateRecent]
+      {
+        applyPathRelocation(relocation, { relocateRecent, relocateHistoryPaths, relocateNamingCandidates });
+        relocateOpenDocuments(relocation);
+      },
+    [relocateHistoryPaths, relocateNamingCandidates, relocateRecent, relocateOpenDocuments]
   );
   const {
     autoRenameDocument,
@@ -334,7 +377,8 @@ export default function App() {
     clearDocument,
     closeTreeContextMenu,
     flushSave,
-    loadDocument,
+    runDocumentTransition,
+    loadDocument: loadDocumentText,
     onMarkdownNavigation: recordNormalNavigation,
     onDocumentOpened: handleDocumentOpened,
     onPathRelocated: handlePathRelocated,
@@ -354,7 +398,6 @@ export default function App() {
     tree,
     workspace
   });
-
   const reloadActiveDocumentRef = useRef<(options?: { mayReplace?: () => boolean }) => Promise<void>>(
     async () => undefined
   );
@@ -374,6 +417,9 @@ export default function App() {
     virtualReviewFile
   } = useOutsideReview({
     activeFile,
+    getCurrentDocument: () => ({ path: stateRef.current.activeFile?.path ?? null,
+      relativePath: stateRef.current.activeFile?.relativePath ?? null,
+      workspacePath: stateRef.current.workspace?.path ?? null }),
     loadDocument,
     openNode,
     recordNormalNavigation,
@@ -393,6 +439,7 @@ export default function App() {
     tree,
     workspace
   });
+  successfulNavigationRef.current = clearReviewForNormalNavigation;
   const activeReviewRef = useRef(activeReview);
 
   useEffect(() => {
@@ -844,7 +891,58 @@ export default function App() {
     setError(null);
   }, [clearDocument, clearHistory, closeTreeContextMenu, setAgentReviewTarget]);
 
+  const closeDocument = useCallback(async (id: string, discardText = false) => {
+    if (closeDocumentInFlightRef.current) return;
+    closeDocumentInFlightRef.current = true;
+    try {
+      await runDocumentTransition(async () => {
+        const entry = getDocuments().find((document) => document.id === id);
+        if (!entry) return;
+        if (entry.path !== stateRef.current.activeFile?.path) {
+          documentCache.delete(id);
+          removeOpenDocument(id);
+          return;
+        }
+        const neighbor = closeNeighbor(id);
+        const root = stateRef.current.workspace;
+        const node = neighbor && (findNode(tree, neighbor.path) ?? { ...neighbor, kind: "markdown" as const });
+        // Resolve the next document before removing the current tab.
+        const text = node && root ? await window.iliad.readMarkdown(root.path, node.path) : null;
+        if (discardText) {
+          await settleDocument(discardPendingSave, flushSelectionComments, areCommentsSettled);
+          cancelPendingSave();
+        } else {
+          await flushSave();
+        }
+        if (stateRef.current.activeFile?.path !== entry.path || stateRef.current.workspace?.path !== root?.path) return;
+        documentCache.delete(id);
+        removeOpenDocument(id);
+        if (node && root && text !== null) {
+          setActiveFile(node);
+          loadDocumentText(text);
+          setSelectedTreePath(node.path);
+          handleDocumentOpened(root.path, node);
+          setContentSearchRevealTarget(null);
+          setCloseDialogOpen(false);
+          setError(null);
+        } else {
+          completeDocumentClose();
+        }
+      });
+    } catch (closeError) {
+      setError(closeError instanceof Error ? closeError.message : strings.fileMessages.openFileFallback);
+    } finally {
+      closeDocumentInFlightRef.current = false;
+    }
+  }, [areCommentsSettled, cancelPendingSave, discardPendingSave, closeNeighbor, completeDocumentClose, documentCache, flushSave,
+    flushSelectionComments, getDocuments, handleDocumentOpened, loadDocumentText,
+    removeOpenDocument, runDocumentTransition, setActiveFile, stateRef, strings.fileMessages.openFileFallback, tree]);
+
   const requestCloseDocument = useCallback(() => {
+    if (virtualReviewFile) {
+      setAgentReviewTarget(null);
+      return;
+    }
     if (!activeFile) {
       return;
     }
@@ -855,28 +953,23 @@ export default function App() {
     }
 
     if (documentCloseRequiresChoice(saveStatus)) {
+      closingDocumentIdRef.current = getDocuments().find((document) => document.path === activeFile.path)?.id ?? null;
       setCloseDialogOpen(true);
       return;
     }
 
-    completeDocumentClose();
-  }, [activeFile, completeDocumentClose, saveStatus, strings.documentClose.saving]);
+    const id = getDocuments().find((document) => document.path === activeFile.path)?.id;
+    if (id) void closeDocument(id);
+  }, [activeFile, closeDocument, getDocuments, saveStatus, setAgentReviewTarget, strings.documentClose.saving, virtualReviewFile]);
 
   const saveAndCloseDocument = useCallback(async () => {
     if (saveStatus === "saving" || closeDocumentInFlightRef.current) {
       return;
     }
 
-    closeDocumentInFlightRef.current = true;
-    try {
-      await flushSave();
-      completeDocumentClose();
-    } catch {
-      setCloseDialogOpen(true);
-    } finally {
-      closeDocumentInFlightRef.current = false;
-    }
-  }, [completeDocumentClose, flushSave, saveStatus]);
+    const id = closingDocumentIdRef.current;
+    if (id) await closeDocument(id);
+  }, [closeDocument, saveStatus]);
 
   const closeWithoutSavingDocument = useCallback(() => {
     if (saveStatus === "saving") {
@@ -884,8 +977,23 @@ export default function App() {
       return;
     }
 
-    completeDocumentClose();
-  }, [completeDocumentClose, saveStatus, strings.documentClose.saving]);
+    const id = closingDocumentIdRef.current;
+    if (id) void closeDocument(id, true);
+  }, [closeDocument, saveStatus, strings.documentClose.saving]);
+
+  const requestCloseTab = useCallback((id: string) => {
+    const entry = getDocuments().find((document) => document.id === id);
+    if (entry?.path === activeFile?.path) requestCloseDocument();
+    else void closeDocument(id);
+  }, [activeFile?.path, closeDocument, getDocuments, requestCloseDocument]);
+
+  const activateDocument = useCallback(async (id: string) => {
+    const entry = getDocuments().find((document) => document.id === id);
+    if (!entry) return;
+    const node = findNode(tree, entry.path) ?? { ...entry, kind: "markdown" as const };
+    finishRestore();
+    await openNode(node);
+  }, [finishRestore, getDocuments, openNode, tree]);
 
   const navigateDocumentHistory = useCallback(
     async (direction: DocumentHistoryDirection) => {
@@ -896,7 +1004,6 @@ export default function App() {
         return;
       }
 
-        setAgentReviewTarget(null);
       const result = await openNode(target.node, { recordHistory: false });
 
       if (result.kind === "markdown") {
@@ -979,8 +1086,6 @@ export default function App() {
         return;
       }
 
-      clearReviewForNormalNavigation(node);
-
       if (activeFile?.path !== node.path) {
         const result = await openNode(node);
 
@@ -989,6 +1094,7 @@ export default function App() {
         }
       } else {
         setSelectedTreePath(node.path);
+        clearReviewForNormalNavigation(node);
       }
 
       contentSearchRevealRequestIdRef.current += 1;
@@ -1036,7 +1142,7 @@ export default function App() {
 
         return findNode(await refreshTree(workspace.path), absolutePath);
       },
-      prepareNavigation: (node) => clearReviewForNormalNavigation(node),
+      prepareNavigation: () => finishRestore(),
       openNode: (node) => openNode(node),
       revealLine: (absolutePath, line) =>
         new Promise<boolean>((resolve) => {
@@ -1063,7 +1169,7 @@ export default function App() {
           });
         })
     }),
-    [clearReviewForNormalNavigation, openNode, refreshTree, workspace]
+    [finishRestore, openNode, refreshTree, workspace]
   );
   useCliBridge({
     workspacePath: workspace?.path ?? null,
@@ -1072,7 +1178,23 @@ export default function App() {
     steps: cliOpenSteps
   });
 
+  const restoreAttempt = useRef({ root: workspace?.path ?? null, started: false });
+  useEffect(() => {
+    const root = workspace?.path ?? null;
+    if (restoreAttempt.current.root !== root) restoreAttempt.current = { root, started: false };
+    if (!workspace || !restoreTarget || restoreAttempt.current.started) return;
+    restoreAttempt.current.started = true;
+    // An explicit open already in progress always wins over remembered state.
+    if (stateRef.current.activeFile || transitions.isBusy()) {
+      finishRestore();
+      return;
+    }
+    void openNode(restoreTarget, { recordHistory: false }).finally(finishRestore);
+  }, [finishRestore, openNode, restoreTarget, stateRef, transitions, workspace]);
+
   const resetForWorkspaceSwitch = useCallback(() => {
+    documentCache.clear();
+    revisions.current.clear();
     setActiveFile(null);
     setSelectedTreePath(null);
     setRevealFolderPath(null);
@@ -1089,6 +1211,7 @@ export default function App() {
     closeSettings({ restoreFocus: false });
   }, [
     clearDocument,
+    documentCache,
     clearHistory,
     closeSettings,
     closeTreeContextMenu,
@@ -1102,7 +1225,7 @@ export default function App() {
     setSelectedTreePath
   ]);
 
-  const openWorkspace = useCallback(async () => {
+  const openWorkspace = useCallback(() => runDocumentTransition(async () => {
     if (isInitializing || switchInFlightRef.current) {
       return;
     }
@@ -1116,14 +1239,18 @@ export default function App() {
         return;
       }
 
+      await flushSave();
       resetForWorkspaceSwitch();
       setWorkspace(nextWorkspace);
+      stateRef.current = { ...stateRef.current, workspace: nextWorkspace };
       setTree([]);
       await refreshTree(nextWorkspace.path);
     } finally {
       switchInFlightRef.current = false;
     }
-  }, [
+  }), [
+    runDocumentTransition,
+    stateRef,
     flushSave,
     isInitializing,
     language,
@@ -1134,7 +1261,7 @@ export default function App() {
   ]);
 
   const openRecentWorkspace = useCallback(
-    async (target: WorkspaceInfo) => {
+    (target: WorkspaceInfo) => runDocumentTransition(async () => {
       if (isInitializing || switchInFlightRef.current) {
         return;
       }
@@ -1150,14 +1277,18 @@ export default function App() {
           return;
         }
 
+        await flushSave();
         resetForWorkspaceSwitch();
         setWorkspace(result.workspace);
+        stateRef.current = { ...stateRef.current, workspace: result.workspace };
         setTree(result.tree);
       } finally {
         switchInFlightRef.current = false;
       }
-    },
+    }),
     [
+      runDocumentTransition,
+      stateRef,
       flushSave,
       isInitializing,
       pruneRecentWorkspace,
@@ -1226,7 +1357,7 @@ export default function App() {
 
       if (
         closeShortcut &&
-        (activeFile || closeDialogOpen) &&
+        (activeFile || virtualReviewFile || closeDialogOpen) &&
         !event.defaultPrevented &&
         !event.repeat &&
         !event.isComposing
@@ -1266,6 +1397,16 @@ export default function App() {
         return;
       }
 
+      const tabDirection = tabCycleDirection(event);
+      if (tabDirection && getDocuments().length > 1) {
+        event.preventDefault();
+        const documents = [...getDocuments()];
+        const current = documents.find((document) => document.path === stateRef.current.activeFile?.path);
+        const target = cycleOpenDocument(documents, current?.id ?? null, tabDirection);
+        if (target) void activateDocument(target.id);
+        return;
+      }
+
       // ⌘[ / ⌘]: the editor leaves these keys to the app (CodeMirrorHost).
       const historyDirection = documentHistoryShortcut(event);
 
@@ -1280,6 +1421,9 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     activeFile,
+    activateDocument,
+    getDocuments,
+    stateRef,
     closeDialogOpen,
     closeSettings,
     closeSidebarPeek,
@@ -1288,6 +1432,7 @@ export default function App() {
     navigateDocumentHistory,
     openWorkspace,
     requestCloseDocument,
+    virtualReviewFile,
     settingsOpen,
     sidebarPeekOpen,
     toggleCommentMargin
@@ -1443,7 +1588,6 @@ export default function App() {
 
       // Same path as a tree click: leave a normal review, then open (the
       // open flushes the pending save first and stops if it fails).
-      clearReviewForNormalNavigation(node);
       void openNode(node);
     },
     [clearReviewForNormalNavigation, openNode, tree]
@@ -1595,6 +1739,15 @@ export default function App() {
         ? activeReview.file.baseContent
         : documentText;
   const breadcrumbParts = editorFile ? documentBreadcrumbParts(workspace?.name ?? "", editorFile.relativePath) : [];
+  const activeDocument = openDocuments.documents.find((document) => document.path === activeFile?.path);
+  const tabLabels = openDocumentLabels(openDocuments.documents);
+  const tabItems = openDocuments.documents.map((document) => ({
+    id: document.id, name: tabLabels.get(document.id) ?? document.name, relativePath: document.relativePath
+  }));
+  const openDocumentPaths = new Set(openDocuments.documents.map((document) => document.path));
+  const editorDocumentId = activeReview
+    ? `review:${workspace?.path}:${activeReview.file.id}`
+    : activeDocument?.id ?? `document:${workspace?.path}:${editorFile?.path ?? "empty"}`;
   // Only the real open document renames from the breadcrumb (no review ghosts, companions or pending reviews).
   const breadcrumbCanRename = Boolean(
     activeFile &&
@@ -1653,6 +1806,7 @@ export default function App() {
       recentWorkspaces={recentWorkspaces}
       nodes={tree}
       activePath={editorFile?.path}
+      openDocumentPaths={openDocumentPaths}
       selectedPath={selectedTreePathForFileTree}
       pendingChanges={pendingTreeChanges}
       pendingReviewCount={pendingReviewFileCount}
@@ -1671,7 +1825,6 @@ export default function App() {
           path: node.path,
           kind: node.kind
         });
-                    clearReviewForNormalNavigation(node);
         return openNode(node);
       }}
       onOpenPendingChange={(target) => {
@@ -1784,7 +1937,11 @@ export default function App() {
           </div>
         </div>
         <div className="topbar-editor-zone">
-          {!sidebarOpen && !sidebarPeekOpen && breadcrumbParts.length > 0 ? (
+          <div className="topbar-document-navigation">
+          {tabItems.length > 1 && !virtualReviewFile ? (
+            <DocumentTabs documents={tabItems} activeId={activeDocument?.id ?? null}
+              labels={strings.topbar.tabs} onActivate={activateDocument} onClose={requestCloseTab} />
+          ) : breadcrumbParts.length > 0 ? (
             <nav className="topbar-breadcrumb" aria-label={strings.topbar.documentLocation}>
               <bdi className="topbar-breadcrumb-path">
                 {breadcrumbParts.map((part, index) =>
@@ -1809,6 +1966,7 @@ export default function App() {
               </bdi>
             </nav>
           ) : null}
+          </div>
           <div ref={setTopbarSlot} className="topbar-slot" />
           <div className="topbar-actions">
             {shouldShowStatus && visibleStatus ? <span className="document-save-state">{visibleStatus}</span> : null}
@@ -1862,6 +2020,11 @@ export default function App() {
         <EditorErrorBoundary labels={strings.editor} resetKey={editorFile?.path ?? "empty"}>
           <EditorPane
             file={editorFile}
+            documentId={editorDocumentId}
+            documentRevision={activeDocument ? revisions.current.get(activeDocument.id) ?? 0 : 0}
+            documentCache={documentCache}
+            activationId={activationId}
+            cacheable={!activeReview && !virtualReviewFile}
             detachedComments={editorDetachedComments}
             conflict={editorConflict}
             value={editorValue}
@@ -1952,7 +2115,6 @@ export default function App() {
         onCopyPath={copyNodePath}
         onOpen={(node) => {
           closeTreeContextMenu();
-          clearReviewForNormalNavigation(node);
           return openNode(node);
         }}
         onDuplicate={duplicateNode}

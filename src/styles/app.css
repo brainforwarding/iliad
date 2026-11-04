@@ -1,6 +1,7 @@
 @import "./tokens.css";
 @import "./base.css";
 @import "./chrome.css";
+@import "./document-tabs.css";
 @import "./sidebar.css";
 @import "./editor.css";
 @import "./mark.css";

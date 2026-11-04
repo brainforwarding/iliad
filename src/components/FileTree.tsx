@@ -61,6 +61,7 @@ interface FileTreeProps {
   recentWorkspaces: WorkspaceInfo[];
   nodes: FileTreeNode[];
   activePath?: string;
+  openDocumentPaths?: ReadonlySet<string>;
   selectedPath?: string | null;
   pendingChanges: PendingFileTreeChange[];
   pendingReviewCount: number;
@@ -107,6 +108,7 @@ interface FileTreeProps {
 }
 
 interface FileTreeLabels {
+  openDocument: string;
   companionComments: (count: number | null) => string;
   newDocument: string;
   newDocumentIn: (target: string) => string;
@@ -174,6 +176,7 @@ interface TreeRowProps {
   node: FileTreeDisplayNode;
   depth: number;
   activePath?: string;
+  openDocumentPaths?: ReadonlySet<string>;
   selectedPath?: string | null;
   workspaceSessionId: string;
   renamingPath: string | null;
@@ -696,6 +699,7 @@ function TreeRow({
   node,
   depth,
   activePath,
+  openDocumentPaths,
   selectedPath,
   workspaceSessionId,
   renamingPath,
@@ -741,6 +745,7 @@ function TreeRow({
   const isRenaming = node.source === "real" && renamingPath === node.node.path;
   const typingId = node.source === "real" && namingAnimation?.path === node.node.path ? namingAnimation.id : null;
   const companionKind = displayNodeCompanionKind(node);
+  const isOpen = node.source === "real" && nodeKind === "markdown" && !companionKind && Boolean(openDocumentPaths?.has(nodePath));
   const companionDocumentPath = node.source === "real" ? node.node.companion?.documentPath ?? null : null;
   const displayedName =
     companionKind === "comments"
@@ -789,9 +794,10 @@ function TreeRow({
   const hasDescendantMatchDescription = searchOpen && descendantMatchCount > 0;
   const showDescendantMatchCount =
     searchOpen && descendantMatchCount > 0 && (!searchMeta?.selfMatch || !isExpanded) && !showCompanions;
-  const rowDescription = hasDescendantMatchDescription
+  const pathDescription = hasDescendantMatchDescription
     ? `${fullRelativePath}. ${labels.fileTreeDescendantMatches(descendantMatchCount)}`
     : fullRelativePath;
+  const rowDescription = isOpen ? `${pathDescription}. ${labels.openDocument}` : pathDescription;
   const rowClassName = [
     "tree-item",
     `is-${displayNodeKind(node)}`,
@@ -804,6 +810,7 @@ function TreeRow({
     node.source === "pending-dir" ? "is-pending-dir" : "",
     hasPendingIndicator ? "has-pending-indicator" : "",
     isActive ? "is-active" : "",
+    isOpen ? "is-open" : "",
     isSelected ? "is-selected" : "",
     isSearchActiveMatch ? "is-search-active-match" : "",
     isDragging ? "is-dragging" : "",
@@ -960,8 +967,11 @@ function TreeRow({
                   <Icon icon={ExternalLink} />
                 </span>
               ) : null}
-              {hasPendingIndicator ? (
-                <span className={`tree-pending-dot ${pendingIndicatorClass}`} aria-hidden="true" />
+              {isOpen || hasPendingIndicator ? (
+                <span className="tree-document-indicators" aria-hidden="true">
+                  {isOpen ? <span className="tree-open-indicator" /> : null}
+                  {hasPendingIndicator ? <span className={`tree-pending-dot ${pendingIndicatorClass}`} /> : null}
+                </span>
               ) : null}
               <span id={pathDescriptionId} className="sr-only">
                 {rowDescription}
@@ -978,6 +988,7 @@ function TreeRow({
               node={child}
               depth={depth + 1}
               activePath={activePath}
+              openDocumentPaths={openDocumentPaths}
               selectedPath={selectedPath}
               workspaceSessionId={workspaceSessionId}
               renamingPath={renamingPath}
@@ -1071,6 +1082,7 @@ export function FileTree({
   recentWorkspaces,
   nodes,
   activePath,
+  openDocumentPaths,
   selectedPath,
   pendingChanges,
   pendingReviewCount,
@@ -2385,6 +2397,7 @@ export function FileTree({
               node={node}
               depth={0}
               activePath={activePath}
+              openDocumentPaths={openDocumentPaths}
               selectedPath={selectedPath}
               workspaceSessionId={workspaceSessionId}
               renamingPath={renamingPath}

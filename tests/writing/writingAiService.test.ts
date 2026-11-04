@@ -26,7 +26,7 @@ afterEach(async () => {
 
 async function userDataDir() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "iliad-writing-ai-"));
-  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  cleanups.push(() => rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 }));
   return dir;
 }
 

@@ -23,6 +23,8 @@ export interface AutosaveFence {
   trackSave: <T>(save: Promise<T>) => Promise<T>;
   /** Resolves once no operation holds the fence (immediately when free). */
   whenReleased: () => Promise<void>;
+  /** Wait for writes already using the active file's saved baseline. */
+  whenSavesSettled: () => Promise<void>;
   /** Runs `operation` with autosave paused (see the module comment). */
   run: <T>(operation: () => Promise<T>, hooks: AutosaveFenceHooks) => Promise<T>;
 }
@@ -51,6 +53,7 @@ export function createAutosaveFence(): AutosaveFence {
       return save;
     },
     whenReleased: () => released,
+    whenSavesSettled: waitForSaves,
     run: async (operation, hooks) => {
       // One holder at a time: a second operation waits for the first.
       while (holders > 0) {

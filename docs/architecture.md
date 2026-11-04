@@ -24,7 +24,9 @@ Iliad is a local-first Markdown writing app with two jobs:
 Outside agents reach Iliad only through the `iliad` CLI (status, open, skill)
 and the per-document comments file (`name.comments.md`).
 
-Avoid broad navigation, command palettes, tabs, chat panels, direct AI writes,
+Document tabs serve a small draft, outline, and notes workflow within one
+workspace, with one active document and writing/AI pipeline. Avoid broad
+navigation, command palettes, chat panels, direct AI writes,
 or dashboards until each addition is backed by a real writing workflow.
 
 ## Module Map
@@ -68,12 +70,13 @@ src/
   App.tsx
   main.tsx
   app/             useWorkspace, useDocumentPersistence (+ autosaveFence),
-                   useDocumentHistory, useDocumentNaming, pathRelocation,
+                   useOpenDocuments, documentTransitions, useDocumentHistory,
+                   useDocumentNaming, pathRelocation,
                    useOutsideReview, useSelectionComments, useCliBridge
   comments/        comments file format, session and three-way merge
   components/      EditorPane, FileTree, menus (Typography, Language,
                    Workspace, WritingAssists), DetachedCommentsBar, …
-  editor/          CodeMirrorHost, documentSync, aiReview/ (inline review),
+  editor/          CodeMirrorHost, documentStateCache, documentSync, aiReview/ (inline review),
                    ideaAutocomplete/, selectionComments/, writingCorrector/,
                    visualMarkdown/, imageDropPaste, paths
   files/           fileActions, fileTree, pathUtils, companionFiles,
@@ -292,10 +295,17 @@ The UI target is one useful top bar, not a separate macOS traffic-light bar plus
 
 - `.app-topbar` is the only top row.
 - The left side reserves the macOS traffic-light area.
-- The active document appears once in the topbar as a simple tab/dent.
+- One open document shows its breadcrumb in the topbar, including with the
+  sidebar visible, hidden, or peeking and during outside review. Two or more
+  open documents show tabs in that same area. Review-only ghosts retain their
+  breadcrumb without entering the open-document set.
+- The tab strip scrolls horizontally and keeps the active tab visible. At
+  narrow widths, compact review/comment controls share that same row. The tree
+  marks open documents separately from active selection and pending changes.
 - The sidebar begins below the topbar.
 - The sidebar header shows workspace name plus `+` only.
-- The top row's right side holds only the save state and the review slot; display settings live in Settings.
+- The top row's right side holds save state, review actions, and the comments
+  toggle; display settings live in Settings.
 
 ### Settings
 
@@ -384,9 +394,36 @@ Relevant files:
 - `electron/preload.ts`
 - `src/types/iliad.ts`
 
-## Document Navigation History
+## Open Documents and Navigation History
 
-The app keeps one active document, not tabs. Back/Forward history is an in-memory renderer concern for moving through recently opened Markdown documents.
+Each workspace window keeps an ordered open-document set with one active
+document. Reopening a path activates its existing entry; new entries append.
+Tab activation preserves order and uses the same guarded navigation as other
+opens. Different workspace folders retain separate windows and tab sets.
+
+- Document opens, closes, and workspace switches run through one serialized
+  transition lane. Text and comments must finish saving before activation;
+  edits made during a delayed read are flushed again before committing it.
+  Failed saves or reads leave the active document, tabs, and history unchanged.
+- Ctrl+Tab / Ctrl+Shift+Tab cycle tab order on every platform. Arrow keys and
+  Home/End move tab focus only; Enter/Space activate. Closing an inactive tab
+  leaves the active document unchanged. Closing the active tab chooses its
+  right neighbor, then its left, with save/discard/cancel for unsaved work.
+- Only ordered workspace-relative paths and the last active path are persisted
+  in local display metadata, keyed by canonical workspace root. Restoration
+  resolves against the loaded tree, skips unavailable paths, and loads inactive
+  contents lazily. An explicit startup open takes precedence.
+- One editor view, save pipeline, and comments hook serve the active document.
+  The in-memory cache preserves each writing document's undo history, selection,
+  and outer editor scroll; it never persists contents or undo history. Cached
+  state is reused only when revision and source text still match. Outside
+  review uses fresh read-only state, and late AI work belongs to its original
+  activation, including across A → B → A switches.
+- Rename/move relocation preserves entry identity and updates cached/session
+  paths. Closing a tab never resolves workspace-owned outside changes.
+
+Back/Forward history remains an independent in-memory renderer concern for
+moving through visited Markdown documents. It may reopen a closed tab.
 
 - Normal file-tree Markdown opens, created Markdown files, duplicated Markdown files, and rendered internal Markdown links record the previous active document after the target opens successfully.
 - Back and Forward open valid Markdown targets through the same save-before-open path as normal document navigation.
@@ -396,14 +433,16 @@ The app keeps one active document, not tabs. Back/Forward history is an in-memor
 - Opening a new document normally clears Forward history.
 - Stale history paths are skipped only after a successful Back/Forward navigation to the next valid target.
 - External files, external web/mail links, folder expansion, and same-document links do not record document history.
-- History is cleared when the workspace changes or the active document is cleared.
+- History is cleared when the workspace changes or the final document closes;
+  closing an intermediate tab preserves it.
 - Renames (manual or automatic) and moves relocate history entries through the one relocation callback (`src/app/pathRelocation.ts`), so Back/Forward keep working after a rename.
-- Do not add tabs until there is evidence the file tree plus Back/Forward history is insufficient.
 
 Relevant files:
 
 - `src/App.tsx`
 - `src/app/useDocumentHistory.ts`
+- `src/app/useOpenDocuments.ts`, `src/app/documentTransitions.ts`
+- `src/editor/documentStateCache.ts`, `src/components/DocumentTabs.tsx`
 - `src/files/fileActions.ts`
 - `src/styles/chrome.css`
 
@@ -815,18 +854,20 @@ CSS is imported through `src/styles/app.css` only. Keep imports in this order be
 1. `tokens.css`
 2. `base.css`
 3. `chrome.css`
-4. `sidebar.css`
-5. `editor.css`
-6. `mark.css`
-7. `visual-markdown.css`
-8. `popovers.css`
-9. `responsive.css`
+4. `document-tabs.css`
+5. `sidebar.css`
+6. `editor.css`
+7. `mark.css`
+8. `visual-markdown.css`
+9. `popovers.css`
+10. `responsive.css`
 
 Style ownership:
 
 - Every colour lives only in `tokens.css`, named by role; raw colours elsewhere fail `npm run lint:css`.
 - Reset, root fonts, launch screen, and generic primary button styles live in `base.css`.
-- App shell, topbar, document tab, shared icon buttons, and content grid styles live in `chrome.css`.
+- App shell, topbar, shared icon buttons, and content grid styles live in
+  `chrome.css`; the document tab strip lives in `document-tabs.css`.
 - Sidebar, file tree, tree selection, and inline rename styles live in `sidebar.css`.
 - Editor container, empty editor state, and scroll geometry live in `editor.css`.
 - CodeMirror visual Markdown classes and widgets live in `visual-markdown.css`.
@@ -840,8 +881,13 @@ Style ownership:
 `src/editor/CodeMirrorHost.tsx` mounts the CodeMirror `EditorView` for
 `EditorPane`. Iliad owns this host instead of using `@uiw/react-codemirror`.
 
-- The document is synced from React state synchronously, in a layout effect,
-  through `syncEditorDocument` (`src/editor/documentSync.ts`). The buffer must
+- Activating a document installs fresh extensions/callbacks and the matching
+  cached writing history/selection in the existing view before paint. The
+  cache excludes transient review/AI state; an authoritative replacement
+  invalidates stale history. The outer `.editor-surface` scroll is restored
+  separately, guarded against rapid switches.
+- Same-document external text is synced from React state synchronously, in a
+  layout effect, through `syncEditorDocument` (`src/editor/documentSync.ts`). The buffer must
   match app state before paint and before any keystroke can land on an old
   document; a deferred sync lets a keystroke autosave stale text over another
   file or over a kept outside version.
@@ -882,6 +928,21 @@ Relevant files:
 - `src/styles/editor.css`
 
 ## Visual Markdown
+
+Inline formatting (spec `specs/2026-11-04-inline-formatting.md`) uses
+`src/editor/inlineFormatting.ts` for ⌘B/⌘I, with Ctrl on other platforms.
+Commands make ordinary Markdown edits, preserve structural prefixes, and use
+normal undo and comment mapping. `inlineStyles.ts` shares Markdown parser
+delimiter ranges between commands and visual bold/italics, including nesting.
+Both shortcuts are reserved from configurable writing-assist bindings.
+
+When a plain click reveals hidden bold/italic markers, `clickPlacement.ts`
+captures its source position before the line shifts. The left boundary is
+outside all opening markers unless preceded by whitespace, in which case it
+is inside. The right boundary is inside all closing markers; a click after
+the following space is outside. Adjacent nested markers form one boundary.
+Visible source uses normal literal placement, and drag selection retains the
+original click anchor.
 
 The visual Markdown layer is intentionally lightweight and should not become a full Markdown renderer.
 

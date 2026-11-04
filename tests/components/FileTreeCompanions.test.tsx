@@ -63,6 +63,16 @@ describe("companion rows in the file tree", () => {
     expect(unknownCount).toContain(">Comments<");
   });
 
+  it("does not expand inactive open documents or mark companion files as document tabs", () => {
+    const openDocumentPaths = new Set(["/ws/chapter.md", "/ws/chapter.comments.md"]);
+    const inactive = renderTree({ activePath: "/ws/other.md", openDocumentPaths });
+    expect(inactive).not.toContain("is-companion");
+    expect(inactive.match(/class="tree-open-indicator"/g)).toHaveLength(1);
+    const active = renderTree({ activePath: "/ws/chapter.md", openDocumentPaths });
+    expect(active).toContain("is-companion");
+    expect(active.match(/class="tree-open-indicator"/g)).toHaveLength(1);
+  });
+
   it("offers only Open, Reveal in Finder, and Move to Trash for a companion", () => {
     vi.stubGlobal("window", { innerWidth: 1000, innerHeight: 800 });
     const labels = appStrings.en.treeContextMenu;

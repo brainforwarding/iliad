@@ -52,6 +52,7 @@ interface CommentsSession extends CommentsSessionState {
   commentsPath: string;
   commentsRelativePath: string;
   timer: number | null;
+  loading?: Promise<void>;
 }
 
 function sessionIo(session: CommentsSession): CommentsFileIo {
@@ -193,6 +194,7 @@ export function useSelectionComments({
   const schedulePersist = useCallback(
     (session: CommentsSession) => {
       session.dirty = true;
+      session.version = (session.version ?? 0) + 1;
 
       if (session.timer !== null) {
         window.clearTimeout(session.timer);
@@ -237,6 +239,8 @@ export function useSelectionComments({
 
     try {
       if (session) {
+        await session.loading;
+        if (!session.loaded) await reloadSession(session);
         await persistSession(session);
       }
     } catch (error) {
@@ -248,7 +252,12 @@ export function useSelectionComments({
     // (their failures were already reported), so a flush before quitting for an
     // update leaves no comment write behind.
     await Promise.all([...pendingWritesRef.current.values()]);
-  }, [persistSession, reportError]);
+  }, [persistSession, reloadSession, reportError]);
+
+  const isPersistSettled = useCallback(() => {
+    const session = sessionRef.current;
+    return (!session || (!session.dirty && session.timer === null)) && pendingWritesRef.current.size === 0;
+  }, []);
 
   // Document open / switch: write the switched-away session, then read the
   // companion of the newly opened document.
@@ -286,7 +295,11 @@ export function useSelectionComments({
     sessionRef.current = session;
     setComments([]);
     setLoaded(false);
-    reloadSession(session).catch((error) => {
+    const loading = reloadSession(session);
+    session.loading = loading;
+    void loading.finally(() => {
+      if (session.loading === loading) session.loading = undefined;
+    }).catch((error) => {
       console.warn("comments: read failed", error);
     });
 
@@ -556,6 +569,7 @@ export function useSelectionComments({
     applyPositionUpdates,
     applyFullReplacement,
     flushPersist,
+    isPersistSettled,
     noteOutsideEditRestored
   };
 }

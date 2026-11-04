@@ -601,3 +601,32 @@ and reading a pass of feedback one hover card at a time does not work. Using
 the comments file keeps one source of truth on disk and needs no new IPC.
 
 Spec: [2026-10-14 comments in the margin](../specs/2026-10-14-comments-in-the-margin.md).
+
+## ADR-0027: A Small Open Writing Set, One Active Document
+
+Status: accepted (2026-11-04). Amends the earlier decision to defer document
+tabs; retains ADR-0021's single-document built-in AI scope.
+
+A writer can keep a draft, outline, and notes open within one workspace window.
+One document shows its breadcrumb; two or more show tabs in the same top row,
+including during outside review and with the sidebar hidden. Activating a tab
+preserves its place in the set and restores its writing state. Other workspace
+folders keep separate windows.
+
+There is still one active editor, text/comments save pipeline, and writing-AI
+target. A transition saves the source and reconciles the target before changing
+activation. Save/read failures leave the source open. An in-memory cache keeps
+undo, selection, and scroll only while the source revision matches; review and
+late AI results cannot cross document activations. Closing a tab never resolves
+pending outside changes.
+
+Only ordered relative paths and the last active path are restored across app
+sessions. Back/Forward history remains separate and can reopen a closed file.
+Split panes, preview/pinned tabs, cross-folder roots, and background document
+save pipelines remain outside this version.
+
+Why: the draft, outline, and notes workflow benefits from a visible small set
+and returning to the same place in each. It does not require expanding built-in
+AI beyond the active document or adding an editor-group framework.
+
+Spec: [2026-11-04 document tabs](../specs/2026-11-04-document-tabs.md).

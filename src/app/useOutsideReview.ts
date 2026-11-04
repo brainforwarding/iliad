@@ -27,6 +27,8 @@ type ProposalFile = AgentChangeProposal["files"][number];
 
 interface UseOutsideReviewOptions {
   activeFile: FileTreeNode | null;
+  /** Synchronous persistence identity, including commits before React effects run. */
+  getCurrentDocument?: () => { path: string | null; relativePath: string | null; workspacePath: string | null };
   loadDocument: (content: string) => void;
   openNode: (node: FileTreeNode) => Promise<OpenNodeResult>;
   recordNormalNavigation: (fromPath: string, toPath: string) => void;
@@ -348,6 +350,7 @@ export async function loadActiveBufferFromDiskIfSafe({
  */
 export function useOutsideReview({
   activeFile,
+  getCurrentDocument,
   loadDocument,
   openNode,
   recordNormalNavigation,
@@ -374,6 +377,14 @@ export function useOutsideReview({
   const workspacePathRef = useRef<string | null>(null);
   const activeFilePathRef = useRef<string | null>(null);
   const activeFileRelativePathRef = useRef<string | null>(null);
+  const currentDocumentRef = useRef(getCurrentDocument);
+  currentDocumentRef.current = getCurrentDocument;
+  const currentPath = useCallback(() => currentDocumentRef.current
+    ? currentDocumentRef.current().path : activeFilePathRef.current, []);
+  const currentRelativePath = useCallback(() => currentDocumentRef.current
+    ? currentDocumentRef.current().relativePath : activeFileRelativePathRef.current, []);
+  const currentWorkspacePath = useCallback(() => currentDocumentRef.current
+    ? currentDocumentRef.current().workspacePath : workspacePathRef.current, []);
   const reviewActionKeyRef = useRef<string | null>(null);
   const agentProposalsRef = useRef<AgentChangeProposal[]>([]);
   const agentReviewTargetRef = useRef<ReviewTarget | null>(null);
@@ -401,19 +412,17 @@ export function useOutsideReview({
    */
   const prepareActiveBufferForReplacement = useCallback(async () => {
     const step = activeBufferReplacementStep({
-      hasActiveDocument: Boolean(activeFilePathRef.current),
+      hasActiveDocument: Boolean(currentPath()),
       inConflict: activeFileInConflictRef.current,
       clean: bufferReplaceable()
     });
 
-    if (step !== "save_first") {
-      return step === "replace";
-    }
+    if (step === "keep") return false;
 
     const flush = flushActiveDocumentRef.current;
 
     if (!flush) {
-      return false;
+      return step === "replace";
     }
 
     try {
@@ -431,10 +440,10 @@ export function useOutsideReview({
    */
   const activeBufferMayBeReplacedNow = useCallback(
     (workspacePath: string, activePath: string, targetRelativePath: string) =>
-      workspacePathRef.current === workspacePath &&
-      activeFilePathRef.current === activePath &&
+      currentWorkspacePath() === workspacePath &&
+      currentPath() === activePath &&
       reviewActionMayLoadActiveBuffer({
-        activeRelativePath: activeFileRelativePathRef.current,
+        activeRelativePath: currentRelativePath(),
         targetRelativePath,
         wasInConflict: activeFileInConflictRef.current,
         canReplaceActiveBuffer: bufferReplaceable()
@@ -488,8 +497,8 @@ export function useOutsideReview({
       // A document reached through history or a link that has a pending
       // outside edit must open in review, never as an editable copy of the
       // outside content (typing there would only end in a conflict).
-      if (!next && !activeFileInConflictRef.current && workspacePathRef.current) {
-        const externalTarget = externalReviewTargetForActiveFile(agentProposals, workspacePathRef.current, activeRel);
+      if (!next && !activeFileInConflictRef.current && currentWorkspacePath()) {
+        const externalTarget = externalReviewTargetForActiveFile(agentProposals, currentWorkspacePath(), activeRel);
 
         if (externalTarget) {
           logReviewNavigation("active_file_entered_external_review", { target: externalTarget, activeRel });
@@ -578,7 +587,7 @@ export function useOutsideReview({
             diskHash: revision.diskHash
           });
 
-        if (workspacePathRef.current !== workspace.path) {
+        if (currentWorkspacePath() !== workspace.path) {
           // The workspace changed while the action was in flight; nothing
           // below may touch the new workspace's editor.
           return;
@@ -588,7 +597,7 @@ export function useOutsideReview({
           const file = result.proposal.files.find((candidate) => candidate.id === result.fileId);
           // Compare against the file that is active now, not the one captured
           // before the await: navigating mid-apply must not clobber another buffer.
-          const activeRelativePath = activeFileRelativePathRef.current;
+          const activeRelativePath = currentRelativePath();
 
           // Load before refreshing the outside review, so a conflict buffer the
           // writer chose to discard is already replaced when the item's
@@ -621,26 +630,15 @@ export function useOutsideReview({
           const nextTree = await refreshTree(workspace.path);
           const nextFile = findNode(nextTree, result.file.path) ?? result.file;
 
-          // Opening the kept file replaces the active buffer: only once that
-          // buffer is saved (spec V5). A conflicted or unsaveable buffer stays
-          // put; the file is kept on disk and in the tree either way.
-          if (workspacePathRef.current === workspace.path && (await prepareActiveBufferForReplacement())) {
-            const previousPath = activeFilePathRef.current;
-
-            if (previousPath) {
-              recordNormalNavigation(previousPath, nextFile.path);
-            }
-
-            setActiveFile(nextFile);
-            setSelectedTreePath(nextFile.path);
-            loadDocument(result.content);
-          }
+          // A kept file is now a normal document. Use the same serialized,
+          // save-before-open path as tabs, including its final workspace check.
+          if (currentWorkspacePath() === workspace.path) await openNode(nextFile);
         }
 
         // A stale Keep did nothing on disk: the deleted document's buffer stays.
         if (result.status !== "stale" && result.kind === "delete_file") {
           const file = result.proposal.files.find((candidate) => candidate.id === result.fileId);
-          const activeRelativePath = activeFileRelativePathRef.current;
+          const activeRelativePath = currentRelativePath();
 
           if (file?.kind === "delete_file" && activeRelativePath && sameRelativePath(activeRelativePath, file.relativePath)) {
             await refreshTree(workspace.path);
@@ -649,9 +647,9 @@ export function useOutsideReview({
             // or conflicted text: those stay in the editor (the save state
             // reports them) until the writer resolves them.
             if (
-              workspacePathRef.current === workspace.path &&
+              currentWorkspacePath() === workspace.path &&
               !wasInConflict &&
-              sameRelativePath(activeFileRelativePathRef.current ?? "", file.relativePath) &&
+              sameRelativePath(currentRelativePath() ?? "", file.relativePath) &&
               bufferReplaceable()
             ) {
               setActiveFile(null);
@@ -688,6 +686,7 @@ export function useOutsideReview({
     [
       bufferReplaceable,
       loadDocument,
+      openNode,
       prepareActiveBufferForReplacement,
       recordNormalNavigation,
       refreshExternalReview,
@@ -723,7 +722,7 @@ export function useOutsideReview({
             files
           });
 
-          if (workspacePathRef.current !== workspace.path) {
+          if (currentWorkspacePath() !== workspace.path) {
             return;
           }
 
@@ -740,8 +739,8 @@ export function useOutsideReview({
           onOutsideEditRestoredRef.current?.(
             proposal.files.filter((file) => file.status !== "stale").map((file) => file.relativePath)
           );
-          const activeRelativePath = activeFileRelativePathRef.current;
-          const activePath = activeFilePathRef.current;
+          const activeRelativePath = currentRelativePath();
+          const activePath = currentPath();
           const touchedActive = proposal.files.some(
             (file) => activeRelativePath && sameRelativePath(activeRelativePath, file.relativePath)
           );
@@ -803,14 +802,14 @@ export function useOutsideReview({
             diskHash: revision.diskHash
           });
 
-        if (workspacePathRef.current !== workspace.path) {
+        if (currentWorkspacePath() !== workspace.path) {
           return;
         }
 
         await refreshExternalReview();
         await refreshTree(workspace.path);
-        const activeRelativePath = activeFileRelativePathRef.current;
-        const activePath = activeFilePathRef.current;
+        const activeRelativePath = currentRelativePath();
+        const activePath = currentPath();
         const resultFile = proposal.files.find((candidate) => candidate.id === fileId);
 
         // A stale result carries the file marked stale, or no file at all
@@ -911,7 +910,7 @@ export function useOutsideReview({
               ? await window.iliad.agent.keepChunk(request)
               : await window.iliad.agent.restoreChunk(request);
 
-          if (workspacePathRef.current !== workspace.path) {
+          if (currentWorkspacePath() !== workspace.path) {
             return;
           }
 
@@ -926,12 +925,12 @@ export function useOutsideReview({
             onOutsideEditRestoredRef.current?.([file.relativePath]);
           }
 
-          const activePath = activeFilePathRef.current;
+          const activePath = currentPath();
 
           if (
             activePath &&
             reviewActionMayLoadActiveBuffer({
-              activeRelativePath: activeFileRelativePathRef.current,
+              activeRelativePath: currentRelativePath(),
               targetRelativePath: file.relativePath,
               wasInConflict: wasInConflict || activeFileInConflictRef.current,
               canReplaceActiveBuffer: replaceable
@@ -1169,7 +1168,7 @@ export function useOutsideReview({
    */
   const applyExternalReviewUpdate = useCallback(
     (snapshot: ExternalReviewSnapshot) => {
-      const workspacePath = workspacePathRef.current;
+      const workspacePath = currentWorkspacePath();
 
       if (!workspacePath || snapshot.workspaceRoot !== workspacePath) {
         return;
@@ -1212,7 +1211,7 @@ export function useOutsideReview({
         void refreshTree(workspacePath).catch(() => undefined);
       }
 
-      const activeRelativePath = activeFileRelativePathRef.current;
+      const activeRelativePath = currentRelativePath();
 
       if (!activeRelativePath) {
         return;

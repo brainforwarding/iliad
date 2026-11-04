@@ -3,6 +3,7 @@ import { selectionDocumentSnapshot, type SelectionDocumentSnapshot } from "../ai
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent,
@@ -20,6 +21,7 @@ import { normalizeSelectionEditInstruction, selectionEditInstructionIsTooLong } 
 const SETTLE_DELAY_MS = 180;
 const HOVER_SHOW_DELAY_MS = 300;
 const HOVER_HIDE_DELAY_MS = 180;
+let selectionRequestSequence = 0;
 
 export interface SelectionCommentsEditorLabels {
   action: string;
@@ -97,7 +99,7 @@ export interface TightenOverlayApi {
   onProposedRangeChange: (range: { from: number; to: number } | null) => void;
   reviewActive: boolean;
   onReviewReady: (review: TightenInlineReview) => void;
-  onRejectReview: () => void;
+  onRejectReview: (focus?: boolean) => void;
 }
 
 type TightenViewState =
@@ -107,6 +109,7 @@ type TightenViewState =
   | { phase: "error"; reason: TightenFailureReason; resetAt?: string; anchorPos: number; kind: "tighten" | "edit" };
 
 interface SelectionCommentsOverlayProps {
+  captureActivation?: () => () => boolean;
   view: EditorView | null;
   comments: SelectionComment[];
   labels: SelectionCommentsEditorLabels;
@@ -192,6 +195,7 @@ function overlayPositionAt(
  * (never cached) across layout reflows such as visualMarkdown syntax reveal.
  */
 export function SelectionCommentsOverlay({
+  captureActivation,
   view,
   comments,
   labels,
@@ -216,8 +220,8 @@ export function SelectionCommentsOverlay({
   tightenStateRef.current = tightenState;
   const tightenRef = useRef(tighten);
   tightenRef.current = tighten;
-  const tightenSeqRef = useRef(0);
   const currentTightenIdRef = useRef<string | null>(null);
+  const disposedRef = useRef(false);
   const tightenDismissTimer = useRef<number | null>(null);
   const dismissTightenRef = useRef<() => void>(() => {});
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -605,7 +609,8 @@ export function SelectionCommentsOverlay({
 
     const kind = mode;
     const anchorPos = safeRange.from;
-    const requestId = `${mode === "edit" ? "e" : "t"}${(tightenSeqRef.current += 1)}`;
+    const requestId = `${mode === "edit" ? "e" : "t"}${++selectionRequestSequence}`;
+    const isCurrent = captureActivation?.() ?? (() => true);
     currentTightenIdRef.current = requestId;
 
     clearTimer(settleTimer);
@@ -632,7 +637,7 @@ export function SelectionCommentsOverlay({
         mode === "edit" ? { mode: "edit", instruction, document: documentSnapshot } : { document: documentSnapshot }
       )
       .then((result) => {
-        if (currentTightenIdRef.current !== requestId) {
+        if (disposedRef.current || !isCurrent() || currentTightenIdRef.current !== requestId) {
           return;
         }
 
@@ -670,7 +675,7 @@ export function SelectionCommentsOverlay({
         setTightenState({ phase: "idle" });
       })
       .catch(() => {
-        if (currentTightenIdRef.current !== requestId) {
+        if (disposedRef.current || !isCurrent() || currentTightenIdRef.current !== requestId) {
           return;
         }
 
@@ -830,6 +835,16 @@ export function SelectionCommentsOverlay({
   const onProvisionalRangeChangeRef = useRef(onProvisionalRangeChange);
   onProvisionalRangeChangeRef.current = onProvisionalRangeChange;
 
+  useLayoutEffect(() => {
+    disposedRef.current = false;
+    return () => {
+      disposedRef.current = true;
+      const id = currentTightenIdRef.current;
+      currentTightenIdRef.current = null;
+      if (id) tightenRef.current?.cancel(id);
+    };
+  }, []);
+
   useEffect(() => {
     return () => {
       clearTimer(settleTimer);
@@ -847,7 +862,7 @@ export function SelectionCommentsOverlay({
       // Never leave a provisional wash behind when the overlay unmounts.
       onProvisionalRangeChangeRef.current(null);
       tightenRef.current?.onProposedRangeChange(null);
-      tightenRef.current?.onRejectReview();
+      tightenRef.current?.onRejectReview(false);
     };
   }, []);
 
