@@ -298,7 +298,8 @@ Observed QA on 2026-11-04:
 A final folder-switch review removed a duplicate initial tree read. The
 workspace hook now owns that read, so the transition finishes before restored
 tabs become ready. Native delayed-read and A → B → A checks pass with separate
-open sets and last-active restoration.
+open sets and last-active restoration. Selecting the already-current folder
+is a no-op and retains its tree, tabs, and active document.
 
 Final review also covered the isolated public-comments adaptation. A session
 version guard now preserves comment edits made during a companion write; its

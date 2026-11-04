@@ -1235,7 +1235,7 @@ export default function App() {
       await flushSave();
       const nextWorkspace = await window.iliad.openWorkspaceDialog(language);
 
-      if (!nextWorkspace) {
+      if (!nextWorkspace || nextWorkspace.path === stateRef.current.workspace?.path) {
         return;
       }
 
