@@ -63,6 +63,7 @@ export function canonicalShortcut(key: string) {
 // (the editor no longer binds them to indent).
 const takenShortcuts = new Set([
   "Mod-q", "Mod-h", "Mod-Alt-h", "Mod-z", "Mod-Shift-z", "Mod-x", "Mod-c", "Mod-v", "Mod-a",
+  "Mod-b", "Mod-i",
   "Mod-0", "Mod-=", "Mod-+", "Mod-Shift-=", "Mod--", "Mod-Ctrl-f", "Mod-m",
   "Mod-w", "Mod-o", "Mod-n", "Mod-Ctrl-s", "Mod-Ctrl-m", "Mod-Alt-f", "Mod-Shift-m", "Mod-Shift-j", "Alt-ArrowUp", "Alt-ArrowDown",
   "Mod-f", "Mod-g", "Mod-Shift-g", "Mod-y", "Mod-[", "Mod-]",

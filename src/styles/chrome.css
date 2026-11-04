@@ -60,6 +60,7 @@
   align-items: center;
   gap: 10px;
   padding: 0 14px 0 18px;
+  container-type: inline-size;
 }
 
 .topbar-navigation {
@@ -67,6 +68,11 @@
   min-width: 0;
   align-items: center;
   gap: 4px;
+}
+
+.topbar-document-navigation {
+  min-width: 0;
+  flex: 1 1 0;
 }
 
 .topbar-navigation .icon-button {
@@ -133,9 +139,10 @@
 .topbar-slot {
   display: flex;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   align-items: center;
   justify-content: flex-end;
+  margin-left: auto;
 }
 
 .topbar-slot:empty {
@@ -473,5 +480,66 @@
 
   .app-shell:not(.sidebar-is-collapsed) .app-content {
     grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  }
+}
+
+/* Keep document navigation and all review actions usable beside a wide tree. */
+@container (max-width: 680px) {
+  .topbar-document-navigation {
+    min-width: 120px;
+  }
+
+  .topbar-slot {
+    flex: 0 0 auto;
+  }
+
+  .topbar-actions {
+    gap: 6px;
+  }
+
+  .document-save-state {
+    max-width: 6ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .topbar-actions .comments-toggle {
+    gap: 4px;
+    padding: 0 5px;
+  }
+
+  .topbar-actions .comments-toggle > span:not(.comments-toggle__count) {
+    display: none;
+  }
+
+  .review-controls {
+    gap: 4px;
+  }
+
+  .review-controls__count {
+    max-width: 3ch;
+  }
+
+  .review-controls .review-controls__arrow {
+    width: 22px;
+  }
+
+  .review-controls__button {
+    padding: 0 6px;
+  }
+}
+
+@container (max-width: 560px) {
+  .document-save-state {
+    max-width: 5ch;
+  }
+
+  .review-controls {
+    gap: 3px;
+  }
+
+  .review-controls__button {
+    padding: 0 3px;
   }
 }

@@ -11,6 +11,8 @@ interface ImageDropPasteOptions {
   insertImage: InsertImage;
   insertImageReference?: InsertImageReference;
   workspaceSessionId?: string;
+  /** Captured at the gesture, invalid after any committed document activation. */
+  captureActivation?: () => () => boolean;
 }
 
 function imageFiles(fileList: FileList | null) {
@@ -26,10 +28,11 @@ function insertionText(markdownImages: string[], currentText: string, position: 
   return `${prefix}${markdownImages.join("\n\n")}${suffix}`;
 }
 
-async function insertImages(view: EditorView, position: number, files: File[], insertImage: InsertImage) {
+export async function insertImages(view: EditorView, position: number, files: File[], insertImage: InsertImage, isCurrent = () => true) {
   const markdownImages: string[] = [];
 
   for (const file of files) {
+    if (!isCurrent()) return;
     try {
       const markdownImage = await insertImage(file);
 
@@ -41,7 +44,7 @@ async function insertImages(view: EditorView, position: number, files: File[], i
     }
   }
 
-  if (markdownImages.length === 0) {
+  if (!isCurrent() || markdownImages.length === 0) {
     return;
   }
 
@@ -55,15 +58,17 @@ async function insertImages(view: EditorView, position: number, files: File[], i
   });
 }
 
-async function insertImageReferences(
+export async function insertImageReferences(
   view: EditorView,
   position: number,
   relativePaths: string[],
-  insertImageReference: InsertImageReference
+  insertImageReference: InsertImageReference,
+  isCurrent = () => true
 ) {
   const markdownImages: string[] = [];
 
   for (const relativePath of relativePaths) {
+    if (!isCurrent()) return;
     try {
       const markdownImage = await insertImageReference(relativePath);
 
@@ -75,7 +80,7 @@ async function insertImageReferences(
     }
   }
 
-  if (markdownImages.length === 0) {
+  if (!isCurrent() || markdownImages.length === 0) {
     return;
   }
 
@@ -100,7 +105,8 @@ function imageReferenceFromDataTransfer(dataTransfer: DataTransfer | null, works
 export function imageDropPasteExtension({
   insertImage,
   insertImageReference,
-  workspaceSessionId
+  workspaceSessionId,
+  captureActivation
 }: ImageDropPasteOptions) {
   return EditorView.domEventHandlers({
     dragover(event) {
@@ -131,7 +137,7 @@ export function imageDropPasteExtension({
         }
 
         const position = view.posAtCoords({ x: event.clientX, y: event.clientY }) ?? view.state.selection.main.head;
-        void insertImageReferences(view, position, [imageReferencePayload.relativePath], insertImageReference);
+        void insertImageReferences(view, position, [imageReferencePayload.relativePath], insertImageReference, captureActivation?.());
 
         return true;
       }
@@ -144,7 +150,7 @@ export function imageDropPasteExtension({
 
       event.preventDefault();
       const position = view.posAtCoords({ x: event.clientX, y: event.clientY }) ?? view.state.selection.main.head;
-      void insertImages(view, position, files, insertImage);
+      void insertImages(view, position, files, insertImage, captureActivation?.());
 
       return true;
     },
@@ -156,7 +162,7 @@ export function imageDropPasteExtension({
       }
 
       event.preventDefault();
-      void insertImages(view, view.state.selection.main.head, files, insertImage);
+      void insertImages(view, view.state.selection.main.head, files, insertImage, captureActivation?.());
 
       return true;
     }

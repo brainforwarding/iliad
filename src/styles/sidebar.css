@@ -754,6 +754,21 @@
   justify-self: center;
 }
 
+.tree-document-indicators {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.tree-open-indicator {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border: 1px solid var(--muted-2);
+  border-radius: 50%;
+}
+
 .tree-pending-dot.is-create {
   background: var(--create);
 }

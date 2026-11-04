@@ -12,6 +12,12 @@ export const appStrings = {
       hideSidebar: "Hide sidebar",
       showSidebar: "Show sidebar",
       documentLocation: "Document location",
+      tabs: {
+        openDocuments: "Open documents",
+        closeDocument: (name: string) => `Close ${name}`,
+        scrollLeft: "Scroll documents left",
+        scrollRight: "Scroll documents right"
+      },
       backTo: (name: string) => `Back to ${name}`,
       forwardTo: (name: string) => `Forward to ${name}`,
       comments: {
@@ -45,6 +51,7 @@ export const appStrings = {
     },
       sidebar: {
       newDocument: "New document",
+      openDocument: "Open document",
       companionComments: (count: number | null) => (count === null ? "Comments" : `Comments · ${count}`),
       newDocumentIn: (target: string) => `New document in ${target}`,
       newFolder: "New folder",
@@ -417,6 +424,12 @@ export const appStrings = {
       hideSidebar: "Ocultar barra lateral",
       showSidebar: "Mostrar barra lateral",
       documentLocation: "Ubicación del documento",
+      tabs: {
+        openDocuments: "Documentos abiertos",
+        closeDocument: (name: string) => `Cerrar ${name}`,
+        scrollLeft: "Desplazar documentos a la izquierda",
+        scrollRight: "Desplazar documentos a la derecha"
+      },
       backTo: (name: string) => `Volver a ${name}`,
       forwardTo: (name: string) => `Avanzar a ${name}`,
       comments: {
@@ -450,6 +463,7 @@ export const appStrings = {
     },
     sidebar: {
       newDocument: "Nuevo documento",
+      openDocument: "Documento abierto",
       companionComments: (count: number | null) => (count === null ? "Comentarios" : `Comentarios · ${count}`),
       newDocumentIn: (target: string) => `Nuevo documento en ${target}`,
       newFolder: "Nueva carpeta",

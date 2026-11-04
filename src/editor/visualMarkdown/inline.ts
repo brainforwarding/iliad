@@ -11,6 +11,8 @@ import {
 } from "./activeRanges";
 import { parseYouTubeVideoUrl } from "./media";
 import { HiddenSyntaxWidget, ImageWidget, InlineMathWidget, YouTubeVideoWidget } from "./widgets";
+import { collectInlineStyles, type InlineStyleRange } from "../inlineStyles";
+export type { InlineStyleRange } from "../inlineStyles";
 
 export interface InlineCodeRange {
   from: number;
@@ -30,8 +32,6 @@ export interface InlineLinkRange {
   labelTo: number;
   href: string;
 }
-
-export interface InlineStyleRange extends InlineCodeRange {}
 
 export interface InlineEscapeRange {
   from: number;
@@ -233,57 +233,6 @@ function collectLinkRanges(text: string, hardBlockers: Array<{ from: number; to:
   return ranges;
 }
 
-function collectStrongRanges(text: string, hardBlockers: Array<{ from: number; to: number }>): InlineStyleRange[] {
-  const ranges: InlineStyleRange[] = [];
-  const strongPattern = /\*\*([^*]+)\*\*/g;
-
-  for (let match = strongPattern.exec(text); match; match = strongPattern.exec(text)) {
-    const from = match.index;
-    const to = from + match[0].length;
-
-    if (overlapsRange(hardBlockers, from, to)) {
-      continue;
-    }
-
-    ranges.push({
-      from,
-      to,
-      contentFrom: from + 2,
-      contentTo: to - 2
-    });
-  }
-
-  return ranges;
-}
-
-function collectEmphasisRanges(
-  text: string,
-  hardBlockers: Array<{ from: number; to: number }>,
-  strongRanges: InlineStyleRange[]
-): InlineStyleRange[] {
-  const ranges: InlineStyleRange[] = [];
-  const emphasisPattern = /(^|[^\*])\*([^\s*][^*]*?)\*/g;
-
-  for (let match = emphasisPattern.exec(text); match; match = emphasisPattern.exec(text)) {
-    const leadingOffset = match[1] ? match[1].length : 0;
-    const from = match.index + leadingOffset;
-    const to = match.index + match[0].length;
-
-    if (overlapsRange(hardBlockers, from, to) || overlapsRange(strongRanges, from, to)) {
-      continue;
-    }
-
-    ranges.push({
-      from,
-      to,
-      contentFrom: from + 1,
-      contentTo: to - 1
-    });
-  }
-
-  return ranges;
-}
-
 export function collectInlineMarkdownRanges(text: string): InlineMarkdownRanges {
   const code = collectInlineCodeRanges(text);
   const escapes = collectEscapedPunctuationRanges(text, code);
@@ -298,8 +247,10 @@ export function collectInlineMarkdownRanges(text: string): InlineMarkdownRanges 
   const math = [...dollarMath, ...latexMath].sort((a, b) => a.from - b.from);
   const hardBlockers = [...code, ...math, ...escapes];
   const links = collectLinkRanges(text, hardBlockers);
-  const strong = collectStrongRanges(text, hardBlockers);
-  const emphasis = collectEmphasisRanges(text, hardBlockers, strong);
+  const styles = collectInlineStyles(text);
+  const unblocked = (range: InlineStyleRange) => !overlapsRange(hardBlockers, range.from, range.to);
+  const strong = styles.strong.filter(unblocked);
+  const emphasis = styles.emphasis.filter(unblocked);
 
   return {
     code,
@@ -378,11 +329,11 @@ export function addStrongDecorations(
     const contentFrom = lineFrom + strongRange.contentFrom;
     const contentTo = lineFrom + strongRange.contentTo;
     if (hideSyntax) {
-      ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(from, contentFrom));
+      ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget(), inlineFormatBoundary: "open" }).range(from, contentFrom));
     }
     ranges.push(Decoration.mark({ class: "cm-md-strong" }).range(contentFrom, contentTo));
     if (hideSyntax) {
-      ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(contentTo, to));
+      ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget(), inlineFormatBoundary: "close" }).range(contentTo, to));
     }
   }
 }
@@ -407,11 +358,11 @@ export function addEmphasisDecorations(
     const contentFrom = lineFrom + emphasisRange.contentFrom;
     const contentTo = lineFrom + emphasisRange.contentTo;
     if (hideSyntax) {
-      ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(markerFrom, contentFrom));
+      ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget(), inlineFormatBoundary: "open" }).range(markerFrom, contentFrom));
     }
     ranges.push(Decoration.mark({ class: "cm-md-emphasis" }).range(contentFrom, contentTo));
     if (hideSyntax) {
-      ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget() }).range(contentTo, to));
+      ranges.push(Decoration.replace({ widget: new HiddenSyntaxWidget(), inlineFormatBoundary: "close" }).range(contentTo, to));
     }
   }
 }

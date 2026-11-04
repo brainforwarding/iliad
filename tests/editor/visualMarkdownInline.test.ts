@@ -71,6 +71,15 @@ function widgetDecorations(state: EditorState) {
 }
 
 describe("visual Markdown inline ranges", () => {
+  it("renders nested bold and italics using distinct non-overlapping markers", () => {
+    const ranges = collectInlineMarkdownRanges("***word***");
+    expect(ranges.strong).toEqual([{ from: 1, to: 9, contentFrom: 3, contentTo: 7 }]);
+    expect(ranges.emphasis).toEqual([{ from: 0, to: 10, contentFrom: 1, contentTo: 9 }]);
+    const state = createVisualMarkdownState("Intro\n***word***", 0);
+    expect(classDecorations(state, "cm-md-strong")).toHaveLength(1);
+    expect(classDecorations(state, "cm-md-emphasis")).toHaveLength(1);
+    expect(widgetDecorations(state)).toHaveLength(4);
+  });
   it("keeps a bold-wrapped link renderable as both strong text and a link", () => {
     const ranges = collectInlineMarkdownRanges("**[example.com](https://example.com)**");
 

@@ -22,6 +22,7 @@ import {
 import { collectDisplayMathBlocks, type DisplayMathBlock } from "./math";
 import { addTableLineDecorations, collectTableLines } from "./tables";
 import { DisplayMathWidget } from "./widgets";
+import { inlineFormatMouseSelection } from "./clickPlacement";
 
 export interface VisualMarkdownOptions {
   documentPath: string;
@@ -284,6 +285,7 @@ export function visualMarkdown(options: VisualMarkdownOptions) {
     interactedField,
     EditorView.focusChangeEffect.of((_state, focusing) => editorFocusedEffect.of(focusing)),
     decorations,
+    inlineFormatMouseSelection(),
     linkHandler
   ];
 }

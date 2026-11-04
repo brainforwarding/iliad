@@ -74,6 +74,7 @@ export function useWorkspace({ messages, onError }: UseWorkspaceOptions) {
   const refreshRequestRef = useRef(0);
   const [workspace, setWorkspaceState] = useState<WorkspaceInfo | null>(null);
   const [tree, setTree] = useState<FileTreeNode[]>([]);
+  const [loadedTreePath, setLoadedTreePath] = useState<string | null>(null);
   const [lastWorkspaceChange, setLastWorkspaceChange] = useState<WorkspaceChangeEvent | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [recentWorkspaces, setRecentWorkspaces] = useState<WorkspaceInfo[]>(() => readRecentWorkspaces());
@@ -123,6 +124,7 @@ export function useWorkspace({ messages, onError }: UseWorkspaceOptions) {
     if (currentWorkspacePathRef.current === workspacePath && requestId === refreshRequestRef.current) {
       setWorkspace(result.workspace);
       setTree(nextTree);
+      setLoadedTreePath(result.workspace.path);
       rememberRecentWorkspace(result.workspace);
     }
 
@@ -215,6 +217,7 @@ export function useWorkspace({ messages, onError }: UseWorkspaceOptions) {
     workspace,
     setWorkspace,
     tree,
+    treeReady: Boolean(workspace && loadedTreePath === workspace.path),
     setTree,
     lastWorkspaceChange,
     refreshTree,

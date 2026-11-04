@@ -37,5 +37,16 @@ export const whatsNewEntries: readonly WhatsNewEntry[] = [
       en: "Press ⌃⌘M, or Comments at the top right, to read every comment beside its passage. Ask Claude Code or Codex for feedback and it leaves comments marked ✦, without touching your text.",
       es: "Pulsa ⌃⌘M, o Comentarios arriba a la derecha, para leer cada comentario junto a su pasaje. Pídele comentarios a Claude Code o Codex y los deja marcados con ✦, sin tocar tu texto."
     }
+  },
+  {
+    version: "0.8.0",
+    title: {
+      en: "Keep a few documents open",
+      es: "Mantén varios documentos abiertos"
+    },
+    body: {
+      en: "Open a second document to see tabs. Each document keeps its cursor, scroll position, and undo history. Use ⌘B for bold and ⌘I for italics.",
+      es: "Abre un segundo documento para ver las pestañas. Cada documento conserva el cursor, la posición de lectura y su historial de deshacer. Usa ⌘B para negrita y ⌘I para cursiva."
+    }
   }
 ];

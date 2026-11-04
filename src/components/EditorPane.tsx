@@ -4,7 +4,7 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap, type ViewUpdate } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { markdownLineCount, reviewBlockedLineRanges } from "../editor/aiReview/blockedRanges";
 import { aiReviewExtension } from "../editor/aiReview/extension";
@@ -19,6 +19,7 @@ import {
 } from "../editor/aiReview/navigation";
 import type { EditorReviewState } from "../editor/aiReview/types";
 import { CodeMirrorHost } from "../editor/CodeMirrorHost";
+import { DocumentActivation, type DocumentStateCache } from "../editor/documentStateCache";
 import { imageDropPasteExtension } from "../editor/imageDropPaste";
 import { ideaAutocompleteExtension, runAutocompleteAction, type IdeaAutocompleteStatus, type IdeaAutocompleteSuggestionKind } from "../editor/ideaAutocomplete/extension";
 import { compactShortcutLabel, defaultAutocompletePreferences, type AutocompletePreferences } from "../editor/ideaAutocomplete/options";
@@ -37,6 +38,7 @@ import {
 } from "../editor/selectionComments/overlay";
 import { visualMarkdown, visualMarkdownInteractionResetEffect } from "../editor/visualMarkdown";
 import { proseEnterExtension } from "../editor/proseEnter";
+import { inlineFormattingExtension } from "../editor/inlineFormatting";
 import { writingCorrectorExtension } from "../editor/writingCorrector/extension";
 import { detectWritingIssues } from "../editor/writingCorrector/harper";
 import { type WritingIssue, writingIssueFingerprint, writingIssueKey } from "../editor/writingCorrector/issues";
@@ -174,6 +176,11 @@ export interface EditorDetachedCommentsProps {
 }
 
 interface EditorPaneProps {
+  documentId?: string;
+  documentRevision?: number;
+  documentCache?: DocumentStateCache;
+  activationId?: number;
+  cacheable?: boolean;
   file: FileTreeNode | null;
   /** Hidden by the caller while the document has a pending outside review (spec V18). */
   detachedComments?: EditorDetachedCommentsProps;
@@ -326,6 +333,11 @@ function createEditorTheme(editorFontSize: number, editorFontPreset: EditorFontP
 
 export function EditorPane({
   file,
+  documentId = file?.path ?? "empty",
+  documentRevision = 0,
+  documentCache,
+  activationId = 0,
+  cacheable = true,
   detachedComments,
   conflict = null,
   onActiveSelectionChange,
@@ -350,6 +362,9 @@ export function EditorPane({
   contentSearchRevealTarget,
   onContentSearchRevealHandled
 }: EditorPaneProps) {
+  const activation = useMemo(() => new DocumentActivation(), [documentId, documentRevision, activationId, cacheable]);
+  const captureActivation = useCallback(() => activation.capture(), [activation]);
+  useLayoutEffect(() => () => activation.enter(), [activation]);
   const editorTheme = useMemo(
     () => createEditorTheme(editorFontSize, editorFontPreset),
     [editorFontPreset, editorFontSize]
@@ -400,6 +415,23 @@ export function EditorPane({
   const [writingIssues, setWritingIssues] = useState<WritingIssue[]>([]);
   const [ignoredWritingIssueKeys, setIgnoredWritingIssueKeys] = useState<Set<string>>(() => new Set());
   const [customCorrectorWords, setCustomCorrectorWords] = useState<Set<string>>(() => new Set());
+  const [transientActivation, setTransientActivation] = useState(activation);
+  if (transientActivation !== activation) {
+    // Adjust before children commit so the first target state never receives
+    // ranges/decorations computed for the preceding document.
+    setTransientActivation(activation);
+    setProvisionalCommentRange(null);
+    setProvisionalTightenRange(null);
+    setTightenReview(null);
+    setActiveWritingIssue(null);
+    setWritingIssues([]);
+    setIgnoredWritingIssueKeys(new Set());
+    setCustomCorrectorWords(new Set());
+    setAutocompleteStatus({ state: "idle" });
+    setAutocompleteStatusAnchor(null);
+    setAutocompleteSteer(null);
+    setAutocompleteSteerDraft("");
+  }
   const editorSurfaceRef = useRef<HTMLDivElement | null>(null);
   const writingIssuePopoverRef = useRef<HTMLDivElement | null>(null);
   const overlayApiRef = useRef<SelectionCommentsOverlayApi | null>(null);
@@ -476,10 +508,10 @@ export function EditorPane({
   );
   // The ✦ AI menu key (stored as `continue`): opens the menu over a selection, nothing otherwise.
   const aiKey = writingAssists?.preferences?.shortcuts.continue ?? defaultAutocompletePreferences.shortcuts.continue;
-  const handleRejectTightenReview = useCallback(() => {
+  const handleRejectTightenReview = useCallback((focus = true) => {
     setTightenReview(null);
     setProvisionalTightenRange(null);
-    editorView?.focus();
+    if (focus) editorView?.focus();
   }, [editorView]);
   const handleAcceptTightenReview = useCallback(() => {
     if (!tightenReview || !editorView || file?.path !== tightenReview.range.filePath) {
@@ -585,26 +617,19 @@ export function EditorPane({
 
   const activeSelectionCallbackRef = useRef(onActiveSelectionChange);
   const lastReportedSelectionRef = useRef<{ from: number; to: number } | null>(null);
+  activeSelectionCallbackRef.current = onActiveSelectionChange;
 
-  useEffect(() => {
-    activeSelectionCallbackRef.current = onActiveSelectionChange;
-  }, [onActiveSelectionChange]);
-
-  // Document switch reuses the CM instance; the old selection is meaningless.
-  useEffect(() => {
+  // Transient chrome belongs to an activation; writing selection lives in CM's cache.
+  useLayoutEffect(() => {
     lastReportedSelectionRef.current = null;
-    activeSelectionCallbackRef.current?.(null);
-    setTightenReview(null);
-    setProvisionalTightenRange(null);
-    setActiveWritingIssue(null);
-    setWritingIssues([]);
-    setIgnoredWritingIssueKeys(new Set());
-    setCustomCorrectorWords(new Set());
-    setAutocompleteStatus({ state: "idle" });
-    setAutocompleteStatusAnchor(null);
-  }, [file?.path]);
+    const selection = editorView?.state.selection.main;
+    const restored = selection && !selection.empty && editorView?.state.sliceDoc(selection.from, selection.to).trim()
+      ? { from: selection.from, to: selection.to } : null;
+    lastReportedSelectionRef.current = restored;
+    activeSelectionCallbackRef.current?.(restored);
+  }, [activation, editorView]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!editorView || !file || review) {
       return;
     }
@@ -617,7 +642,7 @@ export function EditorPane({
         interacted: false
       })
     });
-  }, [editorView, file?.path, review]);
+  }, [editorView, activation, review]);
 
   useEffect(() => {
     const correctorMemory = writingAssists?.correctorMemory;
@@ -631,11 +656,12 @@ export function EditorPane({
     }
 
     let cancelled = false;
+    const isCurrent = captureActivation();
 
     void correctorMemory
       .load()
       .then((memory) => {
-        if (cancelled || file?.path !== documentPath) {
+        if (cancelled || !isCurrent()) {
           return;
         }
 
@@ -647,7 +673,7 @@ export function EditorPane({
     return () => {
       cancelled = true;
     };
-  }, [file?.path, writingAssists?.correctorMemory]);
+  }, [captureActivation, file?.path, writingAssists?.correctorMemory]);
 
   useEffect(() => {
     if (review) {
@@ -783,6 +809,7 @@ export function EditorPane({
     }
 
     let cancelled = false;
+    const isCurrent = captureActivation();
     const documentText = value;
     const timer = window.setTimeout(() => {
       void detectWritingIssues(documentText, {
@@ -793,12 +820,12 @@ export function EditorPane({
         customWords: customCorrectorWords
       })
         .then((issues) => {
-          if (!cancelled) {
+          if (!cancelled && isCurrent()) {
             setWritingIssues(issues);
           }
         })
         .catch(() => {
-          if (!cancelled) {
+          if (!cancelled && isCurrent()) {
             setWritingIssues([]);
           }
         });
@@ -811,6 +838,7 @@ export function EditorPane({
       window.clearTimeout(timer);
     };
   }, [
+    captureActivation,
     blockedLineRanges,
     customCorrectorWords,
     file?.path,
@@ -866,6 +894,7 @@ export function EditorPane({
       const positionKey = writingIssueKey(issue);
       const fingerprint = writingIssueFingerprint(issue, writingAssists?.language ?? "en");
       const documentPath = file?.path;
+      const isCurrent = captureActivation();
 
       setIgnoredWritingIssueKeys((currentKeys) => {
         const nextKeys = new Set(currentKeys);
@@ -883,7 +912,7 @@ export function EditorPane({
       void writingAssists?.correctorMemory
         ?.ignoreIssue(fingerprint)
         .then((memory) => {
-          if (file?.path !== documentPath) {
+          if (!isCurrent()) {
             return;
           }
 
@@ -895,12 +924,13 @@ export function EditorPane({
         })
         .catch(() => undefined);
     },
-    [editorView, file?.path, writingAssists]
+    [captureActivation, editorView, file?.path, writingAssists]
   );
   const addCorrectorWord = useCallback(
     (issue: WritingIssue) => {
       const word = issue.originalText.toLowerCase();
       const documentPath = file?.path;
+      const isCurrent = captureActivation();
 
       setCustomCorrectorWords((currentWords) => {
         const nextWords = new Set(currentWords);
@@ -917,7 +947,7 @@ export function EditorPane({
       void writingAssists?.correctorMemory
         ?.addDictionaryWord(issue.originalText)
         .then(({ customWords }) => {
-          if (file?.path !== documentPath) {
+          if (!isCurrent()) {
             return;
           }
 
@@ -925,7 +955,7 @@ export function EditorPane({
         })
         .catch(() => undefined);
     },
-    [editorView, file?.path, writingAssists]
+    [captureActivation, editorView, file?.path, writingAssists]
   );
   const updateAutocompleteStatusAnchor = useCallback(() => {
     const view = editorView;
@@ -1068,6 +1098,7 @@ export function EditorPane({
         markdown(),
         markdownEscapeHighlight,
         proseEnterExtension(),
+        inlineFormattingExtension(),
         EditorView.lineWrapping,
         editorTheme,
         EditorView.updateListener.of(reportActiveSelection),
@@ -1145,7 +1176,7 @@ export function EditorPane({
             activeHunkId: "tighten-inline-review",
             createLineCount: 0,
             onAcceptHunk: handleAcceptTightenReview,
-            onRejectHunk: handleRejectTightenReview,
+            onRejectHunk: () => handleRejectTightenReview(),
             labels: {
               acceptChange: labels.reviewToolbar.acceptChange,
               rejectChange: labels.reviewToolbar.rejectChange
@@ -1171,7 +1202,8 @@ export function EditorPane({
           imageDropPasteExtension({
             insertImage: onInsertImage,
             insertImageReference: onInsertImageReference,
-            workspaceSessionId: writingAssists?.workspaceSessionId
+            workspaceSessionId: writingAssists?.workspaceSessionId,
+            captureActivation
           })
         );
       }
@@ -1180,6 +1212,7 @@ export function EditorPane({
     },
     [
       activeHunkId,
+      captureActivation,
       autocompleteExtensions,
       lengthKeyGuard,
       editReviewDisplay,
@@ -1286,6 +1319,11 @@ export function EditorPane({
         : null}
       <div className="editor-surface" ref={editorSurfaceRef}>
         <CodeMirrorHost
+          documentId={documentId}
+          documentRevision={documentRevision}
+          documentCache={documentCache}
+          activationId={activationId}
+          cacheable={cacheable}
           value={value}
           basicSetup={{
             foldGutter: false,
@@ -1307,6 +1345,8 @@ export function EditorPane({
         />
         {selectionComments && !review ? (
           <SelectionCommentsOverlay
+            key={JSON.stringify([documentId, documentRevision, activationId, cacheable])}
+            captureActivation={captureActivation}
             view={editorView}
             comments={writerComments.filter((comment) => comment.status === "pending")}
             hoverCards={!marginActive}

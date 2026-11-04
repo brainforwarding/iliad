@@ -153,7 +153,11 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
     }
 
     cancelPendingSave();
-
+    await fenceRef.current.whenSavesSettled();
+    cancelPendingSave();
+    if (saveStatusRef.current === "conflict") {
+      throw new DocumentConflictError("pending_review");
+    }
     await saveCurrentDocument();
   }, [cancelPendingSave, saveCurrentDocument]);
 
@@ -306,6 +310,12 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
     setLastSavedAt(null);
   }, [cancelPendingSave, setDocumentText, setSaveStatus, setSavedText]);
 
+  const discardPendingSave = useCallback(async () => {
+    cancelPendingSave();
+    await fenceRef.current.whenSavesSettled();
+    cancelPendingSave();
+  }, [cancelPendingSave]);
+
   useEffect(() => {
     const onBeforeUnload = () => {
       void flushSave().catch(() => undefined);
@@ -323,6 +333,7 @@ export function useDocumentPersistence({ activeFile, messages, onError, workspac
     lastSavedAt,
     stateRef,
     clearDocument,
+    discardPendingSave,
     cancelPendingSave,
     flushSave,
     handleEditorChange,

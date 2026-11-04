@@ -10,6 +10,13 @@ import {
 import { recordShortcutKeyDown } from "../../src/editor/ideaAutocomplete/shortcutRecording";
 
 describe("autocomplete preferences", () => {
+  it("reserves bold and italics and migrates conflicting AI shortcuts", () => {
+    expect(checkShortcut("Mod-b")).toBe("taken");
+    expect(checkShortcut("Mod-i")).toBe("taken");
+    const loaded = normalizeAutocompletePreferences({ shortcuts: { continue: "Mod-b", sentence: "Mod-i" } });
+    expect(Object.values(loaded.shortcuts)).not.toContain("Mod-b");
+    expect(Object.values(loaded.shortcuts)).not.toContain("Mod-i");
+  });
   it("loads old stored preferences with manualOnly and announce without error", () => {
     const stored = JSON.parse(JSON.stringify({
       manualOnly: true, announce: true,

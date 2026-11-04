@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { settleDocument } from "../../src/app/documentTransitions";
 import { parseCommentsFile, serializeCommentsFile } from "../../src/comments/commentsFile";
 import { commentToEntry, mergeCommentEntries, readdRestoredComments } from "../../src/comments/commentsMerge";
 import {
@@ -111,6 +112,37 @@ describe("three-way comment merge by id", () => {
 });
 
 describe("comments file sync", () => {
+  it("flushes a comment edited during a delayed companion write before navigation can finish", async () => {
+    const { state, io } = fakeDisk(null);
+    const current = session({ loaded: true, dirty: true, version: 1, comments: [comment("a", "Alpha", "first edit", doc)] });
+    let releaseWrite!: () => void;
+    let markStarted!: () => void;
+    const blocked = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const delayed: CommentsFileIo = {
+      ...io,
+      write: async (text, expected) => {
+        if (state.writes === 0) {
+          markStarted();
+          await blocked;
+        }
+        return io.write(text, expected);
+      }
+    };
+    const flushing = settleDocument(async () => undefined, async () => {
+      if (current.dirty) await writeCommentsSession(current, delayed);
+    }, () => !current.dirty);
+    await started;
+    current.comments = current.comments.map((entry) => ({ ...entry, comment: "late edit" }));
+    current.version = (current.version ?? 0) + 1;
+    current.dirty = true;
+    releaseWrite();
+    await flushing;
+    expect(state.writes).toBe(2);
+    expect(parseCommentsFile(state.text ?? "")[0].comment).toBe("late edit");
+    expect(current.dirty).toBe(false);
+  });
+
   it("merges on disk_changed and retries the write once", async () => {
     const original = serializeCommentsFile([
       { id: "a", quote: "Alpha", comment: "one" },

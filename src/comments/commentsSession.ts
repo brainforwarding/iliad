@@ -29,6 +29,8 @@ export interface CommentsSessionState {
   disk: CommentsDiskState;
   loaded: boolean;
   dirty: boolean;
+  /** Changes made while a companion write is in flight still need saving. */
+  version?: number;
   /** The document text positions refer to. */
   documentText: string;
 }
@@ -91,11 +93,12 @@ export async function writeCommentsSession(
   const removedOutside: SelectionComment[] = [];
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    const version = state.version ?? 0;
     const entries = state.comments.map((comment) => commentToEntry(comment, state.documentText));
     const text = serializeCommentsFile(entries);
 
     if (text === serializeCommentsFile(state.disk.entries) && (entries.length > 0 || state.disk.text === null)) {
-      state.dirty = false;
+      state.dirty = (state.version ?? 0) !== version;
       return { fileListChanged: false, removedOutside };
     }
 
@@ -107,7 +110,7 @@ export async function writeCommentsSession(
     if (result.status === "written") {
       const fileListChanged = entries.length === 0 || state.disk.text === null;
       state.disk = entries.length === 0 ? emptyCommentsDisk : { text, hash: await io.hash(text), entries: parseCommentsFile(text) };
-      state.dirty = false;
+      state.dirty = (state.version ?? 0) !== version;
       return { fileListChanged, removedOutside };
     }
 

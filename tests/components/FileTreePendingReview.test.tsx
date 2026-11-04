@@ -73,6 +73,42 @@ function renderFileTree(overrides: Partial<Parameters<typeof FileTree>[0]> = {})
   );
 }
 
+describe("FileTree open documents", () => {
+  it("marks open documents separately from active and creation-target selection", () => {
+    const html = renderFileTree({
+      nodes: [...nodes, { name: "other.md", path: "/workspace/other.md", relativePath: "other.md", kind: "markdown" }],
+      activePath: "/workspace/doc.md",
+      selectedPath: "/workspace/other.md",
+      openDocumentPaths: new Set(["/workspace/doc.md", "/workspace/other.md"]),
+      pendingChanges: [],
+      pendingReviewCount: 0
+    });
+    expect(html.match(/class="tree-open-indicator"/g)).toHaveLength(2);
+    expect(html).toContain("is-active is-open");
+    expect(html).toContain("is-open is-selected");
+    expect(html).toContain("doc.md. Open document");
+  });
+
+  it("preserves a pending-review dot beside the open indicator and excludes review ghosts", () => {
+    const html = renderFileTree({
+      openDocumentPaths: new Set(["/workspace/doc.md", "/workspace/new.md"]),
+      pendingChanges: [...pendingChanges, {
+        proposalId: "proposal-edit", fileId: "file-edit", kind: "edit_file", relativePath: "doc.md",
+        normalizedRelativePath: "doc.md", status: "pending"
+      }]
+    });
+    expect(html.match(/class="tree-open-indicator"/g)).toHaveLength(1);
+    expect(html).toMatch(/tree-document-indicators[^>]*><span class="tree-open-indicator"><\/span><span class="tree-pending-dot is-edit"/);
+    expect(html).toContain('class="tree-pending-dot is-create"');
+  });
+
+  it("localizes open status and leaves closed documents unmarked", () => {
+    expect(renderFileTree({ openDocumentPaths: new Set(["/workspace/doc.md"]), labels: appStrings.es.sidebar }))
+      .toContain("doc.md. Documento abierto");
+    expect(renderFileTree()).not.toContain('class="tree-open-indicator"');
+  });
+});
+
 describe("FileTree pending review strip", () => {
   it("shows the all-documents row only when documents other than the open one are pending", () => {
     expect(shouldShowPendingReviewStrip(0, false)).toBe(false);

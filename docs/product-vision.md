@@ -36,7 +36,8 @@ Iliad is a calm, local Markdown writing app built on three things:
    what the agent changed, and the writer keeps or restores each change, chunk
    by chunk.
 
-In short, Iliad is the best place to write one document and the place to review
+Iliad keeps a small writing set open, such as a draft, outline, and notes, with
+one document active for writing and AI help. It is also the place to review
 what an AI did to your writing. It has no chat panel and no agent of its own.
 Large or multi-document AI work belongs to outside agents, which are stronger
 and improve on their own.
@@ -72,7 +73,9 @@ and improve on their own.
   explicit request sends text. Speed is part of the product: help that arrives
   slower than thought breaks the writing.
 - **Calm UI.** No tabs of chat, no dashboards, no settings sprawl. Controls
-  appear where the writing is, when they are needed.
+  appear where the writing is, when they are needed. Document tabs keep a small
+  set visible within one workspace; other workspace folders keep separate
+  windows. Only the active document receives built-in AI help.
 
 ## Decision test
 
