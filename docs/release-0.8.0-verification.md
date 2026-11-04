@@ -51,7 +51,7 @@ The existing installed app and user profile were left untouched.
 
 The Homebrew cask was updated with the final DMG checksum and published to
 `brainforwarding/homebrew-tap` in commit `8f03518`; repository cask commit `0d5ef6c`.
-Homebrew style passed. The online audit result is recorded in the release log.
+Homebrew style and the published cask online audit passed.
 An unavailable SSH agent during the tap clone was handled using the existing
 HTTPS GitHub access for that command; no credential or global configuration changed.
 
