@@ -1,7 +1,7 @@
 # Native window control clearance
 
 Date: 2026-11-04
-Status: implemented and independently reviewed; release verification pending
+Status: released in 0.8.1; installed and production verified
 
 Windowed macOS at reduced renderer zoom can place the sidebar toggle under the
 traffic lights. The current 88 CSS pixel reservation shrinks with zoom; the
@@ -47,3 +47,10 @@ regression passed all five zoom levels in open, collapsed, and peeking modes,
 with actual minimum sidebar width, three tabs, both history controls, full
 button bounds and widths, fullscreen round trip, and native minimize/restore.
 Screenshots confirmed native and app controls remain aligned and clear.
+
+Release completed: signed/notarized public 0.8.1 passed full download/hash,
+signature/ticket, app workflow, and native clearance checks. The official release
+was installed in Applications after matching its published hashes. The owner
+confirmed the corrected windowed spacing. Extra task-created app bundles were
+unregistered and moved to Trash. Homebrew style and online audit passed.
+See [the release record](../docs/release-0.8.1-verification.md).
