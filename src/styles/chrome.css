@@ -15,7 +15,7 @@
 .app-topbar {
   display: grid;
   min-height: var(--topbar-height);
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-columns: minmax(max-content, var(--sidebar-width)) minmax(0, 1fr);
   -webkit-app-region: drag;
   z-index: 20;
 }
@@ -27,15 +27,15 @@
 /* Over the peek the left part spans the sidebar again, so the pointer stays
    "on the sidebar" there; no drag, or it would swallow the hover. */
 .sidebar-is-peeking .app-topbar {
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-columns: minmax(max-content, var(--sidebar-width)) minmax(0, 1fr);
 }
 
 .topbar-sidebar-zone {
   display: flex;
   min-width: 0;
   align-items: center;
-  /* Clears the traffic lights (createWindow.ts trafficLightPosition). */
-  padding-left: 88px;
+  /* Native controls keep their size when the renderer is zoomed. */
+  padding-left: env(titlebar-area-x, 88px);
   border-right: 1px solid var(--hairline);
   background: var(--sidebar);
 }
@@ -475,7 +475,7 @@
 
 @media (max-width: 760px) {
   .app-shell:not(.sidebar-is-collapsed) .app-topbar {
-    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+    grid-template-columns: minmax(max-content, var(--sidebar-width)) minmax(0, 1fr);
   }
 
   .app-shell:not(.sidebar-is-collapsed) .app-content {

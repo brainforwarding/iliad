@@ -17,6 +17,8 @@ export function createWindow() {
     backgroundColor: "#fdfcf8",
     autoHideMenuBar: true,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    // Expose native control bounds to CSS, including renderer zoom changes.
+    titleBarOverlay: process.platform === "darwin",
     // Centered on the 52px top row (--topbar-height) with the 16px icons beside them.
     trafficLightPosition: { x: 20, y: 19 },
     webPreferences: {
